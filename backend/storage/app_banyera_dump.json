@@ -1,0 +1,2487 @@
+[
+    {
+        "banyera_id": 21,
+        "boat_id": 24,
+        "transaction_date": "2026-05-18T14:38:00.000000Z",
+        "documentation_image_path": "banyera-documentation\/355b670d-fe2f-475f-8676-f75b1b2174c8.png",
+        "total_fee": "180.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-18T06:38:25.000000Z",
+        "updated_at": "2026-05-18T08:17:57.000000Z",
+        "boat": {
+            "boat_id": 24,
+            "boat_name": "ELY",
+            "owner_id": 5,
+            "boat_type_id": 13,
+            "image_path": "boats\/VYwor7gC7Y6ediJ1Bz8IE1H0tVr9Ao2smGY5PgRX.jpg",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-05-11T09:26:29.000000Z",
+            "updated_at": "2026-05-18T07:59:44.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 5,
+                "owner_firstname": "Ely",
+                "owner_lastname": "Cablinga",
+                "address": "Malanang",
+                "contact_number": "09916707189",
+                "created_by": 1,
+                "created_at": "2026-05-05T14:33:56.000000Z",
+                "updated_at": "2026-05-05T14:33:56.000000Z",
+                "deleted_at": null,
+                "full_name": "Ely Cablinga"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 46,
+                "banyera_id": 21,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-05-18T06:59:29.000000Z",
+                "updated_at": "2026-05-18T06:59:29.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 20,
+        "boat_id": 18,
+        "transaction_date": "2026-05-18T08:24:00.000000Z",
+        "documentation_image_path": "banyera-documentation\/fa41ca43-0355-4367-9786-6caca8de89bb.png",
+        "total_fee": "216.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": "Wrong date or time",
+        "voided_at": "2026-05-18T08:18:21.000000Z",
+        "voided_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "created_at": "2026-05-18T00:24:57.000000Z",
+        "updated_at": "2026-05-18T08:18:21.000000Z",
+        "boat": {
+            "boat_id": 18,
+            "boat_name": "ANGEL",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/aqzzlDjX8qIctZIrsoYDX7nSZpAE691OybPVmC8d.png",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-29T02:58:22.000000Z",
+            "updated_at": "2026-04-29T02:58:23.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 48,
+                "banyera_id": 20,
+                "classification_id": 2,
+                "quantity": 12,
+                "fee_id": 7,
+                "subtotal": "216.00",
+                "created_at": "2026-05-18T07:02:28.000000Z",
+                "updated_at": "2026-05-18T07:02:28.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 19,
+        "boat_id": 21,
+        "transaction_date": "2026-05-18T08:21:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "180.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-18T00:22:07.000000Z",
+        "updated_at": "2026-05-18T00:22:07.000000Z",
+        "boat": {
+            "boat_id": 21,
+            "boat_name": "CLARK",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": null,
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-05-05T14:13:30.000000Z",
+            "updated_at": "2026-05-11T05:06:01.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 31,
+                "banyera_id": 19,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-05-18T00:22:07.000000Z",
+                "updated_at": "2026-05-18T00:22:07.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 18,
+        "boat_id": 16,
+        "transaction_date": "2026-05-14T14:42:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "144.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-14T06:42:23.000000Z",
+        "updated_at": "2026-05-14T06:42:23.000000Z",
+        "boat": {
+            "boat_id": 16,
+            "boat_name": "CONG-CONG",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/xFNzruIrBAGoMtRM5UAA3jzkxk4EuMz46jQYzhGt.jpg",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-01T05:32:56.000000Z",
+            "updated_at": "2026-04-01T05:32:57.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 30,
+                "banyera_id": 18,
+                "classification_id": 2,
+                "quantity": 8,
+                "fee_id": 7,
+                "subtotal": "144.00",
+                "created_at": "2026-05-14T06:42:23.000000Z",
+                "updated_at": "2026-05-14T06:42:23.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 17,
+        "boat_id": 16,
+        "transaction_date": "2026-05-13T16:21:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "90.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-13T08:21:11.000000Z",
+        "updated_at": "2026-05-13T08:21:11.000000Z",
+        "boat": {
+            "boat_id": 16,
+            "boat_name": "CONG-CONG",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/xFNzruIrBAGoMtRM5UAA3jzkxk4EuMz46jQYzhGt.jpg",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-01T05:32:56.000000Z",
+            "updated_at": "2026-04-01T05:32:57.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 29,
+                "banyera_id": 17,
+                "classification_id": 2,
+                "quantity": 5,
+                "fee_id": 7,
+                "subtotal": "90.00",
+                "created_at": "2026-05-13T08:21:11.000000Z",
+                "updated_at": "2026-05-13T08:21:11.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 16,
+        "boat_id": 18,
+        "transaction_date": "2026-05-11T13:50:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "90.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-11T05:51:14.000000Z",
+        "updated_at": "2026-05-11T05:53:27.000000Z",
+        "boat": {
+            "boat_id": 18,
+            "boat_name": "ANGEL",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/aqzzlDjX8qIctZIrsoYDX7nSZpAE691OybPVmC8d.png",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-29T02:58:22.000000Z",
+            "updated_at": "2026-04-29T02:58:23.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 28,
+                "banyera_id": 16,
+                "classification_id": 2,
+                "quantity": 5,
+                "fee_id": 7,
+                "subtotal": "90.00",
+                "created_at": "2026-05-11T05:53:27.000000Z",
+                "updated_at": "2026-05-11T05:53:27.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 15,
+        "boat_id": 21,
+        "transaction_date": "2026-05-11T13:28:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "162.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-11T05:28:28.000000Z",
+        "updated_at": "2026-05-11T05:45:43.000000Z",
+        "boat": {
+            "boat_id": 21,
+            "boat_name": "CLARK",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": null,
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-05-05T14:13:30.000000Z",
+            "updated_at": "2026-05-11T05:06:01.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 25,
+                "banyera_id": 15,
+                "classification_id": 2,
+                "quantity": 9,
+                "fee_id": 7,
+                "subtotal": "162.00",
+                "created_at": "2026-05-11T05:45:17.000000Z",
+                "updated_at": "2026-05-11T05:45:43.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 14,
+        "boat_id": 18,
+        "transaction_date": "2026-05-10T00:43:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "180.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-09T16:44:03.000000Z",
+        "updated_at": "2026-05-09T16:44:03.000000Z",
+        "boat": {
+            "boat_id": 18,
+            "boat_name": "ANGEL",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/aqzzlDjX8qIctZIrsoYDX7nSZpAE691OybPVmC8d.png",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-29T02:58:22.000000Z",
+            "updated_at": "2026-04-29T02:58:23.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 22,
+                "banyera_id": 14,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-05-09T16:44:03.000000Z",
+                "updated_at": "2026-05-09T16:44:03.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 13,
+        "boat_id": 18,
+        "transaction_date": "2026-05-09T23:35:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "18.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-09T15:35:59.000000Z",
+        "updated_at": "2026-05-09T15:35:59.000000Z",
+        "boat": {
+            "boat_id": 18,
+            "boat_name": "ANGEL",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/aqzzlDjX8qIctZIrsoYDX7nSZpAE691OybPVmC8d.png",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-29T02:58:22.000000Z",
+            "updated_at": "2026-04-29T02:58:23.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 21,
+                "banyera_id": 13,
+                "classification_id": 2,
+                "quantity": 1,
+                "fee_id": 7,
+                "subtotal": "18.00",
+                "created_at": "2026-05-09T15:35:59.000000Z",
+                "updated_at": "2026-05-09T15:35:59.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 12,
+        "boat_id": 18,
+        "transaction_date": "2026-05-08T19:44:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "180.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-08T11:44:31.000000Z",
+        "updated_at": "2026-05-08T11:44:31.000000Z",
+        "boat": {
+            "boat_id": 18,
+            "boat_name": "ANGEL",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/aqzzlDjX8qIctZIrsoYDX7nSZpAE691OybPVmC8d.png",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-29T02:58:22.000000Z",
+            "updated_at": "2026-04-29T02:58:23.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 20,
+                "banyera_id": 12,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-05-08T11:44:31.000000Z",
+                "updated_at": "2026-05-08T11:44:31.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 11,
+        "boat_id": 21,
+        "transaction_date": "2026-05-08T10:58:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "216.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-08T02:58:19.000000Z",
+        "updated_at": "2026-05-08T02:58:19.000000Z",
+        "boat": {
+            "boat_id": 21,
+            "boat_name": "CLARK",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": null,
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-05-05T14:13:30.000000Z",
+            "updated_at": "2026-05-11T05:06:01.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 19,
+                "banyera_id": 11,
+                "classification_id": 2,
+                "quantity": 12,
+                "fee_id": 7,
+                "subtotal": "216.00",
+                "created_at": "2026-05-08T02:58:19.000000Z",
+                "updated_at": "2026-05-08T02:58:19.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 10,
+        "boat_id": 18,
+        "transaction_date": "2026-05-07T11:04:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "216.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-06T03:04:52.000000Z",
+        "updated_at": "2026-05-06T03:04:52.000000Z",
+        "boat": {
+            "boat_id": 18,
+            "boat_name": "ANGEL",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/aqzzlDjX8qIctZIrsoYDX7nSZpAE691OybPVmC8d.png",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-29T02:58:22.000000Z",
+            "updated_at": "2026-04-29T02:58:23.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 18,
+                "banyera_id": 10,
+                "classification_id": 2,
+                "quantity": 12,
+                "fee_id": 7,
+                "subtotal": "216.00",
+                "created_at": "2026-05-06T03:04:52.000000Z",
+                "updated_at": "2026-05-06T03:04:52.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 9,
+        "boat_id": 18,
+        "transaction_date": "2026-05-06T08:24:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "18.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-06T00:24:26.000000Z",
+        "updated_at": "2026-05-06T00:24:26.000000Z",
+        "boat": {
+            "boat_id": 18,
+            "boat_name": "ANGEL",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/aqzzlDjX8qIctZIrsoYDX7nSZpAE691OybPVmC8d.png",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-29T02:58:22.000000Z",
+            "updated_at": "2026-04-29T02:58:23.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 17,
+                "banyera_id": 9,
+                "classification_id": 2,
+                "quantity": 1,
+                "fee_id": 7,
+                "subtotal": "18.00",
+                "created_at": "2026-05-06T00:24:26.000000Z",
+                "updated_at": "2026-05-06T00:24:26.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 8,
+        "boat_id": 18,
+        "transaction_date": "2026-05-04T18:29:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "414.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-04T10:29:34.000000Z",
+        "updated_at": "2026-05-04T10:29:34.000000Z",
+        "boat": {
+            "boat_id": 18,
+            "boat_name": "ANGEL",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/aqzzlDjX8qIctZIrsoYDX7nSZpAE691OybPVmC8d.png",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-29T02:58:22.000000Z",
+            "updated_at": "2026-04-29T02:58:23.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 14,
+                "banyera_id": 8,
+                "classification_id": 2,
+                "quantity": 12,
+                "fee_id": 7,
+                "subtotal": "216.00",
+                "created_at": "2026-05-04T10:29:34.000000Z",
+                "updated_at": "2026-05-04T10:29:34.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            },
+            {
+                "item_id": 15,
+                "banyera_id": 8,
+                "classification_id": 1,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-05-04T10:29:34.000000Z",
+                "updated_at": "2026-05-04T10:29:34.000000Z",
+                "classification": {
+                    "classification_id": 1,
+                    "created_at": "2026-04-17T06:40:34.000000Z",
+                    "updated_at": "2026-05-06T00:44:09.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tamban",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            },
+            {
+                "item_id": 16,
+                "banyera_id": 8,
+                "classification_id": 1,
+                "quantity": 1,
+                "fee_id": 7,
+                "subtotal": "18.00",
+                "created_at": "2026-05-04T10:29:34.000000Z",
+                "updated_at": "2026-05-04T10:29:34.000000Z",
+                "classification": {
+                    "classification_id": 1,
+                    "created_at": "2026-04-17T06:40:34.000000Z",
+                    "updated_at": "2026-05-06T00:44:09.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tamban",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 7,
+        "boat_id": 17,
+        "transaction_date": "2026-05-04T17:22:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "180.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-05-04T09:23:04.000000Z",
+        "updated_at": "2026-05-04T09:23:04.000000Z",
+        "boat": {
+            "boat_id": 17,
+            "boat_name": "CRISJON",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/XYxKDksUAyg1dJ1aW0FRa1NKnrsMj2Z8DB0SkbWF.jpg",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-11T02:25:30.000000Z",
+            "updated_at": "2026-04-17T06:09:12.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 12,
+                "banyera_id": 7,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-05-04T09:23:04.000000Z",
+                "updated_at": "2026-05-04T09:30:51.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            },
+            {
+                "item_id": 13,
+                "banyera_id": 7,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-05-04T09:30:51.000000Z",
+                "updated_at": "2026-05-04T09:30:51.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 6,
+        "boat_id": 18,
+        "transaction_date": "2026-04-29T14:29:00.000000Z",
+        "documentation_image_path": "banyera-documentation\/47b364af-4baa-461f-bc67-682ac0bbb6ef.png",
+        "total_fee": "270.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-04-29T06:30:36.000000Z",
+        "updated_at": "2026-04-29T06:30:36.000000Z",
+        "boat": {
+            "boat_id": 18,
+            "boat_name": "ANGEL",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/aqzzlDjX8qIctZIrsoYDX7nSZpAE691OybPVmC8d.png",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-29T02:58:22.000000Z",
+            "updated_at": "2026-04-29T02:58:23.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 10,
+                "banyera_id": 6,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-04-29T06:30:36.000000Z",
+                "updated_at": "2026-04-29T06:30:36.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            },
+            {
+                "item_id": 11,
+                "banyera_id": 6,
+                "classification_id": 1,
+                "quantity": 5,
+                "fee_id": 7,
+                "subtotal": "90.00",
+                "created_at": "2026-04-29T06:30:36.000000Z",
+                "updated_at": "2026-04-29T06:30:36.000000Z",
+                "classification": {
+                    "classification_id": 1,
+                    "created_at": "2026-04-17T06:40:34.000000Z",
+                    "updated_at": "2026-05-06T00:44:09.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tamban",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 5,
+        "boat_id": 16,
+        "transaction_date": "2026-04-28T09:42:00.000000Z",
+        "documentation_image_path": "banyera-documentation\/47338683-db1b-4ac1-b451-31eadfd7727d.jpeg",
+        "total_fee": "180.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-04-28T01:43:12.000000Z",
+        "updated_at": "2026-04-28T01:43:12.000000Z",
+        "boat": {
+            "boat_id": 16,
+            "boat_name": "CONG-CONG",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/xFNzruIrBAGoMtRM5UAA3jzkxk4EuMz46jQYzhGt.jpg",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-01T05:32:56.000000Z",
+            "updated_at": "2026-04-01T05:32:57.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 9,
+                "banyera_id": 5,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-04-28T01:43:12.000000Z",
+                "updated_at": "2026-04-28T01:43:12.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 4,
+        "boat_id": 16,
+        "transaction_date": "2026-04-22T16:55:00.000000Z",
+        "documentation_image_path": "banyera-documentation\/c240f851-31e2-4083-9355-af83ba0d3441.png",
+        "total_fee": "180.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-04-22T08:58:28.000000Z",
+        "updated_at": "2026-04-22T08:58:28.000000Z",
+        "boat": {
+            "boat_id": 16,
+            "boat_name": "CONG-CONG",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/xFNzruIrBAGoMtRM5UAA3jzkxk4EuMz46jQYzhGt.jpg",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-01T05:32:56.000000Z",
+            "updated_at": "2026-04-01T05:32:57.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 8,
+                "banyera_id": 4,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-04-22T08:58:28.000000Z",
+                "updated_at": "2026-04-22T08:58:28.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 3,
+        "boat_id": 16,
+        "transaction_date": "2026-04-18T10:38:00.000000Z",
+        "documentation_image_path": "banyera-documentation\/53dcd535-5204-47db-9a17-8af5305647cf.png",
+        "total_fee": "0.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-04-18T02:38:54.000000Z",
+        "updated_at": "2026-04-28T13:40:20.000000Z",
+        "boat": {
+            "boat_id": 16,
+            "boat_name": "CONG-CONG",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/xFNzruIrBAGoMtRM5UAA3jzkxk4EuMz46jQYzhGt.jpg",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-01T05:32:56.000000Z",
+            "updated_at": "2026-04-01T05:32:57.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 4,
+                "banyera_id": 3,
+                "classification_id": 2,
+                "quantity": 1,
+                "fee_id": 7,
+                "subtotal": "18.00",
+                "created_at": "2026-04-18T02:38:54.000000Z",
+                "updated_at": "2026-04-18T02:49:44.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            },
+            {
+                "item_id": 5,
+                "banyera_id": 3,
+                "classification_id": 2,
+                "quantity": 1,
+                "fee_id": 7,
+                "subtotal": "18.00",
+                "created_at": "2026-04-18T02:49:44.000000Z",
+                "updated_at": "2026-04-28T13:40:20.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            },
+            {
+                "item_id": 6,
+                "banyera_id": 3,
+                "classification_id": 1,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-04-18T02:49:44.000000Z",
+                "updated_at": "2026-04-28T13:40:20.000000Z",
+                "classification": {
+                    "classification_id": 1,
+                    "created_at": "2026-04-17T06:40:34.000000Z",
+                    "updated_at": "2026-05-06T00:44:09.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tamban",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 2,
+        "boat_id": 17,
+        "transaction_date": "2026-04-18T10:09:00.000000Z",
+        "documentation_image_path": "banyera-documentation\/202c0f31-5dd9-48ca-9df3-639593df97f2.png",
+        "total_fee": "180.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-04-18T02:09:35.000000Z",
+        "updated_at": "2026-04-18T03:06:02.000000Z",
+        "boat": {
+            "boat_id": 17,
+            "boat_name": "CRISJON",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/XYxKDksUAyg1dJ1aW0FRa1NKnrsMj2Z8DB0SkbWF.jpg",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-11T02:25:30.000000Z",
+            "updated_at": "2026-04-17T06:09:12.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 3,
+                "banyera_id": 2,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-04-18T02:09:35.000000Z",
+                "updated_at": "2026-04-18T03:06:02.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            },
+            {
+                "item_id": 7,
+                "banyera_id": 2,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-04-18T03:06:02.000000Z",
+                "updated_at": "2026-04-18T03:06:02.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "banyera_id": 1,
+        "boat_id": 16,
+        "transaction_date": "2026-04-17T15:57:00.000000Z",
+        "documentation_image_path": null,
+        "total_fee": "0.00",
+        "created_by": {
+            "user_id": 1,
+            "email": "headofmeoo@gmail.com",
+            "role": "head",
+            "status": "active",
+            "first_name": "Jhunie",
+            "last_name": "Mercado",
+            "gender": "male",
+            "contact_number": "09916707489",
+            "birthday": "2022-05-10T00:00:00.000000Z",
+            "address": "Opol, Misamis Oriental",
+            "profile_image": "profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "created_by": null,
+            "created_at": "2026-03-20T06:50:33.000000Z",
+            "updated_at": "2026-05-18T00:56:08.000000Z",
+            "full_name": "Jhunie Mercado",
+            "profile_image_url": "http:\/\/127.0.0.1:8000\/storage\/profile_images\/6aIuQviDjKIFDxRapOQomUZbgxsuQFiwwU4lrCFU.png",
+            "role_label": "Head of MEEO"
+        },
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null,
+        "created_at": "2026-04-17T07:58:33.000000Z",
+        "updated_at": "2026-05-04T10:28:26.000000Z",
+        "boat": {
+            "boat_id": 16,
+            "boat_name": "CONG-CONG",
+            "owner_id": 3,
+            "boat_type_id": 13,
+            "image_path": "boats\/xFNzruIrBAGoMtRM5UAA3jzkxk4EuMz46jQYzhGt.jpg",
+            "status": "active",
+            "created_by": 1,
+            "created_at": "2026-04-01T05:32:56.000000Z",
+            "updated_at": "2026-04-01T05:32:57.000000Z",
+            "deleted_at": null,
+            "owner": {
+                "owner_id": 3,
+                "owner_firstname": "Cecelia1",
+                "owner_lastname": "Baculio",
+                "address": "Zone 1A, Luyong Bonbon, Opol, Mis. Or.",
+                "contact_number": null,
+                "created_by": 1,
+                "created_at": "2026-04-01T05:31:05.000000Z",
+                "updated_at": "2026-05-06T00:53:06.000000Z",
+                "deleted_at": null,
+                "full_name": "Cecelia1 Baculio"
+            },
+            "boat_type": {
+                "boat_type_id": 13,
+                "type_name": "Lantsa",
+                "created_by": 1,
+                "created_at": "2026-04-01T04:58:13.000000Z",
+                "updated_at": "2026-05-09T02:29:01.000000Z",
+                "deleted_at": null
+            }
+        },
+        "items": [
+            {
+                "item_id": 1,
+                "banyera_id": 1,
+                "classification_id": 2,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-04-17T07:58:33.000000Z",
+                "updated_at": "2026-05-04T10:28:26.000000Z",
+                "classification": {
+                    "classification_id": 2,
+                    "created_at": "2026-04-17T06:59:54.000000Z",
+                    "updated_at": "2026-04-17T06:59:54.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tulingan",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            },
+            {
+                "item_id": 2,
+                "banyera_id": 1,
+                "classification_id": 1,
+                "quantity": 10,
+                "fee_id": 7,
+                "subtotal": "180.00",
+                "created_at": "2026-04-17T07:58:33.000000Z",
+                "updated_at": "2026-05-04T10:28:26.000000Z",
+                "classification": {
+                    "classification_id": 1,
+                    "created_at": "2026-04-17T06:40:34.000000Z",
+                    "updated_at": "2026-05-06T00:44:09.000000Z",
+                    "deleted_at": null,
+                    "classification_name": "Tamban",
+                    "created_by": 1
+                },
+                "fee": {
+                    "fee_id": 7,
+                    "fee_type_name": "Banyera",
+                    "boat_type_id": 13,
+                    "vehicle_type_id": null,
+                    "amount": "18.00",
+                    "effective_from": "2026-04-17T00:00:00.000000Z",
+                    "effective_to": null,
+                    "created_by": 1,
+                    "created_at": "2026-04-17T07:47:52.000000Z",
+                    "updated_at": "2026-04-17T07:47:52.000000Z",
+                    "deleted_at": null,
+                    "fee_name": "Banyera",
+                    "fee_type": {
+                        "fee_name": "Banyera"
+                    },
+                    "feeType": {
+                        "fee_name": "Banyera"
+                    }
+                }
+            }
+        ]
+    }
+]

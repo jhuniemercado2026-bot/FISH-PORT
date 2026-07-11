@@ -1,0 +1,14 @@
+Illuminate\Support\Facades\DB::table('activity_logs')
+    ->leftJoin('users', 'activity_logs.user_id', '=', 'users.user_id')
+    ->whereNotNull('activity_logs.user_id')
+    ->whereNull('users.user_id')
+    ->update(['activity_logs.user_id' => null]);
+$database = Illuminate\Support\Facades\DB::getDatabaseName();
+$existingKeys = collect(Illuminate\Support\Facades\DB::select("SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'activity_logs' AND REFERENCED_TABLE_NAME = 'users'", [$database]))->pluck('CONSTRAINT_NAME')->all();
+Illuminate\Support\Facades\Schema::table('activity_logs', function ($table) use ($existingKeys) {
+    if (!in_array('activity_logs_user_id_foreign', $existingKeys, true)) {
+        $table->foreign('user_id')->references('user_id')->on('users')->nullOnDelete();
+    }
+});
+$result = Illuminate\Support\Facades\DB::select("SELECT CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'activity_logs' AND REFERENCED_TABLE_NAME IS NOT NULL", [$database]);
+echo json_encode($result);

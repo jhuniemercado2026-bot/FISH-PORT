@@ -1,0 +1,6 @@
+if (Schema::hasColumn("banyera_transactions", "price_range_per_banyera")) {
+    DB::statement("ALTER TABLE banyera_transactions DROP COLUMN price_range_per_banyera");
+}
+dump(Schema::hasColumn("banyera_transactions", "price_range_per_banyera"));
+$columns = DB::select("SHOW COLUMNS FROM banyera_transactions");
+dump(collect($columns)->pluck("Field")->values()->all());
