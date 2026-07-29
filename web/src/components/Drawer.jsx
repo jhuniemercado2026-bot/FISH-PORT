@@ -89,15 +89,26 @@ const Drawer = ({
   fontFamily = DEFAULT_FONT,
   closeIcon: CloseIcon = IoCloseOutline,
   onCloseButtonClick,
+  footer,
+  maskClosable = true,
+  keyboard = true,
 }) => (
   <AntDrawer
     open={open}
     onClose={onClose}
     width={width}
     closable={false}
+    maskClosable={maskClosable}
+    keyboard={keyboard}
+    footer={footer || null}
     styles={{
       body: { padding: 0, fontFamily, backgroundColor: "#f8fafc" },
       header: { display: "none" },
+      footer: {
+        padding: "16px 20px",
+        borderTop: "1px solid #e5e7eb",
+        backgroundColor: "#ffffff",
+      },
     }}
   >
     <div
@@ -142,7 +153,11 @@ const Drawer = ({
 
     <div
       className="modal-hide-scrollbar p-5 overflow-y-auto"
-      style={{ maxHeight: "calc(100vh - 84px)", scrollbarWidth: "none", msOverflowStyle: "none" }}
+      style={{
+        maxHeight: footer ? "calc(100vh - 153px)" : "calc(100vh - 84px)",
+        scrollbarWidth: "none",
+        msOverflowStyle: "none",
+      }}
     >
       {children}
     </div>

@@ -67,6 +67,8 @@ class Bill extends Model
                     ->select('boat_type_id', 'type_name'),
                 'createdBy:user_id,first_name,last_name,email',
                 'items:bill_item_id,bill_id,transaction_type,docking_id,banyera_id,amount',
+                'items.docking:docking_id,boat_id,docking_date,docking_fee',
+                'items.banyeraTransaction:banyera_id,boat_id,transaction_date,total_fee',
             ])
             ->withExists(['payments as has_payments'])
             ->withSum('payments as total_paid', 'amount_paid');

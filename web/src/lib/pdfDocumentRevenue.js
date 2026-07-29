@@ -558,6 +558,7 @@ export const buildRevenuePdf = async ({
   yearlyDate,
   preparedBy = "Admin",
   reportData = {},
+  fileName = "",
 }) => {
   const composer = await createPdfComposer();
   const config = getRevenueReportConfig({
@@ -572,6 +573,11 @@ export const buildRevenuePdf = async ({
   const totalRevenue = Number(reportData.totalRevenue || 0);
   const reportRows = Array.isArray(reportData.rows) ? reportData.rows : [];
   const rows = reportRows.length > 0 ? reportRows : [config.emptyRow];
+  const documentTitle = String(fileName || "").replace(/\.pdf$/i, "");
+  if (documentTitle) {
+    composer.pdfDoc.setTitle(documentTitle);
+    composer.pdfDoc.setSubject(documentTitle);
+  }
 
   await drawHeader(composer, config.title);
   drawReportDetails(composer, config, totalRevenue, preparedBy);

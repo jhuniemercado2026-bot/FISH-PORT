@@ -8,7 +8,7 @@ export const useTransactionLockQuery = () => {
   const fiscalYear = useFiscalYearStore((state) => state.fiscalYear);
 
   const activeTransactionLock = useMemo(
-    () => getActiveTransactionLock(query.data),
+    () => getActiveTransactionLock(query.data?.transaction_lock ?? query.data),
     [query.data],
   );
 
@@ -25,6 +25,7 @@ export const useTransactionLockQuery = () => {
   return {
     ...query,
     transactionLock,
+    rawTransactionLock: activeTransactionLock,
     isTransactionLocked: Boolean(transactionLock),
     transactionLockMessage: getTransactionLockMessage(transactionLock),
   };

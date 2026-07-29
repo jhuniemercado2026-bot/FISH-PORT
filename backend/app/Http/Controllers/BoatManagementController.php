@@ -109,6 +109,7 @@ class BoatManagementController extends Controller
         $includeBoats = $request->boolean('include_boats', true);
         $includeBoatTypes = $request->boolean('include_boat_types', true);
         $includeOwners = $request->boolean('include_owners', true);
+        $includeArchivedLookups = $request->boolean('include_archived_lookups');
 
         if ($boatOnly) {
             $includeBoats = true;
@@ -136,14 +137,22 @@ class BoatManagementController extends Controller
                 ->orderByDesc('created_at')
                 ->orderByDesc('boat_id')
             : null;
-        $boatTypesQuery = $includeBoatTypes ? BoatType::forManagementIndex()
+        $boatTypesQuery = $includeBoatTypes ? ($includeArchivedLookups && ! $typesOnly
+            ? BoatType::withTrashed()
+                ->with('createdBy:user_id,first_name,last_name,email')
+                ->withCount('activeBoats as boats_count')
+            : BoatType::forManagementIndex())
             ->managementFilters(
                 $request->query('boat_types_search', ''),
                 $this->usageFilter($request, 'boat_types_usage', 'boat_types_status')
             )
             ->orderByDesc('created_at')
             ->orderByDesc('boat_type_id') : null;
-        $ownersQuery = $includeOwners ? BoatOwner::forManagementIndex()
+        $ownersQuery = $includeOwners ? ($includeArchivedLookups && ! $ownersOnly
+            ? BoatOwner::withTrashed()
+                ->with('createdBy:user_id,first_name,last_name,email')
+                ->withCount('activeBoats as boats_count')
+            : BoatOwner::forManagementIndex())
             ->managementFilters(
                 $request->query('owners_search', ''),
                 $this->usageFilter($request, 'owners_usage', 'owners_status')
@@ -170,7 +179,7 @@ class BoatManagementController extends Controller
                 $boatsPage,
                 $perPage,
                 function (Boat $boat) {
-                    $boat->makeVisible('image_path');
+                    $boat->makeVisible(['image_path', 'image_public_id']);
                     $boat->owner?->append('full_name');
                     $boat->createdBy?->append('full_name');
                 }
@@ -183,7 +192,10 @@ class BoatManagementController extends Controller
                 $request->boolean('boat_types_paginated'),
                 $boatTypesPage,
                 $perPage,
-                fn (BoatType $type) => $type->createdBy?->append('full_name')
+                function (BoatType $type) {
+                    $type->makeVisible('deleted_at');
+                    $type->createdBy?->append('full_name');
+                }
             )
             : ['data' => [], 'meta' => $this->emptyMeta($perPage)];
 
@@ -194,6 +206,7 @@ class BoatManagementController extends Controller
                 $ownersPage,
                 $perPage,
                 function (BoatOwner $owner) {
+                    $owner->makeVisible('deleted_at');
                     $owner->append('full_name');
                     $owner->createdBy?->append('full_name');
                 }
@@ -204,7 +217,7 @@ class BoatManagementController extends Controller
 
         if ($includeBoats) {
             $stats = [
-                'total_registered' => Boat::active()->count(),
+                'total_registered' => Boat::withTrashed()->count(),
                 'active_boats' => Boat::active()->where('status', 'active')->count(),
                 'expired_boats' => Boat::active()->where('status', 'expired')->count(),
                 'suspended_boats' => Boat::active()->where('status', 'suspended')->count(),
@@ -215,7 +228,7 @@ class BoatManagementController extends Controller
         if ($includeBoatTypes) {
             $stats = [
                 ...$stats,
-                'total_types' => BoatType::active()->count(),
+                'total_types' => BoatType::withTrashed()->count(),
                 'boat_types_in_use' => BoatType::active()->has('activeBoats')->count(),
                 'boat_types_not_in_use' => BoatType::active()->doesntHave('activeBoats')->count(),
             ];
@@ -224,7 +237,7 @@ class BoatManagementController extends Controller
         if ($includeOwners) {
             $stats = [
                 ...$stats,
-                'total_owners' => BoatOwner::active()->count(),
+                'total_owners' => BoatOwner::withTrashed()->count(),
                 'boat_owners_in_use' => BoatOwner::active()->has('activeBoats')->count(),
                 'boat_owners_not_in_use' => BoatOwner::active()->doesntHave('activeBoats')->count(),
             ];

@@ -10,9 +10,10 @@ import {
   IoAddOutline,
   IoBoatOutline,
   IoCalendarOutline,
-  IoCardOutline,
   IoCashOutline,
   IoChevronDownOutline,
+  IoCheckmarkOutline,
+  IoCloseOutline,
   IoCreateOutline,
   IoDocumentTextOutline,
   IoAlertCircleOutline,
@@ -26,27 +27,32 @@ import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
 import StatusPill from "../../components/StatusPill";
 import FilterSelect from "../../components/FilterSelect";
+import FilterButton from "../../components/FilterButton";
 import TableCard from "../../components/TableCard";
 import OverviewCard from "../../components/Overview";
 import Tabs from "../../components/Tabs";
+import Legend from "../../components/Legend";
 import DatePicker from "../../components/DatePicker";
 import Breadcrumbs from "../../components/Breadcrumbs";
 import TitlePage from "../../components/TitlePage";
 import Card from "../../components/Card";
 import Modal from "../../components/Modal";
+import DetailDrawer, { DrawerInfoCard, DrawerSection } from "../../components/Drawer";
 import { useSidebar } from "../../store/sidebarStore";
 import { showAddedToast, showBottomToast, showNoChangesToast, showUpdatedToast } from "../../store/bottomToastStore";
 import api from "../../api/axios";
 import { useBillingBoatsQuery, useBillingDataQuery, useBillingFormLookupsQuery, useBillingPaymentsQuery } from "../../hooks/useBillingDataQuery";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
-import { getPaymentFormLookupsQueryOptions } from "../../hooks/usePaymentsDataQuery";
+import { usePaymentFormLookupsQuery, usePaymentsDataQuery } from "../../hooks/usePaymentsDataQuery";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
 import { buildBillingStatementPdf } from "../../lib/pdfDocumentBill";
 import Spinner from "../../components/Spinner";
 import NoDataFound from "../../components/NoDataFound";
+import { adjustTodaySystemCashReceived, invalidateTodaySystemCashReceived } from "../../utils/remittanceCashCache";
 
 const FONT = "'Montserrat', sans-serif";
 const PAGE_SIZE = 10;
+const BILLING_MODAL_WIDTH = "1040px";
 const antTheme = {
   token: {
     colorPrimary: "#4096ff",
@@ -61,17 +67,17 @@ const antTheme = {
 
 const TABS = [
   { value: "/billing", label: "Billing", icon: IoReceiptOutline },
-  { value: "/create-billing", label: "Create Billing", icon: IoAddOutline },
+  { value: "/billing-payments", label: "Payments", icon: IoCashOutline },
 ];
 const BILLING_TAB_PATHS = {
   records: "/billing",
-  create: "/create-billing",
+  payments: "/billing-payments",
 };
 const BILLING_PATH_TABS = {
   "/billing": "records",
-  "/create-billing": "create",
+  "/billing-payments": "payments",
 };
-const BILLING_TABS = new Set(["records", "create"]);
+const BILLING_TABS = new Set(["records", "payments"]);
 const getBillingTabPath = (tab) => BILLING_PATH_TABS[tab] ? tab : BILLING_TAB_PATHS[tab] ?? BILLING_TAB_PATHS.records;
 const getBillingTabFromLocation = ({ pathname, search }) => {
   const tab = new URLSearchParams(search).get("tab");
@@ -85,6 +91,17 @@ const PERIOD_FILTER_OPTIONS = [
   { value: "today", label: "Today" },
   { value: "week", label: "This Week" },
   { value: "month", label: "This Month" },
+];
+
+const PAYMENT_STATUS_FILTER_OPTIONS = [
+  { value: "all", label: "All Status" },
+  { value: "paid", label: "Paid" },
+  { value: "partial", label: "Partial" },
+];
+
+const PAYMENT_STATUS_LEGEND = [
+  { key: "paid", label: "Paid", color: "#16a34a" },
+  { key: "partial", label: "Partial", color: "#f59e0b" },
 ];
 
 const BILLING_FILTER_DROPDOWN_PROPS = {
@@ -159,12 +176,29 @@ const formatReferenceNumber = (value) => {
   return digits.slice(-6).padStart(6, "0");
 };
 
+const getBillingStatementFilename = (bill) => {
+  const reference = formatReferenceNumber(bill?.bill_reference_no);
+  const safeReference = (reference || "billing-statement")
+    .replace(/[<>:"/\\|?*]+/g, "")
+    .trim();
+
+  return `${safeReference}.pdf`;
+};
+
 const getBillingHighlightId = ({ highlightedSearchResult, search }) => {
   const stateId = highlightedSearchResult?.group === "Bills" ? String(highlightedSearchResult?.id || "") : "";
   const urlId = new URLSearchParams(search).get("highlight") || "";
   const rawId = stateId || urlId;
 
   return rawId.startsWith("bill-") ? rawId.slice("bill-".length) : "";
+};
+
+const getPaymentHighlightId = ({ highlightedSearchResult, search }) => {
+  const stateId = highlightedSearchResult?.group === "Payments" ? String(highlightedSearchResult?.id || "") : "";
+  const urlId = new URLSearchParams(search).get("highlight") || "";
+  const rawId = stateId || urlId;
+
+  return rawId.startsWith("payment-") ? rawId.slice("payment-".length) : "";
 };
 
 const getDatePartsFromValue = (value) => {
@@ -207,6 +241,17 @@ const formatDisplayDate = (value) => {
   });
 };
 
+const formatShortDisplayDate = (value) => {
+  if (!value) return "-";
+  const parts = getDatePartsFromValue(value);
+  if (!parts) return String(value).slice(0, 10);
+  return new Date(parts.year, parts.month - 1, parts.day).toLocaleDateString("en-PH", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
 const formatLongDisplayDate = (value) => {
   if (!value) return "";
   const parts = getDatePartsFromValue(value);
@@ -232,12 +277,21 @@ const getBillItemDisplayType = (transactionType) =>
       : "Transaction";
 
 const getBillItemDisplayDate = (item, fallbackDate = "") => {
-  if (item?.transaction_type === "docking")
-    return item?.docking?.docking_date || fallbackDate;
-  if (item?.transaction_type === "banyera")
+  const transactionType = String(item?.transaction_type || "").toLowerCase();
+
+  if (transactionType === "docking")
     return (
+      item?.transaction_date ||
+      item?.docking_date ||
+      item?.docking?.docking_date ||
+      fallbackDate
+    );
+  if (transactionType === "banyera")
+    return (
+      item?.transaction_date ||
       item?.banyera_transaction?.transaction_date ||
       item?.banyeraTransaction?.transaction_date ||
+      item?.banyera_date ||
       fallbackDate
     );
   return fallbackDate;
@@ -290,9 +344,9 @@ const ErrorMessage = ({ children }) => (
 );
 
 const Input = React.forwardRef(
-  ({ icon: Icon, readOnly = false, error = false, ...props }, ref) => (
+  ({ icon: Icon, readOnly = false, readOnlyPlain = false, error = false, tabIndex, inputClassName = "", inputStyle = {}, wrapperClassName = "", ...props }, ref) => (
     <div
-      className={`flex items-center gap-2.5 border px-3.5 transition-all ${readOnly ? "bg-slate-50" : "bg-white"} ${error && !readOnly ? "border-red-300" : "border-slate-200 focus-within:border-[#4096ff]"}`}
+      className={`flex items-center gap-2.5 border px-3.5 transition-all ${readOnly && !readOnlyPlain ? "border-slate-200 bg-slate-100" : error ? "border-red-300 bg-white" : "border-slate-200 bg-white focus-within:border-[#4096ff]"} ${wrapperClassName}`.trim()}
       style={{ height: 46, borderRadius: 10 }}
     >
       {Icon ? (
@@ -301,9 +355,10 @@ const Input = React.forwardRef(
       <input
         ref={ref}
         readOnly={readOnly}
+        tabIndex={readOnly ? -1 : tabIndex}
         {...props}
-        className={`h-full w-full border-none bg-transparent text-[13px] font-medium outline-none ${readOnly ? "cursor-default text-slate-500" : "text-[#0d1117]"}`}
-        style={{ fontFamily: FONT }}
+        className={`h-full w-full border-none bg-transparent text-[13px] font-medium outline-none ${readOnly && !readOnlyPlain ? "cursor-default text-slate-500" : "text-[#0d1117]"} ${readOnly ? "cursor-default" : ""} ${inputClassName}`.trim()}
+        style={{ fontFamily: FONT, ...inputStyle }}
       />
     </div>
   ),
@@ -438,6 +493,49 @@ const DateFilterField = ({
   );
 };
 
+const BillingStatementModal = ({
+  bill,
+  open,
+  pdfFile,
+  loading,
+  onClose,
+}) => {
+  if (!open) return null;
+
+  const reference = formatReferenceNumber(bill.bill_reference_no) || "-";
+
+  return (
+    <Modal
+      title="Billing Statement"
+      onClose={onClose}
+      closeOnBackdrop
+      maxWidth="920px"
+      showFooter={false}
+      bodyClassName="h-[68vh] max-h-[68vh] !overflow-hidden !p-0"
+      contentClassName="h-full !gap-0"
+    >
+      <div className="relative h-full overflow-hidden bg-white">
+        {loading ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-white px-6 text-center text-[13px] text-slate-500">
+            Generating PDF preview...
+          </div>
+        ) : pdfFile?.url ? (
+          <iframe
+            src={pdfFile.url}
+            title={`Billing Statement ${reference}`}
+            className="h-full w-full border-0 bg-white"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center bg-white px-6 text-center text-[13px] text-slate-500">
+            Generating PDF preview...
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+
+};
+
 const EditBillingModal = ({
   open,
   bill,
@@ -520,6 +618,7 @@ const EditBillingModal = ({
       saveLabel="Save"
       savingLabel=""
       saveButtonWidth="140px"
+      closeButtonWidth="140px"
       maxWidth="920px"
       minimumSavingMs={0}
     >
@@ -663,9 +762,9 @@ const EditBillingModal = ({
                         "minmax(150px,1fr) minmax(150px,0.9fr) minmax(130px,0.8fr)",
                     }}
                   >
-                    <Input value={typeLabel} readOnly />
-                    <Input value={recordDate} readOnly />
-                    <Input value={item.amount} readOnly />
+                    <Input value={typeLabel} readOnly readOnlyPlain />
+                    <Input value={recordDate} readOnly readOnlyPlain />
+                    <Input value={item.amount} readOnly readOnlyPlain />
                   </div>
                 );
               })}
@@ -675,6 +774,654 @@ const EditBillingModal = ({
         {formError ? <ErrorMessage>{formError}</ErrorMessage> : null}
       </div>
     </Modal>
+  );
+};
+
+const RecordPaymentModal = ({
+  open,
+  bill,
+  form,
+  paymentScope,
+  paymentableBills,
+  fieldErrors,
+  formError,
+  saving,
+  onClose,
+  onChange,
+  onScopeChange,
+  onBillChange,
+  onBoatChange,
+  onBillToggle,
+  onSelectAllBills,
+  onShowAllBills,
+  onDateFilterChange,
+  onSave,
+}) => {
+  if (!open || !bill) return null;
+
+  const billOptions = paymentableBills.map((record) => ({
+    value: String(record.bill_id),
+    label: `${record.bill_reference || formatReferenceNumber(record.bill_reference_no)} - ${record.boat_name || "-"}`,
+  }));
+  const selectedBill = paymentableBills.find((record) => String(record.bill_id) === String(form.bill_id));
+  const groupedBoats = new Map();
+
+  paymentableBills.forEach((record) => {
+    const key = String(record.boat_id ?? "");
+    if (!key) return;
+    if (!groupedBoats.has(key)) {
+      groupedBoats.set(key, {
+        value: key,
+        label: record.boat_name || "-",
+        boat_name: record.boat_name || "-",
+        owner_name: record.owner_name || "-",
+        transaction_summary: [],
+        amount_due: 0,
+        total_paid: 0,
+        balance: 0,
+        bill_count: 0,
+        bills: [],
+      });
+    }
+
+    const current = groupedBoats.get(key);
+    current.bill_count += 1;
+    current.amount_due += Number(record.amount_due ?? record.total_amount ?? 0);
+    current.total_paid += Number(record.total_paid ?? 0);
+    current.balance += Number(record.balance ?? record.total_amount ?? 0);
+    current.bills.push(record);
+    current.payment_transactions_history = [
+      ...(current.payment_transactions_history || []),
+      ...(Array.isArray(record.payment_transactions_history)
+        ? record.payment_transactions_history.map((payment) => ({
+            ...payment,
+            bill_reference: record.bill_reference || formatReferenceNumber(record.bill_reference_no),
+          }))
+        : []),
+    ];
+    if (record.transaction_summary) {
+      current.transaction_summary.push(
+        ...String(record.transaction_summary)
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean),
+      );
+    }
+  });
+
+  const boatOptions = Array.from(groupedBoats.values()).map((boat) => ({
+    ...boat,
+    transaction_summary: [...new Set(boat.transaction_summary)].join(", ") || "-",
+    label: `${boat.boat_name} - ${boat.bill_count} bill${boat.bill_count === 1 ? "" : "s"}`,
+  }));
+  const selectedBoat = boatOptions.find((boat) => String(boat.value) === String(form.boat_id));
+  const filteredBoatBills = (selectedBoat?.bills ?? []).filter((record) => {
+    const dateValue = String(record.bill_date || record.billing_date || record.created_at || "").slice(0, 10);
+    if (form.date_from && dateValue && dateValue < form.date_from) return false;
+    if (form.date_to && dateValue && dateValue > form.date_to) return false;
+    return true;
+  });
+  const selectedBills = filteredBoatBills.filter((record) => form.bill_ids.includes(String(record.bill_id)));
+  const selectedBillsSummary = selectedBills.length > 0
+    ? {
+        boat_name: selectedBills[0]?.boat_name || selectedBoat?.boat_name || "-",
+        owner_name: selectedBills[0]?.owner_name || selectedBoat?.owner_name || "-",
+        transaction_summary: [...new Set(selectedBills.flatMap((record) =>
+          String(record.transaction_summary || "")
+            .split(",")
+            .map((part) => part.trim())
+            .filter(Boolean),
+        ))].join(", ") || "-",
+        amount_due: selectedBills.reduce((sum, record) => sum + Number(record.amount_due ?? record.total_amount ?? 0), 0),
+        total_paid: selectedBills.reduce((sum, record) => sum + Number(record.total_paid ?? 0), 0),
+        balance: selectedBills.reduce((sum, record) => sum + Number(record.balance ?? record.total_amount ?? 0), 0),
+        bill_count: selectedBills.length,
+        payment_transactions_history: selectedBills.flatMap((record) =>
+          Array.isArray(record.payment_transactions_history)
+            ? record.payment_transactions_history.map((payment) => ({
+                ...payment,
+                bill_reference: record.bill_reference || formatReferenceNumber(record.bill_reference_no),
+              }))
+            : [],
+        ),
+      }
+    : null;
+  const paymentSummary = paymentScope === "single_bill" ? selectedBill : selectedBillsSummary;
+  const paymentTransactionsHistorySource =
+    paymentScope === "selected_bills" ? selectedBoat : paymentSummary;
+  const hasPaymentTransactionsHistoryContext = Boolean(paymentTransactionsHistorySource);
+  const paymentTransactionsHistoryRows = (Array.isArray(paymentTransactionsHistorySource?.payment_transactions_history)
+    ? paymentTransactionsHistorySource.payment_transactions_history
+    : [])
+    .map((payment, index) => ({
+      key: payment.payment_id ?? payment.id ?? `${payment.payment_reference || payment.reference || "payment"}-${index}`,
+      reference:
+        payment.payment_reference ||
+        payment.payment_reference_no ||
+        payment.reference_no ||
+        payment.reference ||
+        "-",
+      bill_reference: payment.bill_reference || payment.bill_reference_no || "",
+      date: payment.payment_date || payment.date || payment.created_at,
+      amount: payment.amount_paid ?? payment.amount ?? payment.total_amount ?? 0,
+    }))
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  const allFilteredBillsSelected =
+    filteredBoatBills.length > 0 &&
+    filteredBoatBills.every((record) => form.bill_ids.includes(String(record.bill_id)));
+  const totalAmountToPay = Number(form.amount_paid || 0);
+
+  return (
+    <Modal
+      title="Record Payment"
+      onClose={onClose}
+      onSave={onSave}
+      saving={saving}
+      saveLabel="Save"
+      saveButtonWidth="170px"
+      closeButtonWidth="170px"
+      maxWidth={BILLING_MODAL_WIDTH}
+      minimumSavingMs={0}
+      closeOnBackdrop
+      bodyClassName="!max-h-[64vh]"
+      footerLeftContent={
+        <div>
+          <p
+            className="m-0 text-[11px] font-semibold uppercase"
+            style={{ color: "#6F6F82", fontFamily: FONT }}
+          >
+            Total Amount to Pay
+          </p>
+          <p
+            className="m-0 text-[28px] font-bold leading-tight text-[#1a1f36]"
+            style={{ fontVariantNumeric: "tabular-nums" }}
+          >
+            ₱{totalAmountToPay.toLocaleString("en-PH", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+        </div>
+      }
+    >
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.85fr)]">
+        <div className="min-w-0 space-y-6">
+        <Card icon={IoBoatOutline} title="BILLING DETAILS" subtitle="Select one bill or selected bills for a boat.">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="xl:col-span-2">
+              <div className="mb-5 grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => onScopeChange("single_bill")} className={`w-full rounded-[10px] px-4 py-2 text-[13px] font-semibold uppercase transition-colors ${paymentScope === "single_bill" ? "bg-[#1a1f36] text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`} style={{ fontFamily: FONT }}>
+                  1 Bill
+                </button>
+                <button type="button" onClick={() => onScopeChange("selected_bills")} className={`w-full rounded-[10px] px-4 py-2 text-[13px] font-semibold uppercase transition-colors ${paymentScope === "selected_bills" ? "bg-[#1a1f36] text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`} style={{ fontFamily: FONT }}>
+                  Select Multiple Bills
+                </button>
+              </div>
+
+              {paymentScope === "single_bill" ? (
+                <>
+                  <div>
+                    <Label required>Bill Reference</Label>
+                    <SelectField value={form.bill_id || undefined} onChange={onBillChange} placeholder="Select or type bill reference" error={Boolean(fieldErrors.bill_id?.[0])} options={billOptions} />
+                    {fieldErrors.bill_id?.[0] ? <ErrorMessage>{fieldErrors.bill_id[0]}</ErrorMessage> : null}
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+                    <div>
+                      <Label>Boat Name</Label>
+                      <Input value={paymentSummary?.boat_name || bill?.boat_name || ""} readOnly />
+                    </div>
+                    <div>
+                      <Label>Boat Owner</Label>
+                      <Input value={paymentSummary?.owner_name || bill?.payer_name || ""} readOnly />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <Label required>Boat Name</Label>
+                    <SelectField value={form.boat_id || undefined} onChange={onBoatChange} placeholder="Select boat name" error={Boolean(fieldErrors.boat_id?.[0])} options={boatOptions} />
+                    {fieldErrors.boat_id?.[0] ? <ErrorMessage>{fieldErrors.boat_id[0]}</ErrorMessage> : null}
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+                    <div>
+                      <Label>Boat Name</Label>
+                      <Input value={(paymentSummary?.boat_name || selectedBoat?.boat_name) || ""} readOnly />
+                    </div>
+                    <div>
+                      <Label>Boat Owner</Label>
+                      <Input value={(paymentSummary?.owner_name || selectedBoat?.owner_name) || ""} readOnly />
+                    </div>
+                  </div>
+
+                  {form.boat_id ? (
+                    <div className="mt-4 rounded-[10px] border border-slate-200 bg-slate-50/70 p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="m-0 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#6F6F82", fontFamily: FONT }}>Filter by Date Range</p>
+                        <button type="button" onClick={() => onShowAllBills(filteredBoatBills)} className="border-none bg-transparent p-0 text-[12px] font-semibold text-blue-600 transition-colors hover:text-blue-700" style={{ fontFamily: FONT }}>Show All</button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div>
+                          <Label>From Date</Label>
+                          <DatePicker value={form.date_from || undefined} onChange={(_, dateString) => onDateFilterChange("date_from", dateString)} placeholder="Select a date to filter" options={{ useFiscalYearDefault: false }} containerClassName="w-full" inputClassName="rounded-[10px] border-slate-200 bg-white text-[13px] text-[#1a1f36] focus:border-[#4096ff] focus:ring-0" />
+                        </div>
+                        <div>
+                          <Label>To Date</Label>
+                          <DatePicker value={form.date_to || undefined} onChange={(_, dateString) => onDateFilterChange("date_to", dateString)} placeholder="Select a date to filter" options={{ useFiscalYearDefault: false }} containerClassName="w-full" inputClassName="rounded-[10px] border-slate-200 bg-white text-[13px] text-[#1a1f36] focus:border-[#4096ff] focus:ring-0" />
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {form.boat_id ? (
+                    <div className={`mt-4 rounded-[10px] border bg-slate-50/70 p-4 ${fieldErrors.bill_ids?.[0] ? "border-red-300" : "border-slate-200"}`}>
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="m-0 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#6F6F82", fontFamily: FONT }}>Select Bills</p>
+                        <div className="flex items-center gap-3">
+                          {selectedBillsSummary ? <p className="m-0 text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>{selectedBillsSummary.bill_count} selected</p> : null}
+                          {filteredBoatBills.length > 0 ? (
+                            <button type="button" onClick={() => onSelectAllBills(filteredBoatBills, allFilteredBillsSelected)} className="border-none bg-transparent p-0 text-[12px] font-semibold text-blue-600 transition-colors hover:text-blue-700" style={{ fontFamily: FONT }}>
+                              {allFilteredBillsSelected ? "Clear All" : "Select All"}
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="max-h-[268px] space-y-2 overflow-y-auto pr-1 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300" style={{ scrollbarWidth: "thin", scrollbarColor: "#94a3b8 transparent" }}>
+                        {filteredBoatBills.length > 0 ? (
+                          filteredBoatBills.map((record) => {
+                            const isChecked = form.bill_ids.includes(String(record.bill_id));
+                            const billDate = String(record.bill_date || record.billing_date || record.created_at || "").slice(0, 10);
+
+                            return (
+                              <label key={record.bill_id} className={`flex cursor-pointer items-center justify-between gap-4 rounded-[10px] border px-4 py-3 transition-colors ${isChecked ? "border-[#1a1f36] bg-white" : "border-slate-200 bg-white/90 hover:bg-white"}`}>
+                                <div className="flex items-center gap-3">
+                                  <input type="checkbox" checked={isChecked} onChange={() => onBillToggle(record.bill_id, filteredBoatBills)} className="h-4 w-4 rounded border-blue-300 text-blue-500 accent-blue-500 focus:ring-blue-500" />
+                                  <div>
+                                    <p className="m-0 text-[13px] font-semibold text-[#1a1f36]">{record.bill_reference || formatReferenceNumber(record.bill_reference_no)}</p>
+                                    <p className="m-0 text-[11px] text-slate-500">{formatDisplayDate(billDate)}</p>
+                                  </div>
+                                </div>
+                                <p className="m-0 text-right text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(record.balance ?? record.total_amount)}</p>
+                              </label>
+                            );
+                          })
+                        ) : (
+                          <p className="m-0 rounded-[10px] border border-dashed border-slate-200 bg-white px-4 py-3 text-[13px] text-slate-500">No bills found for this boat.</p>
+                        )}
+                      </div>
+                      {fieldErrors.bill_ids?.[0] ? <ErrorMessage>{fieldErrors.bill_ids[0]}</ErrorMessage> : null}
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+
+            {paymentSummary ? (
+              <div className="xl:col-span-2 rounded-[10px] border border-slate-200 bg-slate-50/70 p-4">
+                <div className="space-y-3">
+                  {[
+                    ["Transactions", paymentSummary.transaction_summary || "-"],
+                    ["Total Billed", formatMoney(paymentSummary.amount_due ?? paymentSummary.total_amount)],
+                    ["Previously Paid", formatMoney(paymentSummary.total_paid)],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex items-start justify-between gap-4">
+                      <p className="m-0 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#6F6F82", fontFamily: FONT }}>{label}</p>
+                      <p className="m-0 text-right text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>{value}</p>
+                    </div>
+                  ))}
+                  <div className="border-t border-slate-200 pt-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <p className="m-0 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#6F6F82", fontFamily: FONT }}>Balance Due</p>
+                      <p className="m-0 text-right text-[16px] font-bold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(paymentSummary.balance ?? paymentSummary.total_amount)}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </Card>
+
+        <Card
+          icon={IoDocumentTextOutline}
+          title="PAYMENT TRANSACTIONS HISTORY"
+          subtitle="Check previous payment references already recorded for this selection."
+        >
+          {!hasPaymentTransactionsHistoryContext ? (
+            <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
+              {paymentScope === "selected_bills"
+                ? "Select a boat to view payment transaction history."
+                : "Select a bill to view payment transaction history."}
+            </div>
+          ) : paymentTransactionsHistoryRows.length === 0 ? (
+            <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
+              No payment transactions found for this selection.
+            </div>
+          ) : (
+            <div className="rounded-[10px] border border-slate-200 bg-slate-50/60 p-3">
+              <div
+                className="mb-2 grid gap-2 px-1 pr-3"
+                style={{
+                  gridTemplateColumns:
+                    "minmax(0,1.1fr) minmax(0,0.9fr) minmax(0,0.8fr)",
+                }}
+              >
+                {["Reference", "Date", "Amount (PHP)"].map((label) => (
+                  <p key={label} className="m-0 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#6F6F82", fontFamily: FONT }}>
+                    {label}
+                  </p>
+                ))}
+              </div>
+              <div className="max-h-[268px] space-y-2 overflow-y-auto pr-1">
+                {paymentTransactionsHistoryRows.map((row) => (
+                  <div
+                    key={row.key}
+                    className="grid items-start gap-2 rounded-[10px] border border-slate-200 bg-white px-3 py-2.5"
+                    style={{
+                      gridTemplateColumns:
+                        "minmax(0,1.1fr) minmax(0,0.9fr) minmax(0,0.8fr)",
+                    }}
+                  >
+                    <p className="m-0 min-w-0 truncate text-[13px] font-semibold text-[#1a1f36]">{row.reference}</p>
+                    <p className="m-0 min-w-0 truncate text-[13px] font-medium text-[#1a1f36]">{formatShortDisplayDate(row.date)}</p>
+                    <p className="m-0 min-w-0 truncate text-left text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {formatMoney(row.amount)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+        </div>
+
+        <Card icon={IoCashOutline} title="PAYMENT DETAILS" subtitle="Create a payment entry for the selected bill." className="min-w-0 xl:min-h-[520px]">
+          <div className="space-y-4">
+            <div>
+              <Label required>Payment Method</Label>
+              <Input value="Cash" readOnly />
+            </div>
+            <div>
+              <Label required>Official Receipt No.</Label>
+              <Input value={form.official_receipt_no} onChange={(event) => onChange({ official_receipt_no: normalizeOfficialReceiptNo(event.target.value) })} placeholder="Enter official receipt number" error={Boolean(fieldErrors.official_receipt_no?.[0])} />
+              {fieldErrors.official_receipt_no?.[0] ? <ErrorMessage>{fieldErrors.official_receipt_no[0]}</ErrorMessage> : null}
+            </div>
+            <div>
+              <Label required>Amount (₱)</Label>
+              <Input value={form.amount_paid} onChange={(event) => onChange({ amount_paid: event.target.value })} placeholder="0.00" error={Boolean(fieldErrors.amount_paid?.[0])} />
+              {fieldErrors.amount_paid?.[0] ? <ErrorMessage>{fieldErrors.amount_paid[0]}</ErrorMessage> : null}
+            </div>
+            <div>
+              <Label>Remarks</Label>
+              <textarea value={form.remarks} onChange={(event) => onChange({ remarks: event.target.value })} placeholder="Add payment remarks" className="min-h-[96px] w-full resize-none rounded-[10px] border border-slate-200 px-3.5 py-3 text-[13px] outline-none focus:border-[#4096ff]" style={{ fontFamily: FONT, color: "#0d1117" }} />
+            </div>
+            {formError ? <p className="m-0 text-[12px] font-normal text-red-500">{formError}</p> : null}
+          </div>
+        </Card>
+      </div>
+    </Modal>
+  );
+};
+
+const PayBillPromptModal = ({ open, saving, onClose, onYes, onNo }) => {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center px-4"
+      style={{ backgroundColor: "rgba(10,13,28,0.55)", backdropFilter: "blur(6px)" }}
+      onMouseDown={(event) => {
+        if (!saving && event.target === event.currentTarget) {
+          onClose?.();
+        }
+      }}
+    >
+      <div
+        className="relative bg-white w-full overflow-hidden"
+        style={{
+          maxWidth: 400,
+          borderRadius: 20,
+          boxShadow: "0 24px 64px rgba(0,0,0,0.2)",
+          fontFamily: FONT,
+          animation: "modalPop 0.22s cubic-bezier(0.34,1.56,0.64,1)",
+        }}
+      >
+        <style>{`@keyframes modalPop{from{opacity:0;transform:scale(0.92) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}`}</style>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={saving}
+          className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border-none bg-transparent text-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+          aria-label="Close"
+        >
+          <IoCloseOutline className="text-[22px]" />
+        </button>
+        <div className="px-6 pt-8 pb-5 flex flex-col items-center text-center">
+          <div className="mb-5 flex items-center justify-center" style={{ width: 68, height: 68, borderRadius: 18, backgroundColor: "#eff6ff" }}>
+            <IoCashOutline style={{ fontSize: 36, color: "#2563eb" }} />
+          </div>
+          <p className="m-0 text-[18px] font-bold mb-2" style={{ color: "#0d1117" }}>
+            Do you want to pay this bill?
+          </p>
+          <p className="m-0 text-[15px] leading-relaxed" style={{ color: "#64748b" }}>
+            Choose Yes to continue to payment after saving, or No to generate the bill only.
+          </p>
+        </div>
+        <div className="px-6 pb-8 flex gap-3">
+          <button
+            onClick={onNo}
+            disabled={saving}
+            className="flex flex-1 items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-200 bg-white text-[13px] font-semibold cursor-pointer hover:bg-gray-50 transition-colors disabled:cursor-not-allowed disabled:opacity-70"
+            style={{ fontFamily: FONT, color: "#1a1f36" }}
+          >
+            <IoCloseOutline className="text-[16px]" />
+            No
+          </button>
+          <button
+            onClick={onYes}
+            disabled={saving}
+            className="flex-1 py-2.5 rounded-xl text-white text-[13px] font-semibold cursor-pointer transition-colors flex items-center justify-center gap-2 disabled:cursor-not-allowed"
+            style={{
+              fontFamily: FONT,
+              backgroundColor: saving ? "#1a1f36" : "#1a1f36",
+              border: "none",
+              opacity: saving ? 0.7 : 1,
+            }}
+            onMouseEnter={(event) => {
+              if (!saving) event.currentTarget.style.backgroundColor = "#2d3561";
+            }}
+            onMouseLeave={(event) => {
+              if (!saving) event.currentTarget.style.backgroundColor = "#1a1f36";
+            }}
+          >
+            {saving ? <Spinner size={4} /> : (
+              <>
+                <IoCheckmarkOutline className="text-[16px]" />
+                Yes
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const EditPaymentModal = ({ open, payment, form, errors, saving, onClose, onChange, onSave }) => {
+  if (!open || !payment) return null;
+
+  return (
+    <Modal
+      title="Edit Payment"
+      onClose={onClose}
+      onSave={onSave}
+      saving={saving}
+      saveLabel="Save"
+      savingLabel=""
+      saveButtonWidth="140px"
+      maxWidth="620px"
+      minimumSavingMs={0}
+    >
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Payment Reference No.</Label>
+            <Input value={payment.payment_reference || ""} readOnly />
+          </div>
+          <div>
+            <Label>Bill Reference No.</Label>
+            <Input value={payment.bill_reference || ""} readOnly />
+          </div>
+        </div>
+        <div>
+          <Label required>Official Receipt No.</Label>
+          <Input
+            value={form.official_receipt_no}
+            onChange={(event) => onChange({ official_receipt_no: normalizeOfficialReceiptNo(event.target.value) })}
+            placeholder="Enter official receipt number"
+            error={Boolean(errors.official_receipt_no)}
+          />
+          {errors.official_receipt_no ? <ErrorMessage>{errors.official_receipt_no}</ErrorMessage> : null}
+        </div>
+        <div>
+          <Label>Remarks</Label>
+          <textarea
+            value={form.remarks}
+            onChange={(event) => onChange({ remarks: event.target.value })}
+            placeholder="Add payment remarks"
+            className="min-h-[120px] w-full resize-none rounded-[10px] border border-slate-200 px-4 py-3 text-[14px] outline-none focus:border-[#4096ff]"
+            style={{ fontFamily: FONT, color: "#0d1117" }}
+          />
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+const PaymentDetailsDrawer = ({ payment, open, onClose }) => {
+  if (!payment) return null;
+
+  const statusLabel = payment.status
+    ? String(payment.status).charAt(0).toUpperCase() + String(payment.status).slice(1)
+    : "-";
+  const paymentTransactionsHistoryRows = (
+    Array.isArray(payment.payment_transactions_history)
+      ? payment.payment_transactions_history
+      : Array.isArray(payment.payment_history)
+        ? payment.payment_history
+        : Array.isArray(payment.transactions_history)
+          ? payment.transactions_history
+          : []
+  )
+    .map((row, index) => ({
+      key: row.payment_id ?? row.id ?? `${row.payment_reference || row.reference || "payment"}-${index}`,
+      reference:
+        row.payment_reference ||
+        row.payment_reference_no ||
+        row.reference_no ||
+        row.reference ||
+        "-",
+      date: row.payment_date || row.date || row.created_at,
+      amount: row.amount_paid ?? row.amount ?? row.total_amount ?? 0,
+    }))
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+
+  return (
+    <DetailDrawer
+      open={open}
+      onClose={onClose}
+      title="Payment Details"
+      subtitle="Review the selected payment record."
+      icon={IoReceiptOutline}
+      width={500}
+    >
+      <DrawerSection
+        icon={IoReceiptOutline}
+        title="Payment Details"
+        subtitle="Reference and receipt information."
+      >
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <DrawerInfoCard label="Payment Reference No." value={payment.payment_reference || "-"} />
+          <DrawerInfoCard
+            label="Status"
+            value={statusLabel}
+            indicatorColor={payment.status === "paid" ? "#16a34a" : "#f59e0b"}
+          />
+          <DrawerInfoCard label="Official Receipt No." value={payment.official_receipt_no || "-"} />
+          <DrawerInfoCard label="Payment Method" value={payment.payment_method_label || payment.payment_method || "-"} />
+          <DrawerInfoCard label="Payment Date" value={formatDisplayDate(payment.payment_date)} />
+          <DrawerInfoCard label="Remarks" value={payment.remarks || "-"} />
+          <DrawerInfoCard label="Total Amount" value={formatMoney(payment.total_amount)} className="sm:col-span-2" />
+          <DrawerInfoCard label="Amount Paid" value={formatMoney(payment.amount_paid)} />
+          <DrawerInfoCard label="Balance Due" value={formatMoney(payment.balance)} />
+        </div>
+      </DrawerSection>
+
+      <DrawerSection
+        icon={IoBoatOutline}
+        title="Billing Details"
+        subtitle="Boat and bill context."
+      >
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <DrawerInfoCard label="Bill Reference No." value={payment.bill_reference || "-"} />
+          <DrawerInfoCard label="Boat Name" value={payment.boat_name || "-"} />
+          <DrawerInfoCard label="Boat Type" value={payment.boat_type || "-"} />
+          <DrawerInfoCard label="Boat Owner" value={payment.owner_name || "-"} />
+        </div>
+      </DrawerSection>
+
+      <DrawerSection
+        icon={IoDocumentTextOutline}
+        title="PAYMENT TRANSACTIONS HISTORY"
+        subtitle="Previous payment references for this bill."
+      >
+        {paymentTransactionsHistoryRows.length === 0 ? (
+          <div className="flex min-h-[160px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
+            No payment transactions found for this bill.
+          </div>
+        ) : (
+          <div className="rounded-[10px] border border-slate-200 bg-slate-50/60 p-3">
+            <div
+              className="mb-2 grid gap-2 px-1 pr-3"
+              style={{ gridTemplateColumns: "minmax(140px,1fr) minmax(130px,0.9fr) minmax(110px,0.8fr)" }}
+            >
+              {["Reference", "Date", "Amount (\u20B1)"].map((label) => (
+                <p key={label} className="m-0 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "#6F6F82", fontFamily: FONT }}>
+                  {label}
+                </p>
+              ))}
+            </div>
+            <div className="space-y-2 pr-1">
+              {paymentTransactionsHistoryRows.map((row) => (
+                <div
+                  key={row.key}
+                  className="grid items-start gap-2 rounded-[10px] border border-slate-200 bg-white px-3 py-2.5"
+                  style={{ gridTemplateColumns: "minmax(140px,1fr) minmax(130px,0.9fr) minmax(110px,0.8fr)" }}
+                >
+                  <p className="m-0 text-[13px] font-semibold text-[#1a1f36]">{row.reference}</p>
+                  <p className="m-0 text-[13px] font-medium text-[#1a1f36]">{formatShortDisplayDate(row.date)}</p>
+                  <p className="m-0 text-left text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {Number(row.amount || 0).toLocaleString("en-PH", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </DrawerSection>
+
+      <DrawerSection
+        icon={IoPersonOutline}
+        title="Received By"
+        subtitle="Payment receiving information."
+      >
+        <div className="grid grid-cols-1 gap-3">
+          <DrawerInfoCard label="Received By" value={payment.received_by_name || "-"} />
+        </div>
+      </DrawerSection>
+    </DetailDrawer>
   );
 };
 
@@ -729,6 +1476,56 @@ const getRequestErrorMessage = (error, fallbackMessage) => {
 const buildDateFromParts = (year, month, day) => {
   if (!year || !month || !day) return "";
   return `${year}-${month}-${day}`;
+};
+
+const getTodayManilaDate = () => {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  return formatter.format(new Date());
+};
+
+const bumpBillingTodayPaymentStats = (queryClient, paymentDate, paymentCount = 1) => {
+  if (paymentDate !== getTodayManilaDate() || paymentCount <= 0) return;
+
+  queryClient.setQueriesData({ queryKey: ["billing-data"] }, (current) => {
+    if (!current?.stats) return current;
+
+    return {
+      ...current,
+      stats: {
+        ...current.stats,
+        today_payments: Number(current.stats.today_payments ?? 0) + paymentCount,
+      },
+    };
+  });
+};
+
+const getInitialPaymentModalForm = (bill = null) => ({
+  bill_id: bill?.bill_id ? String(bill.bill_id) : "",
+  boat_id: bill?.boat_id ? String(bill.boat_id) : "",
+  bill_ids: bill?.bill_id ? [String(bill.bill_id)] : [],
+  payment_method: "cash",
+  official_receipt_no: "",
+  payment_date: getTodayManilaDate(),
+  amount_paid: bill ? String(Number(bill.balance ?? bill.total_amount ?? 0).toFixed(2)) : "",
+  remarks: "",
+  date_from: "",
+  date_to: "",
+});
+
+const normalizeOfficialReceiptNo = (value) =>
+  String(value ?? "").replace(/\D/g, "").slice(0, 6);
+
+const validateOfficialReceiptNo = (value) => {
+  const normalized = normalizeOfficialReceiptNo(value);
+  if (!normalized) return "Official Receipt No. is required.";
+  if (normalized.length !== 6) return "Official Receipt No. must be exactly 6 digits.";
+  return "";
 };
 
 const normalizeDateValue = (value) => {
@@ -904,6 +1701,19 @@ const printPdfFile = (fileUrl) => {
   };
 };
 
+const printPreloadedPdfFrame = (iframe) => {
+  if (!iframe?.contentWindow) return false;
+
+  try {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+    return true;
+  } catch (error) {
+    console.error("Failed to print preloaded billing statement PDF", error);
+    return false;
+  }
+};
+
 const downloadPdfFile = (fileUrl, filename) => {
   if (!fileUrl) return;
 
@@ -916,7 +1726,7 @@ const downloadPdfFile = (fileUrl, filename) => {
 };
 
 const TailDropdown = ({ value, onChange, options, height = 42, width = 160 }) => (
-  <FilterSelect
+  <FilterButton
     {...BILLING_FILTER_DROPDOWN_PROPS}
     value={value}
     onChange={onChange}
@@ -944,6 +1754,12 @@ const SuperBilling = () => {
   const [requestedPage, setRequestedPage] = useState(1);
   const currentPage = useDebouncedValue(requestedPage, 150);
   const [periodFilter, setPeriodFilter] = useState("all");
+  const [paymentSearch, setPaymentSearch] = useState("");
+  const debouncedPaymentSearch = useDebouncedValue(paymentSearch, 350);
+  const [paymentRequestedPage, setPaymentRequestedPage] = useState(1);
+  const currentPaymentPage = useDebouncedValue(paymentRequestedPage, 150);
+  const [paymentPeriodFilter, setPaymentPeriodFilter] = useState("all");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState("all");
   const [billingForm, setBillingForm] = useState(getInitialBillingForm);
   const pendingCreateBillingScrollRef = useRef(null);
   const unbilledTransactionsRef = useRef(null);
@@ -951,18 +1767,35 @@ const SuperBilling = () => {
   const prevBoatIdRef = useRef(null);
   const selectedBillId = searchParams.get("bill") ?? "";
   const rawHighlightedBillId = getBillingHighlightId({ highlightedSearchResult, search: location.search });
+  const rawHighlightedPaymentId = getPaymentHighlightId({ highlightedSearchResult, search: location.search });
   const highlightToken = rawHighlightedBillId
     ? `${rawHighlightedBillId}|${location.search}|${highlightedSearchResult?.group || ""}`
+    : rawHighlightedPaymentId
+      ? `${rawHighlightedPaymentId}|${location.search}|${highlightedSearchResult?.group || ""}`
     : "";
   const [dismissedHighlightToken, setDismissedHighlightToken] = useState("");
   const highlightedBillId = dismissedHighlightToken === highlightToken ? "" : rawHighlightedBillId;
-  const [selectedBillPdfUrl, setSelectedBillPdfUrl] = useState("");
+  const highlightedPaymentId = dismissedHighlightToken === highlightToken ? "" : rawHighlightedPaymentId;
   const [selectedBillPdfLoading, setSelectedBillPdfLoading] = useState(false);
+  const [selectedBillPdfFile, setSelectedBillPdfFile] = useState(null);
+  const [selectedBillPdfReady, setSelectedBillPdfReady] = useState(false);
+  const selectedBillPrintFrameRef = useRef(null);
+  const [selectedBillSnapshot, setSelectedBillSnapshot] = useState(null);
   const [editingBillId, setEditingBillId] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const [submitMode, setSubmitMode] = useState(null);
   const [formError, setFormError] = useState("");
-  const [pageShellLoadedOnce, setPageShellLoadedOnce] = useState(false);
+  const [paymentModalBill, setPaymentModalBill] = useState(null);
+  const [paymentModalForm, setPaymentModalForm] = useState(getInitialPaymentModalForm);
+  const [paymentModalScope, setPaymentModalScope] = useState("single_bill");
+  const [paymentModalFieldErrors, setPaymentModalFieldErrors] = useState({});
+  const [paymentModalFormError, setPaymentModalFormError] = useState("");
+  const [showCreateBillingModal, setShowCreateBillingModal] = useState(false);
+  const [editingPayment, setEditingPayment] = useState(null);
+  const [detailPayment, setDetailPayment] = useState(null);
+  const [editPaymentForm, setEditPaymentForm] = useState({ official_receipt_no: "", remarks: "" });
+  const [editPaymentErrors, setEditPaymentErrors] = useState({});
+  const [showPayBillPrompt, setShowPayBillPrompt] = useState(false);
   const [isRefreshingUnbilledTransactions, setIsRefreshingUnbilledTransactions] = useState(false);
 
   const navigateBillingTab = React.useCallback((nextTab, options = {}) => {
@@ -977,8 +1810,9 @@ const SuperBilling = () => {
   }, [location.pathname, location.search, navigate]);
   const activeTabKey = BILLING_PATH_TABS[activeTab] ?? "records";
   const isRecordsTab = activeTabKey === "records";
-  const isCreateTab = activeTabKey === "create";
-  const breadcrumbLabel = isCreateTab ? "Create Billing" : "Billing";
+  const isPaymentsTab = activeTabKey === "payments";
+  const isCreateBillingActive = showCreateBillingModal;
+  const breadcrumbLabel = isPaymentsTab ? "Payments" : "Billing";
   const selectedBillingBoatId = String(billingForm.boat_id || "");
 
   const { data, isLoading, isFetching, isError, refetch } = useBillingDataQuery({
@@ -993,24 +1827,11 @@ const SuperBilling = () => {
   }, {
     enabled: isRecordsTab || Boolean(selectedBillId) || Boolean(highlightedBillId),
   });
-  const overviewQuery = useBillingDataQuery({
-    page: 1,
-    perPage: 1,
-    search: "",
-    status: "all",
-    period: "all",
-    boat: "all",
-    sort: "created_at_desc",
-    paginated: true,
-    includeBoats: false,
-  }, {
-    enabled: isCreateTab,
-  });
   const boatsQuery = useBillingBoatsQuery();
   const formLookupsQuery = useBillingFormLookupsQuery(
     { boatId: selectedBillingBoatId },
     {
-      enabled: isCreateTab && Boolean(selectedBillingBoatId),
+      enabled: isCreateBillingActive && Boolean(selectedBillingBoatId),
       placeholderData: undefined,
     },
   );
@@ -1023,7 +1844,7 @@ const SuperBilling = () => {
     includeBoats: false,
     compact: true,
   }, {
-    enabled: isCreateTab && Boolean(selectedBillingBoatId),
+    enabled: isCreateBillingActive && Boolean(selectedBillingBoatId),
     placeholderData: undefined,
   });
   const paymentsQuery = useBillingPaymentsQuery(
@@ -1032,6 +1853,25 @@ const SuperBilling = () => {
       enabled: Boolean(selectedBillId),
     },
   );
+  const paymentRecordsQuery = usePaymentsDataQuery(
+    {
+      page: currentPaymentPage,
+      perPage: PAGE_SIZE,
+      search: debouncedPaymentSearch,
+      period: paymentPeriodFilter,
+      status: paymentStatusFilter,
+      paginated: true,
+      includePayments: true,
+      includeFormData: false,
+      highlightPaymentId: highlightedPaymentId,
+    },
+    {
+      enabled: isPaymentsTab,
+    },
+  );
+  const paymentFormLookupsQuery = usePaymentFormLookupsQuery({
+    enabled: Boolean(paymentModalBill),
+  });
   const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
 
   const bills = data?.bills ?? [];
@@ -1047,9 +1887,42 @@ const SuperBilling = () => {
   const dockings = formLookupsQuery.data?.dockings ?? [];
   const banyeraTransactions = formLookupsQuery.data?.banyeraTransactions ?? [];
   const payments = paymentsQuery.data ?? [];
-  const overviewData = overviewQuery.data ?? data;
-  const billingStats = overviewData?.stats ?? { total_records: 0, today_records: 0 };
+  const paymentRecordsData = paymentRecordsQuery.data;
+  const paymentRecords = paymentRecordsData?.payments ?? [];
+  const paymentRecordsMeta = paymentRecordsData?.paymentsMeta ?? {
+    current_page: 1,
+    last_page: 1,
+    per_page: PAGE_SIZE,
+    total: 0,
+    from: 0,
+    to: 0,
+  };
+  const defaultBillingStats = { total_records: 0, total_payment_records: 0, today_records: 0, today_payments: 0 };
+  const billingStats = (
+    isPaymentsTab
+      ? paymentRecordsData?.stats
+      : data?.stats
+  ) ?? paymentRecordsData?.stats ?? data?.stats ?? defaultBillingStats;
   const billedHistoryBills = createFormBillsQuery.data?.bills ?? [];
+  const paymentableBills = useMemo(() => {
+    const records = paymentFormLookupsQuery.data?.paymentableBills ?? [];
+    if (!paymentModalBill?.bill_id) return records;
+
+    const hasModalBill = records.some((bill) => String(bill.bill_id) === String(paymentModalBill.bill_id));
+    if (hasModalBill) return records;
+
+    return [
+      {
+        ...paymentModalBill,
+        bill_reference: formatReferenceNumber(paymentModalBill.bill_reference_no),
+        amount_due: Number(paymentModalBill.total_amount || 0),
+        total_paid: 0,
+        balance: Number(paymentModalBill.balance ?? paymentModalBill.total_amount ?? 0),
+        transaction_summary: paymentModalBill.transaction_summary || "-",
+      },
+      ...records,
+    ];
+  }, [paymentFormLookupsQuery.data?.paymentableBills, paymentModalBill]);
   const isBoatBillingDataLoading =
     Boolean(selectedBillingBoatId) &&
     ((!formLookupsQuery.data && formLookupsQuery.isFetching) ||
@@ -1092,25 +1965,30 @@ const SuperBilling = () => {
   }, [debouncedSearch, periodFilter]);
 
   useEffect(() => {
-    if (!isCreateTab) return;
-    setSearchParams((currentParams) => {
-      const nextParams = new URLSearchParams(currentParams);
-      nextParams.delete("bill");
-      return nextParams;
-    });
-  }, [isCreateTab, setSearchParams]);
-
-  useEffect(() => {
     if (!selectedBillId) return;
     if (!isRecordsTab || location.pathname !== getBillingTabPath("records")) {
       navigateBillingTab("records", { replace: true, state: location.state });
     }
   }, [isRecordsTab, location.pathname, location.state, navigateBillingTab, selectedBillId]);
 
-  const openBillingStatement = (billId) => {
+  const openBillingStatement = (bill) => {
+    const billId = typeof bill === "object" ? bill?.bill_id : bill;
+    if (typeof bill === "object" && bill) {
+      setSelectedBillSnapshot(bill);
+    }
+
     setSearchParams((currentParams) => {
       const nextParams = new URLSearchParams(currentParams);
       nextParams.set("bill", String(billId));
+      return nextParams;
+    });
+  };
+
+  const closeBillingDetails = () => {
+    setSelectedBillSnapshot(null);
+    setSearchParams((currentParams) => {
+      const nextParams = new URLSearchParams(currentParams);
+      nextParams.delete("bill");
       return nextParams;
     });
   };
@@ -1151,17 +2029,57 @@ const SuperBilling = () => {
     });
   };
 
-  const warmPaymentsAndNavigate = (billId) => {
-    const paymentsFormLookupOptions = getPaymentFormLookupsQueryOptions();
+  const openPaymentModalForBill = (bill) => {
+    if (!bill?.bill_id) return;
+    const sourceBill = {
+      ...bill,
+      balance: Number(bill.balance ?? bill.total_amount ?? 0),
+      boat_name: bill.boat_name || boatMap[String(bill.boat_id)]?.boat_name || "",
+      payer_name: bill.payer_name || boatMap[String(bill.boat_id)]?.owner?.full_name || "",
+    };
+    setPaymentModalBill(sourceBill);
+    setPaymentModalForm(getInitialPaymentModalForm(sourceBill));
+    setPaymentModalScope("single_bill");
+    setPaymentModalFieldErrors({});
+    setPaymentModalFormError("");
+  };
 
-    queryClient.fetchQuery({
-      ...paymentsFormLookupOptions,
-      staleTime: 0,
-    });
+  const openRecordPaymentModal = () => {
+    if (isTransactionLocked) {
+      showBottomToast("error", "Transactions Locked", transactionLockMessage);
+      return;
+    }
 
-    navigate(
-      `/record-payment?bill_id=${encodeURIComponent(billId)}`,
-    );
+    setPaymentModalBill({});
+    setPaymentModalForm(getInitialPaymentModalForm());
+    setPaymentModalScope("single_bill");
+    setPaymentModalFieldErrors({});
+    setPaymentModalFormError("");
+  };
+
+  const openCreateBillingModal = () => {
+    if (isTransactionLocked) {
+      showBottomToast("error", "Transactions Locked", transactionLockMessage);
+      return;
+    }
+
+    setBillingForm(getInitialBillingForm());
+    setFieldErrors({});
+    setEditingBillId(null);
+    setFormError("");
+    setSubmitMode(null);
+    setShowCreateBillingModal(true);
+  };
+
+  const closeCreateBillingModal = () => {
+    if (isSaving) return;
+
+    setShowCreateBillingModal(false);
+    setBillingForm(getInitialBillingForm());
+    setFieldErrors({});
+    setEditingBillId(null);
+    setFormError("");
+    setSubmitMode(null);
   };
 
   const boatMap = useMemo(
@@ -1182,10 +2100,22 @@ const SuperBilling = () => {
         tone: "navy",
       },
       {
+        title: "Total Payment Records",
+        value: billingStats.total_payment_records,
+        icon: IoCashOutline,
+        tone: "green",
+      },
+      {
         title: "Today's Bill",
         value: billingStats.today_records,
         icon: IoCalendarOutline,
         tone: "amber",
+      },
+      {
+        title: "Today's Payment",
+        value: billingStats.today_payments,
+        icon: IoCashOutline,
+        tone: "green",
       },
     ];
   }, [billingStats]);
@@ -1198,14 +2128,21 @@ const SuperBilling = () => {
   const paginatedRecords = bills;
   const billsTotal = Number(billsMeta.total ?? 0);
   const hasBillsResponse = Boolean(data?.billsMeta);
+  const paymentRecordsTotalPages = Math.max(1, Number(paymentRecordsMeta.last_page || 1));
+  const safePaymentPage = Math.min(paymentRequestedPage, paymentRecordsTotalPages);
+  const paymentRecordsTotal = Number(paymentRecordsMeta.total ?? 0);
+  const hasPaymentRecordsResponse = Boolean(paymentRecordsData?.paymentsMeta);
   const showInitialSkeleton = !isError && isLoading && !data;
+  const showPaymentRecordsSkeleton = !paymentRecordsQuery.isError && paymentRecordsQuery.isLoading && !paymentRecordsData;
   const showBillsEmptyState = hasBillsResponse && billsTotal === 0;
-  const isCreateTabLoading = !overviewData && overviewQuery.isLoading;
-  const pageShellHasData = Boolean(data || overviewData);
-  const pageShellHasError = Boolean(isError || overviewQuery.isError);
-  const showPageShellSkeleton = !pageShellLoadedOnce && (isRecordsTab ? showInitialSkeleton : isCreateTabLoading);
+  const showPaymentRecordsEmptyState = hasPaymentRecordsResponse && paymentRecordsTotal === 0;
+  const isActiveTabLoading = isPaymentsTab ? showPaymentRecordsSkeleton : showInitialSkeleton;
+  const hasOverviewStats = Boolean(data?.stats || paymentRecordsData?.stats);
+  const showPageShellSkeleton = isActiveTabLoading && !hasOverviewStats;
   const hasActiveTableFilters =
     debouncedSearch || periodFilter !== "all";
+  const hasActivePaymentTableFilters =
+    debouncedPaymentSearch || paymentPeriodFilter !== "all" || paymentStatusFilter !== "all";
 
   const requestBillingPage = (pageOrUpdater) => {
     clearUniversalHighlight();
@@ -1223,14 +2160,19 @@ const SuperBilling = () => {
   };
 
   useEffect(() => {
-    if (pageShellHasData || pageShellHasError) {
-      setPageShellLoadedOnce(true);
-    }
-  }, [pageShellHasData, pageShellHasError]);
-
-  useEffect(() => {
     if (requestedPage > totalPages) setRequestedPage(totalPages);
   }, [requestedPage, totalPages]);
+
+  useEffect(() => {
+    const resolvedPage = Number(paymentRecordsMeta.current_page || 0);
+    if (highlightedPaymentId && resolvedPage && resolvedPage !== paymentRequestedPage) {
+      setPaymentRequestedPage(resolvedPage);
+    }
+  }, [highlightedPaymentId, paymentRecordsMeta.current_page, paymentRequestedPage]);
+
+  useEffect(() => {
+    if (paymentRequestedPage > paymentRecordsTotalPages) setPaymentRequestedPage(paymentRecordsTotalPages);
+  }, [paymentRequestedPage, paymentRecordsTotalPages]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -1256,9 +2198,42 @@ const SuperBilling = () => {
     [bills, editingBillId],
   );
 
+  const isActiveBillingLookupRecord = (record) => {
+    const status = String(record?.status ?? "").toLowerCase();
+    const isVoided = Boolean(record?.is_voided || record?.voided_at || status === "voided");
+    return !isVoided;
+  };
+
   const availableRecordsByType = useMemo(
     () => ({
-      docking: (dockings ?? []).map((record) => ({
+      docking: (dockings ?? [])
+        .filter(isActiveBillingLookupRecord)
+        .map((record) => ({
+          value: String(record.docking_id),
+          label: `${record.boat?.boat_name ?? "Unknown boat"} - ${formatDisplayDate(record.docking_date)}`,
+          amount: Number(record.docking_fee || 0),
+          boatId: String(record.boat_id ?? ""),
+          sortDate: String(record.docking_date || ""),
+          isBilled: Boolean(record.is_billed),
+        })),
+      banyera: (banyeraTransactions ?? [])
+        .filter(isActiveBillingLookupRecord)
+        .map((record) => ({
+          value: String(record.banyera_id),
+          label: `${record.boat?.boat_name ?? "Unknown boat"} - ${formatDisplayDate(record.transaction_date)}`,
+          amount: Number(record.total_fee || 0),
+          boatId: String(record.boat_id ?? ""),
+          sortDate: String(record.transaction_date || ""),
+          isBilled: Boolean(record.is_billed),
+        })),
+    }),
+    [banyeraTransactions, dockings],
+  );
+
+  const buildLookupRecordsByType = (lookups = {}) => ({
+    docking: (lookups.dockings ?? [])
+      .filter(isActiveBillingLookupRecord)
+      .map((record) => ({
         value: String(record.docking_id),
         label: `${record.boat?.boat_name ?? "Unknown boat"} - ${formatDisplayDate(record.docking_date)}`,
         amount: Number(record.docking_fee || 0),
@@ -1266,7 +2241,9 @@ const SuperBilling = () => {
         sortDate: String(record.docking_date || ""),
         isBilled: Boolean(record.is_billed),
       })),
-      banyera: (banyeraTransactions ?? []).map((record) => ({
+    banyera: (lookups.banyeraTransactions ?? [])
+      .filter(isActiveBillingLookupRecord)
+      .map((record) => ({
         value: String(record.banyera_id),
         label: `${record.boat?.boat_name ?? "Unknown boat"} - ${formatDisplayDate(record.transaction_date)}`,
         amount: Number(record.total_fee || 0),
@@ -1274,27 +2251,6 @@ const SuperBilling = () => {
         sortDate: String(record.transaction_date || ""),
         isBilled: Boolean(record.is_billed),
       })),
-    }),
-    [banyeraTransactions, dockings],
-  );
-
-  const buildLookupRecordsByType = (lookups = {}) => ({
-    docking: (lookups.dockings ?? []).map((record) => ({
-      value: String(record.docking_id),
-      label: `${record.boat?.boat_name ?? "Unknown boat"} - ${formatDisplayDate(record.docking_date)}`,
-      amount: Number(record.docking_fee || 0),
-      boatId: String(record.boat_id ?? ""),
-      sortDate: String(record.docking_date || ""),
-      isBilled: Boolean(record.is_billed),
-    })),
-    banyera: (lookups.banyeraTransactions ?? []).map((record) => ({
-      value: String(record.banyera_id),
-      label: `${record.boat?.boat_name ?? "Unknown boat"} - ${formatDisplayDate(record.transaction_date)}`,
-      amount: Number(record.total_fee || 0),
-      boatId: String(record.boat_id ?? ""),
-      sortDate: String(record.transaction_date || ""),
-      isBilled: Boolean(record.is_billed),
-    })),
   });
 
   const buildBilledRecordIds = (recordsByType = {}, activeEditingBillRecord = null) => {
@@ -1448,15 +2404,23 @@ const SuperBilling = () => {
     },
     onSuccess: async (createdBill, variables) => {
       void queryClient.invalidateQueries({ queryKey: ["billing-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["billing-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: ["billing-form-lookups"] });
 
       if (variables?.proceedToPayment && createdBill?.bill_id) {
+        const modalBill = {
+          ...createdBill,
+          boat_name: boatMap[String(createdBill.boat_id)]?.boat_name || "",
+          payer_name: boatMap[String(createdBill.boat_id)]?.owner?.full_name || "",
+        };
         setBillingForm(getInitialBillingForm());
         setFieldErrors({});
         setEditingBillId(null);
         setFormError("");
         setSubmitMode(null);
-        await warmPaymentsAndNavigate(createdBill.bill_id);
+        setShowCreateBillingModal(false);
+        openPaymentModalForBill(modalBill);
         return;
       }
 
@@ -1466,6 +2430,7 @@ const SuperBilling = () => {
       setEditingBillId(null);
       setFormError("");
       setSubmitMode(null);
+      setShowCreateBillingModal(false);
       navigateBillingTab("records", { replace: true });
     },
     onError: (error) => {
@@ -1494,15 +2459,23 @@ const SuperBilling = () => {
     },
     onSuccess: async (updatedBill, variables) => {
       void queryClient.invalidateQueries({ queryKey: ["billing-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["billing-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: ["billing-form-lookups"] });
 
       if (variables?.proceedToPayment) {
+        const modalBill = {
+          ...updatedBill,
+          bill_id: updatedBill?.bill_id ?? variables.id,
+          boat_name: boatMap[String(updatedBill?.boat_id ?? variables.payload?.boat_id)]?.boat_name || "",
+          payer_name: boatMap[String(updatedBill?.boat_id ?? variables.payload?.boat_id)]?.owner?.full_name || "",
+        };
         setBillingForm(getInitialBillingForm());
         setFieldErrors({});
         setEditingBillId(null);
         setFormError("");
         setSubmitMode(null);
-        await warmPaymentsAndNavigate(updatedBill?.bill_id ?? variables.id);
+        openPaymentModalForBill(modalBill);
         return;
       }
 
@@ -1531,6 +2504,350 @@ const SuperBilling = () => {
     },
   });
 
+  const createPaymentMutation = useMutation({
+    mutationFn: async (payload) => {
+      if (isTransactionLocked) {
+        throw new Error(transactionLockMessage);
+      }
+      const response = await api.post("/payments", payload, {
+        params: { minimal: 1 },
+      });
+      return response.data;
+    },
+    onSuccess: (response, variables) => {
+      const createdPaymentCount = Array.isArray(response?.payments) ? response.payments.length : 1;
+      const createdPaymentTotal = Array.isArray(response?.payments)
+        ? response.payments.reduce((sum, payment) => sum + Number(payment?.amount_paid || payment?.amount || 0), 0)
+        : Number(response?.payment?.amount_paid || response?.amount_paid || variables?.amount_paid || 0);
+      bumpBillingTodayPaymentStats(queryClient, variables?.payment_date, createdPaymentCount);
+      adjustTodaySystemCashReceived(queryClient, variables?.payment_date, createdPaymentTotal);
+      showAddedToast("Payment", "payment record");
+      setPaymentModalBill(null);
+      setPaymentModalForm(getInitialPaymentModalForm());
+      setPaymentModalFieldErrors({});
+      setPaymentModalFormError("");
+      void queryClient.invalidateQueries({ queryKey: ["billing-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["billing-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["billing-payments"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["payments-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["payments-form-lookups"], refetchType: "active" });
+      invalidateTodaySystemCashReceived(queryClient, variables?.payment_date);
+      navigateBillingTab("payments", { replace: true });
+    },
+    onError: (error) => {
+      const message = getRequestErrorMessage(error, "Unable to save the payment record.");
+      const responseErrors = error?.response?.data?.errors ?? {};
+      const nextFieldErrors = { ...responseErrors };
+      const amountPaidError = nextFieldErrors.amount_paid?.[0] || "";
+
+      if (nextFieldErrors.official_receipt_no?.[0] === "Official Receipt No. already exists.") {
+        delete nextFieldErrors.official_receipt_no;
+      }
+
+      setPaymentModalFieldErrors(nextFieldErrors);
+      setPaymentModalFormError(amountPaidError ? "" : message === "Official Receipt No. already exists." ? "" : message);
+      showBottomToast("error", "Save Failed", amountPaidError || message);
+    },
+  });
+
+  const updatePaymentMutation = useMutation({
+    mutationFn: async ({ id, payload }) => {
+      if (isTransactionLocked) {
+        throw new Error(transactionLockMessage);
+      }
+
+      const response = await api.put(`/payments/${id}`, payload, {
+        params: { minimal: 1 },
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      showUpdatedToast("Payment", "payment record");
+      setEditingPayment(null);
+      setEditPaymentForm({ official_receipt_no: "", remarks: "" });
+      setEditPaymentErrors({});
+      void queryClient.invalidateQueries({ queryKey: ["payments-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["billing-payments"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["billing-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["billing-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
+    },
+    onError: (error) => {
+      const responseErrors = error?.response?.data?.errors ?? {};
+      const nextErrors = {};
+
+      if (responseErrors.official_receipt_no?.[0]) {
+        nextErrors.official_receipt_no = responseErrors.official_receipt_no[0];
+      }
+
+      setEditPaymentErrors(nextErrors);
+      showBottomToast("error", "Save Failed", getRequestErrorMessage(error, "Unable to save the payment record."));
+    },
+  });
+
+  const closePaymentModal = () => {
+    if (createPaymentMutation.isPending) return;
+    setPaymentModalBill(null);
+    setPaymentModalForm(getInitialPaymentModalForm());
+    setPaymentModalScope("single_bill");
+    setPaymentModalFieldErrors({});
+    setPaymentModalFormError("");
+  };
+
+  const requestPaymentPage = (pageOrUpdater) => {
+    clearUniversalHighlight();
+
+    setPaymentRequestedPage((page) => {
+      const nextPage = typeof pageOrUpdater === "function" ? pageOrUpdater(page) : pageOrUpdater;
+      return Math.min(Math.max(1, Number(nextPage) || 1), paymentRecordsTotalPages);
+    });
+  };
+
+  const openEditPayment = (payment) => {
+    setEditingPayment(payment);
+    setEditPaymentForm({
+      official_receipt_no: normalizeOfficialReceiptNo(payment?.official_receipt_no || ""),
+      remarks: payment?.remarks || "",
+    });
+    setEditPaymentErrors({});
+  };
+
+  const closeEditPayment = () => {
+    if (updatePaymentMutation.isPending) return;
+    setEditingPayment(null);
+    setEditPaymentForm({ official_receipt_no: "", remarks: "" });
+    setEditPaymentErrors({});
+  };
+
+  const updateEditPaymentForm = (patch) => {
+    setEditPaymentForm((current) => ({ ...current, ...patch }));
+    setEditPaymentErrors((current) => {
+      const next = { ...current };
+      Object.keys(patch).forEach((key) => {
+        delete next[key];
+      });
+      return next;
+    });
+  };
+
+  const handleSavePaymentEdit = () => {
+    if (!editingPayment?.payment_id) return;
+
+    const officialReceiptNo = normalizeOfficialReceiptNo(editPaymentForm.official_receipt_no);
+    const officialReceiptError = validateOfficialReceiptNo(officialReceiptNo);
+
+    if (officialReceiptError) {
+      setEditPaymentErrors({ official_receipt_no: officialReceiptError });
+      return;
+    }
+
+    const payload = {
+      official_receipt_no: officialReceiptNo,
+      remarks: editPaymentForm.remarks || "",
+    };
+    const original = {
+      official_receipt_no: normalizeOfficialReceiptNo(editingPayment.official_receipt_no || ""),
+      remarks: editingPayment.remarks || "",
+    };
+
+    if (JSON.stringify(payload) === JSON.stringify(original)) {
+      showNoChangesToast();
+      return;
+    }
+
+    updatePaymentMutation.mutate({ id: editingPayment.payment_id, payload });
+  };
+
+  const updatePaymentModalForm = (patch) => {
+    setPaymentModalForm((current) => ({ ...current, ...patch }));
+    setPaymentModalFormError("");
+    setPaymentModalFieldErrors((current) => {
+      const next = { ...current };
+      Object.keys(patch).forEach((key) => {
+        delete next[key];
+      });
+      return next;
+    });
+  };
+
+  const getPaymentableBillDate = (bill) =>
+    String(bill?.bill_date || bill?.billing_date || bill?.created_at || "").slice(0, 10);
+
+  const handlePaymentModalScopeChange = (scope) => {
+    setPaymentModalScope(scope);
+    setPaymentModalFieldErrors({});
+    setPaymentModalFormError("");
+
+    if (scope === "single_bill") {
+      const selectedBill =
+        paymentableBills.find((bill) => String(bill.bill_id) === String(paymentModalForm.bill_id)) ||
+        paymentableBills.find((bill) => String(bill.bill_id) === String(paymentModalBill?.bill_id));
+      setPaymentModalForm((current) => ({
+        ...current,
+        bill_id: selectedBill ? String(selectedBill.bill_id) : "",
+        boat_id: selectedBill ? String(selectedBill.boat_id ?? "") : "",
+        bill_ids: [],
+        amount_paid: selectedBill ? String(Number(selectedBill.balance ?? selectedBill.total_amount ?? 0).toFixed(2)) : "",
+        date_from: "",
+        date_to: "",
+      }));
+      return;
+    }
+
+    const boatId = String(paymentModalForm.boat_id || paymentModalBill?.boat_id || "");
+    const selectedBillsForBoat = paymentableBills.filter((bill) => String(bill.boat_id ?? "") === boatId);
+    const selectedBillIds = paymentModalBill?.bill_id ? [String(paymentModalBill.bill_id)] : [];
+    const selectedBalance = selectedBillsForBoat
+      .filter((bill) => selectedBillIds.includes(String(bill.bill_id)))
+      .reduce((sum, bill) => sum + Number(bill.balance ?? bill.total_amount ?? 0), 0);
+
+    setPaymentModalForm((current) => ({
+      ...current,
+      bill_id: "",
+      boat_id: boatId,
+      bill_ids: selectedBillIds,
+      amount_paid: selectedBalance > 0 ? String(selectedBalance.toFixed(2)) : "",
+      date_from: "",
+      date_to: "",
+    }));
+  };
+
+  const handlePaymentModalBillChange = (billId) => {
+    const selectedBill = paymentableBills.find((bill) => String(bill.bill_id) === String(billId));
+    setPaymentModalForm((current) => ({
+      ...current,
+      bill_id: billId ?? "",
+      boat_id: selectedBill ? String(selectedBill.boat_id ?? "") : "",
+      bill_ids: [],
+      amount_paid: selectedBill ? String(Number(selectedBill.balance ?? selectedBill.total_amount ?? 0).toFixed(2)) : "",
+    }));
+    setPaymentModalFormError("");
+    setPaymentModalFieldErrors((current) => ({ ...current, bill_id: undefined, amount_paid: undefined }));
+  };
+
+  const handlePaymentModalBoatChange = (boatId) => {
+    setPaymentModalForm((current) => ({
+      ...current,
+      boat_id: boatId ?? "",
+      bill_id: "",
+      bill_ids: [],
+      amount_paid: "",
+      date_from: "",
+      date_to: "",
+    }));
+    setPaymentModalFormError("");
+    setPaymentModalFieldErrors((current) => ({ ...current, boat_id: undefined, bill_ids: undefined, amount_paid: undefined }));
+  };
+
+  const handlePaymentModalBillToggle = (billId, visibleBills = []) => {
+    const nextBillId = String(billId);
+    setPaymentModalForm((current) => {
+      const nextBillIds = current.bill_ids.includes(nextBillId)
+        ? current.bill_ids.filter((id) => id !== nextBillId)
+        : [...current.bill_ids, nextBillId];
+      const nextSelectedBills = visibleBills.filter((bill) => nextBillIds.includes(String(bill.bill_id)));
+      const nextAmount = nextSelectedBills.reduce((sum, bill) => sum + Number(bill.balance ?? bill.total_amount ?? 0), 0);
+
+      return {
+        ...current,
+        bill_ids: nextBillIds,
+        amount_paid: nextBillIds.length > 0 ? String(nextAmount.toFixed(2)) : "",
+      };
+    });
+    setPaymentModalFormError("");
+    setPaymentModalFieldErrors((current) => ({ ...current, bill_ids: undefined, amount_paid: undefined }));
+  };
+
+  const handlePaymentModalSelectAllBills = (visibleBills = [], allSelected = false) => {
+    const nextBillIds = allSelected ? [] : visibleBills.map((bill) => String(bill.bill_id));
+    const nextAmount = visibleBills
+      .filter((bill) => nextBillIds.includes(String(bill.bill_id)))
+      .reduce((sum, bill) => sum + Number(bill.balance ?? bill.total_amount ?? 0), 0);
+
+    setPaymentModalForm((current) => ({
+      ...current,
+      bill_ids: nextBillIds,
+      amount_paid: nextBillIds.length > 0 ? String(nextAmount.toFixed(2)) : "",
+    }));
+    setPaymentModalFormError("");
+    setPaymentModalFieldErrors((current) => ({ ...current, bill_ids: undefined, amount_paid: undefined }));
+  };
+
+  const handlePaymentModalShowAllBills = (visibleBills = []) => {
+    const dateValues = visibleBills.map(getPaymentableBillDate).filter(Boolean).sort();
+    setPaymentModalForm((current) => ({
+      ...current,
+      date_from: dateValues[0] ?? "",
+      date_to: dateValues[dateValues.length - 1] ?? "",
+    }));
+  };
+
+  const handlePaymentModalDateFilterChange = (field, value) => {
+    setPaymentModalForm((current) => ({
+      ...current,
+      [field]: normalizeDateValue(value),
+      bill_ids: [],
+      amount_paid: "",
+    }));
+    setPaymentModalFieldErrors((current) => ({ ...current, bill_ids: undefined, amount_paid: undefined }));
+  };
+
+  const handleCreatePaymentFromModal = () => {
+    if (isTransactionLocked) {
+      showBottomToast("error", "Transactions Locked", transactionLockMessage);
+      return;
+    }
+
+    const nextErrors = {};
+    const officialReceiptError = validateOfficialReceiptNo(paymentModalForm.official_receipt_no);
+    const amountPaid = Number(paymentModalForm.amount_paid);
+    const selectedPaymentBill = paymentableBills.find((bill) => String(bill.bill_id) === String(paymentModalForm.bill_id));
+    const selectedPaymentBills = paymentableBills.filter((bill) => paymentModalForm.bill_ids.includes(String(bill.bill_id)));
+    const billBalance = paymentModalScope === "selected_bills"
+      ? selectedPaymentBills.reduce((sum, bill) => sum + Number(bill.balance ?? bill.total_amount ?? 0), 0)
+      : Number(selectedPaymentBill?.balance ?? paymentModalBill?.balance ?? paymentModalBill?.total_amount ?? 0);
+
+    if (paymentModalScope === "single_bill") {
+      if (!selectedPaymentBill) nextErrors.bill_id = ["Bill reference is required."];
+    } else {
+      if (!paymentModalForm.boat_id) nextErrors.boat_id = ["Boat name is required."];
+      if (paymentModalForm.bill_ids.length === 0) nextErrors.bill_ids = ["Select at least one bill."];
+    }
+    if (officialReceiptError) nextErrors.official_receipt_no = [officialReceiptError];
+    if (!paymentModalForm.payment_date) {
+      nextErrors.payment_date = ["Payment date is required."];
+    } else if (paymentModalForm.payment_date > getTodayManilaDate()) {
+      nextErrors.payment_date = ["Payment date cannot be in the future."];
+    }
+    if (!paymentModalForm.amount_paid) {
+      nextErrors.amount_paid = ["Amount is required."];
+    } else if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
+      nextErrors.amount_paid = ["Amount must be greater than zero."];
+    } else if (billBalance > 0 && amountPaid - billBalance > 0.009) {
+      nextErrors.amount_paid = ["Amount paid cannot exceed the bill balance."];
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setPaymentModalFieldErrors(nextErrors);
+      setPaymentModalFormError("");
+      return;
+    }
+
+    setPaymentModalFieldErrors({});
+    setPaymentModalFormError("");
+    createPaymentMutation.mutate({
+      payment_scope: paymentModalScope,
+      bill_id: paymentModalScope === "single_bill" ? Number(paymentModalForm.bill_id) : undefined,
+      bill_ids: paymentModalScope === "selected_bills" ? paymentModalForm.bill_ids.map((billId) => Number(billId)) : undefined,
+      payment_method: paymentModalForm.payment_method || "cash",
+      official_receipt_no: normalizeOfficialReceiptNo(paymentModalForm.official_receipt_no),
+      payment_date: paymentModalForm.payment_date,
+      amount_paid: amountPaid,
+      remarks: paymentModalForm.remarks || null,
+    });
+  };
+
   const previewBoat = boatMap[billingForm.boat_id];
   const billedTransactionsHistory = useMemo(() => {
     if (!billingForm.boat_id) return [];
@@ -1551,12 +2868,28 @@ const SuperBilling = () => {
       );
   }, [billedHistoryBills, billingForm.boat_id]);
 
-  const selectedBillRecord = useMemo(
+  const currentSelectedBillRecord = useMemo(
     () =>
       bills.find((bill) => String(bill.bill_id) === String(selectedBillId)) ??
       null,
     [bills, selectedBillId],
   );
+  const selectedBillRecord =
+    currentSelectedBillRecord ??
+    (String(selectedBillSnapshot?.bill_id ?? "") === String(selectedBillId)
+      ? selectedBillSnapshot
+      : null);
+
+  useEffect(() => {
+    if (!selectedBillId) {
+      setSelectedBillSnapshot(null);
+      return;
+    }
+
+    if (currentSelectedBillRecord) {
+      setSelectedBillSnapshot(currentSelectedBillRecord);
+    }
+  }, [currentSelectedBillRecord, selectedBillId]);
   const selectedBillPayments = useMemo(
     () =>
       payments.filter(
@@ -1577,7 +2910,7 @@ const SuperBilling = () => {
 
         return {
           charge_key: `charge-${selectedBillRecord.bill_id}-${transactionType}-${index}`,
-          date: getBillItemDisplayDate(item, selectedBillRecord.created_at),
+          date: getBillItemDisplayDate(item),
           type: feeLabel,
           description: `${feeLabel} Fee`,
           amount: Number(item.amount || 0),
@@ -1625,18 +2958,14 @@ const SuperBilling = () => {
     }
     return { value: "unpaid", label: "Unpaid" };
   }, [selectedBillBalanceDue, selectedBillRecord, selectedBillTotalPaid]);
-  const previewTotal = useMemo(
-    () =>
-      billingForm.items.reduce(
-        (sum, item) => sum + Number(item.amount || 0),
-        0,
-      ),
-    [billingForm.items],
-  );
 
   useEffect(() => {
-    if (!selectedBillRecord) {
-      setSelectedBillPdfUrl("");
+    if (!selectedBillRecord || !isRecordsTab) {
+      setSelectedBillPdfFile((current) => {
+        if (current?.url) URL.revokeObjectURL(current.url);
+        return null;
+      });
+      setSelectedBillPdfReady(false);
       setSelectedBillPdfLoading(false);
       return undefined;
     }
@@ -1644,8 +2973,14 @@ const SuperBilling = () => {
     let isActive = true;
     let nextUrl = "";
 
-    const loadPdf = async () => {
-      if (isActive) setSelectedBillPdfLoading(true);
+    setSelectedBillPdfFile((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
+    setSelectedBillPdfReady(false);
+
+    const preloadBillingStatement = async () => {
+      setSelectedBillPdfLoading(true);
       try {
         const pdfBytes = await buildBillingStatementPdf({
           bill: selectedBillRecord,
@@ -1658,36 +2993,46 @@ const SuperBilling = () => {
 
         const nextData =
           pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
-        const reference =
-          formatReferenceNumber(selectedBillRecord?.bill_reference_no) ||
-          "billing-statement";
-        const pdfFile = new File([nextData], `${reference}.pdf`, {
+        const filename = getBillingStatementFilename(selectedBillRecord);
+        const pdfFile = new File([nextData], filename, {
           type: "application/pdf",
         });
+
         nextUrl = URL.createObjectURL(pdfFile);
-        setSelectedBillPdfUrl(nextUrl);
+        setSelectedBillPdfFile({
+          url: nextUrl,
+          filename,
+        });
       } catch (error) {
-        console.error("Failed to generate billing statement PDF", error);
-        if (isActive) {
-          setSelectedBillPdfUrl("");
-        }
+        console.error("Failed to preload billing statement PDF", error);
+        if (isActive) setSelectedBillPdfFile(null);
       } finally {
         if (isActive) setSelectedBillPdfLoading(false);
       }
     };
 
-    loadPdf();
+    preloadBillingStatement();
 
     return () => {
       isActive = false;
       if (nextUrl) URL.revokeObjectURL(nextUrl);
     };
   }, [
+    isRecordsTab,
     selectedBillChargeItems,
     selectedBillPeriod,
     selectedBillRecord,
     selectedBillStatus.label,
   ]);
+
+  const previewTotal = useMemo(
+    () =>
+      billingForm.items.reduce(
+        (sum, item) => sum + Number(item.amount || 0),
+        0,
+      ),
+    [billingForm.items],
+  );
 
   const updateBillingItem = (index, patch) => {
     setBillingForm((current) => ({
@@ -1724,8 +3069,11 @@ const SuperBilling = () => {
   };
 
   const handleRefreshUnbilledTransactions = async () => {
-    if (!isCreateTab) return;
+    if (!isCreateBillingActive) return;
 
+    setFormError("");
+    setFieldErrors((current) => ({ ...current, boat_id: "" }));
+    setSubmitMode(null);
     setIsRefreshingUnbilledTransactions(true);
 
     try {
@@ -1801,14 +3149,14 @@ const SuperBilling = () => {
   };
 
   useEffect(() => {
-    if (!isCreateTab || !billingForm.boat_id) return;
+    if (!isCreateBillingActive || !billingForm.boat_id) return;
 
     const sectionRef = pendingCreateBillingScrollRef.current;
     if (!sectionRef) return;
 
     pendingCreateBillingScrollRef.current = null;
     showCreateBillingSection(sectionRef);
-  }, [isCreateTab, billingForm.boat_id]);
+  }, [isCreateBillingActive, billingForm.boat_id]);
 
   const handleDateRangeChange = (field, value) => {
     showUnbilledTransactions();
@@ -1846,7 +3194,7 @@ const SuperBilling = () => {
   };
 
   useEffect(() => {
-    if (!isCreateTab || editingBillId || !billingForm.boat_id) return;
+    if (!isCreateBillingActive || editingBillId || !billingForm.boat_id) return;
 
     const boatIdChanged = prevBoatIdRef.current !== billingForm.boat_id;
     prevBoatIdRef.current = billingForm.boat_id;
@@ -1886,7 +3234,7 @@ const SuperBilling = () => {
       console.error("Error updating billing form items:", error);
     }
   }, [
-    isCreateTab,
+    isCreateBillingActive,
     billingForm.boat_id,
     billingForm.date_from,
     billingForm.date_to,
@@ -1994,13 +3342,67 @@ const SuperBilling = () => {
     setSubmitMode(null);
   };
 
-  const handlePrintBillingStatement = () => {
-    printPdfFile(selectedBillPdfUrl);
+  const buildSelectedBillingStatementFile = async () => {
+    if (!selectedBillRecord) return null;
+
+    setSelectedBillPdfLoading(true);
+    try {
+      const pdfBytes = await buildBillingStatementPdf({
+        bill: selectedBillRecord,
+        chargeItems: selectedBillChargeItems,
+        billPeriod: selectedBillPeriod,
+        statusLabel: selectedBillStatus.label,
+      });
+      const nextData =
+        pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
+      const filename = getBillingStatementFilename(selectedBillRecord);
+      const pdfFile = new File([nextData], filename, {
+        type: "application/pdf",
+      });
+
+      return {
+        url: URL.createObjectURL(pdfFile),
+        filename,
+      };
+    } catch (error) {
+      console.error("Failed to generate billing statement PDF", error);
+      showBottomToast(
+        "error",
+        "PDF Error",
+        "Unable to generate the billing statement.",
+      );
+      return null;
+    } finally {
+      setSelectedBillPdfLoading(false);
+    }
   };
 
-  const handleDownloadBillingStatement = () => {
-    const reference = formatReferenceNumber(selectedBillRecord?.bill_reference_no) || "billing-statement";
-    downloadPdfFile(selectedBillPdfUrl, `${reference}.pdf`);
+  const handlePrintBillingStatement = async () => {
+    const pdfFile = selectedBillPdfFile ?? await buildSelectedBillingStatementFile();
+    if (!pdfFile) return;
+
+    const printedFromPreloadedFrame =
+      selectedBillPdfFile &&
+      selectedBillPdfReady &&
+      printPreloadedPdfFrame(selectedBillPrintFrameRef.current);
+
+    if (!printedFromPreloadedFrame) {
+      printPdfFile(pdfFile.url);
+    }
+
+    if (!selectedBillPdfFile) {
+      window.setTimeout(() => URL.revokeObjectURL(pdfFile.url), 30000);
+    }
+  };
+
+  const handleDownloadBillingStatement = async () => {
+    const pdfFile = selectedBillPdfFile ?? await buildSelectedBillingStatementFile();
+    if (!pdfFile) return;
+
+    downloadPdfFile(pdfFile.url, pdfFile.filename);
+    if (!selectedBillPdfFile) {
+      URL.revokeObjectURL(pdfFile.url);
+    }
   };
 
   const submitBill = (proceedToPayment = false) => {
@@ -2057,15 +3459,20 @@ const SuperBilling = () => {
   };
 
   const handleSaveBill = () => {
+    setShowPayBillPrompt(true);
+  };
+
+  const handleGenerateBillOnly = () => {
+    setShowPayBillPrompt(false);
     submitBill(false);
   };
 
-  const handleProceedToPayment = () => {
+  const handleGenerateBillAndPay = () => {
+    setShowPayBillPrompt(false);
     submitBill(true);
   };
 
   const isSaving = createMutation.isPending || updateMutation.isPending;
-  const isProceedingToPayment = isSaving && submitMode === "payment";
   const isGeneratingBill = isSaving && submitMode === "generate";
 
   return (
@@ -2271,81 +3678,43 @@ const SuperBilling = () => {
 
           <main className="flex-1 overflow-y-auto bg-white px-6 py-6 xl:px-8">
             <div className="mx-auto w-full max-w-[1440px]">
-              {!selectedBillRecord ? (
-                <>
-                  <div className="mb-5 flex items-center justify-between">
-                    <TitlePage title="Billing" subtitle="Manage billing records and create billing entries." loading={showPageShellSkeleton} />
-                    <Breadcrumbs items={[{ label: "Dashboard", to: "/dashboard" }, { label: breadcrumbLabel }]} fontFamily={FONT} loading={showPageShellSkeleton} />
-                  </div>
+              <div className="mb-5 flex items-center justify-between">
+                <TitlePage title="Billing" subtitle="Manage billing records and create billing entries." loading={showPageShellSkeleton} />
+                <Breadcrumbs items={[{ label: "Dashboard", to: "/dashboard" }, { label: breadcrumbLabel }]} fontFamily={FONT} loading={showPageShellSkeleton} />
+              </div>
 
-                  <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2">
-                    {overviewCards.map((card) => (
-                      <OverviewCard
-                        key={card.title}
-                        title={card.title}
-                        value={card.value}
-                        icon={card.icon}
-                        tone={card.tone}
-                        loading={showPageShellSkeleton}
-                      />
-                    ))}
-                  </div>
-
-                </>
-              ) : null}
+              <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {overviewCards.map((card) => (
+                  <OverviewCard
+                    key={card.title}
+                    title={card.title}
+                    value={card.value}
+                    icon={card.icon}
+                    tone={card.tone}
+                    loading={showPageShellSkeleton}
+                  />
+                ))}
+              </div>
               
               <Tabs
                 tabs={TABS.map((tab) => ({ key: tab.value, label: tab.label, icon: tab.icon }))}
                 activeKey={activeTab}
                 onTabChange={navigateBillingTab}
                 fontFamily={FONT}
-                className={!selectedBillRecord ? "mb-5" : ""}
+                className="mb-5"
                 loading={showPageShellSkeleton}
-                rightContent={isCreateTab ? (
-                  showPageShellSkeleton ? (
-                    <div
-                      aria-hidden="true"
-                      className="h-[38px] w-[96px] animate-pulse rounded-[10px] border border-slate-200 bg-slate-100"
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      aria-label="Refresh"
-                      onClick={handleRefreshUnbilledTransactions}
-                      disabled={isRefreshingUnbilledTransactions}
-                      className="flex items-center gap-2 rounded-[10px] border border-slate-200 bg-white px-3 py-2 text-[13px] font-normal text-slate-600 transition hover:border-slate-300 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      <IoRefreshOutline className="text-[15px]" />
-                      <span>Refresh</span>
-                    </button>
-                  )
+                rightContent={isPaymentsTab ? (
+                  <Legend items={PAYMENT_STATUS_LEGEND} loading={showPageShellSkeleton} />
                 ) : null}
               >
 
               {isRecordsTab ? (
-                selectedBillRecord ? (
-                  <div className="fixed inset-0 z-[1200] bg-white">
-                    {selectedBillPdfLoading ? (
-                      <div className="flex h-screen items-center justify-center px-6 text-center text-[13px] text-slate-500">
-                        Generating PDF preview...
-                      </div>
-                    ) : (
-                      <iframe
-                        key={selectedBillPdfUrl}
-                        src={selectedBillPdfUrl}
-                        title="Billing Statement PDF"
-                        className="block h-screen w-full border-0"
-                        style={{ backgroundColor: "#f8fafc" }}
-                      />
-                    )}
-                  </div>
-                ) : (
-                  <>
+                <>
                     <TableCard
                       title="Billing Records"
                       subtitle="All billing records in the system."
                       loading={showInitialSkeleton}
-                      headerActionsSkeletonCount={2}
+                      headerActionsSkeletonCount={3}
                       className=""
                       bodyClassName="overflow-x-auto"
                       footerClassName="flex items-center justify-between"
@@ -2386,6 +3755,16 @@ const SuperBilling = () => {
                             }}
                             options={PERIOD_FILTER_OPTIONS}
                           />
+                          <button
+                            type="button"
+                            onClick={openCreateBillingModal}
+                            disabled={isTransactionLocked}
+                            className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:hover:bg-[#1a1f36]"
+                            style={{ fontFamily: FONT, opacity: isTransactionLocked ? 0.55 : 1 }}
+                          >
+                            <IoAddOutline className="text-[16px]" />
+                            <span>Create Billing</span>
+                          </button>
                         </>
                       }
                       pagination={{
@@ -2409,7 +3788,7 @@ const SuperBilling = () => {
                             <TH>Boat Owner</TH>
                             <TH>Boat Type</TH>
                             <TH>Transactions</TH>
-                            <TH>Date</TH>
+                            <TH>Billing Date</TH>
                             <TH>
                               <div className="text-right">Amount (₱)</div>
                             </TH>
@@ -2469,7 +3848,7 @@ const SuperBilling = () => {
                               <tr
                                 key={record.bill_id}
                                 onClick={() =>
-                                  openBillingStatement(record.bill_id)
+                                  openBillingStatement(record)
                                 }
                                 className={`cursor-pointer transition-colors ${highlightedBillId ? "table-row-plain" : index % 2 === 0 ? "table-row-even" : "table-row-odd"} ${isHighlighted ? "universal-search-highlight" : ""}`.trim()}
                                 style={{
@@ -2557,455 +3936,614 @@ const SuperBilling = () => {
 
                     </TableCard>
                   </>
-                )
-              ) : (
-                <div className="border border-slate-200 bg-white p-5">
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 xl:items-stretch">
-                      <Card
-                        className="flex h-full flex-col"
-                        bodyClassName="flex-1"
-                        icon={IoBoatOutline}
-                        title="BOAT INFORMATION"
-                        subtitle="Choose the boat and billing period for this entry."
-                        loading={isCreateTabLoading}
-                        skeletonLayout={[
-                          { type: "fields", count: 5, columns: 2, spans: [2, 1, 1, 1, 1] },
-                        ]}
-                      >
-                        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                          <div className="xl:col-span-2">
-                            <div>
-                              <Label required>Boat Name</Label>
-                              <SelectField
-                                value={billingForm.boat_id || undefined}
-                                onChange={handleBoatChange}
-                                placeholder="Select boat name"
-                                error={Boolean(fieldErrors.boat_id)}
-                                options={boats.map((boat) => ({
-                                  value: String(boat.boat_id),
-                                  label: `${boat.boat_name}`,
-                                }))}
-                              />
-                            </div>
-                            {fieldErrors.boat_id ? <ErrorMessage>{fieldErrors.boat_id}</ErrorMessage> : null}
-                          </div>
-
-                          <div>
-                            <Label>Boat Owner</Label>
-                            <Input
-                              value={previewBoat?.owner?.full_name || ""}
-                              readOnly
-                            />
-                          </div>
-
-                          <div>
-                            <Label>Boat Type</Label>
-                            <Input
-                              value={
-                                previewBoat?.boat_type?.type_name ||
-                                previewBoat?.boatType?.type_name ||
-                                ""
-                              }
-                              readOnly
-                            />
-                          </div>
-
-                          <div>
-                            <div
-                              className="mb-2 flex min-h-[20px] items-center justify-between gap-3"
-                              onClickCapture={showUnbilledTransactions}
-                            >
-                              <p
-                                className="m-0 text-[11px] font-semibold uppercase"
-                                style={{ color: "#6F6F82", fontFamily: FONT }}
-                              >
-                                From Date
-                              </p>
-                              <span className="block h-[18px] w-[52px]" aria-hidden="true" />
-                            </div>
-                            <div onClickCapture={showUnbilledTransactions}>
-                              <DatePicker
-                                value={billingForm.date_from || undefined}
-                                onChange={(_, currentDateString) =>
-                                  handleDateRangeChange("date_from", currentDateString)
-                                }
-                                placeholder="Select a date to filter"
-                                options={{ useFiscalYearDefault: false }}
-                                containerClassName="w-full"
-                                inputClassName="rounded-[10px] border-slate-200 bg-white text-[13px] text-[#1a1f36] focus:border-[#4096ff] focus:ring-0"
-                              />
-                            </div>
-                          </div>
-
-                          <div>
-                            <div
-                              className="mb-2 flex min-h-[20px] items-center justify-between gap-3"
-                              onClickCapture={showUnbilledTransactions}
-                            >
-                              <p
-                                className="m-0 text-[11px] font-semibold uppercase"
-                                style={{ color: "#6F6F82", fontFamily: FONT }}
-                              >
-                                To Date
-                              </p>
-                              <button
-                                type="button"
-                                onClick={handleShowAll}
-                                className="border-none bg-transparent p-0 text-[12px] font-semibold text-blue-600 transition-colors hover:text-blue-700"
-                                style={{ fontFamily: FONT }}
-                              >
-                                Show All
-                              </button>
-                            </div>
-                            <div onClickCapture={showUnbilledTransactions}>
-                              <DatePicker
-                                value={billingForm.date_to || undefined}
-                                onChange={(_, currentDateString) =>
-                                  handleDateRangeChange("date_to", currentDateString)
-                                }
-                                placeholder="Select a date to filter"
-                                options={{ useFiscalYearDefault: false }}
-                                containerClassName="w-full"
-                                inputClassName="rounded-[10px] border-slate-200 bg-white text-[13px] text-[#1a1f36] focus:border-[#4096ff] focus:ring-0"
-                              />
-                            </div>
-                          </div>
-
-                        </div>
-                      </Card>
-                    
-                      <div ref={unbilledTransactionsRef}>
-                        <Card
-                          className="flex h-full flex-col"
-                          bodyClassName="flex-1"
-                          icon={IoReceiptOutline}
-                          title="UNBILLED TRANSACTIONS"
-                          subtitle="Review all unpaid transactions pulled from the selected boat."
-                          loading={Boolean(
-                            billingForm.boat_id &&
-                              (isCreateTabLoading || isBoatBillingDataLoading || isRefreshingUnbilledTransactions),
-                          )}
-                          skeletonLayout={[
-                            { type: "table", columns: 3, rows: 4 },
-                          ]}
-                        >
-                        {!billingForm.boat_id ? (
-                          <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
-                            Select a boat to view unbilled transactions.
-                          </div>
-                        ) : billingForm.items.every(
-                            (item) => !item.record_id,
-                          ) ? (
-                          <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
-                            <span>
-                              No unbilled transactions found for the selected boat
-                              and date range.
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="rounded-[10px] border border-slate-200 bg-slate-50/60 p-3">
-                            <div
-                              className="mb-2 grid gap-2 px-1 pr-3"
-                              style={{
-                                gridTemplateColumns:
-                                  "minmax(160px,1fr) minmax(160px,0.9fr) minmax(140px,0.8fr)",
-                              }}
-                            >
-                              <p
-                                className="m-0 text-[11px] font-semibold uppercase tracking-wider"
-                                style={{ color: "#6F6F82", fontFamily: FONT }}
-                              >
-                                Type
-                              </p>
-                              <p
-                                className="m-0 text-[11px] font-semibold uppercase tracking-wider"
-                                style={{ color: "#6F6F82", fontFamily: FONT }}
-                              >
-                                Date
-                              </p>
-                              <p
-                                className="m-0 text-[11px] font-semibold uppercase tracking-wider"
-                                style={{ color: "#6F6F82", fontFamily: FONT }}
-                              >
-                                Amount (₱)
-                              </p>
-                            </div>
-
-                            <div
-                              className="max-h-[220px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
-                              style={{ scrollbarWidth: "thin", scrollbarColor: "#94a3b8 transparent" }}
-                            >
-                              {billingForm.items.map((item, index) => {
-                                const records = (
-                                  availableRecordsByType[item.transaction_type] ??
-                                  []
-                                ).filter((record) => {
-                                  if (!billingForm.boat_id) return true;
-                                  return record.boatId === billingForm.boat_id;
-                                });
-
-                                const typeLabel =
-                                  TRANSACTION_TYPE_OPTIONS.find(
-                                    (option) =>
-                                      option.value === item.transaction_type,
-                                  )?.label || "";
-                                const recordDate =
-                                  formatLongDisplayDate(
-                                    records.find(
-                                      (record) =>
-                                        String(record.value) ===
-                                        String(item.record_id),
-                                    )?.sortDate,
-                                  ) || "";
-
-                                return (
-                                  <div
-                                    key={`${item.transaction_type}-${index}`}
-                                    className="mb-2 grid items-start gap-2 pr-3 last:mb-0"
-                                    style={{
-                                      gridTemplateColumns:
-                                        "minmax(160px,1fr) minmax(160px,0.9fr) minmax(140px,0.8fr)",
-                                    }}
-                                  >
-                                    <input
-                                      value={typeLabel}
-                                      disabled
-                                      readOnly
-                                      className="h-[46px] rounded-[10px] border border-slate-200 bg-slate-50 px-3 text-[12px] font-medium text-[#1a1f36] opacity-100 outline-none"
-                                      placeholder=""
-                                    />
-                                    <input
-                                      value={recordDate}
-                                      disabled
-                                      readOnly
-                                      className="h-[46px] rounded-[10px] border border-slate-200 bg-slate-50 px-3 text-[12px] font-medium text-[#1a1f36] opacity-100 outline-none"
-                                      placeholder=""
-                                    />
-                                    <input
-                                      value={item.amount}
-                                      disabled
-                                      readOnly
-                                      className="h-[46px] rounded-[10px] border border-slate-200 bg-slate-50 px-3 text-[12px] font-medium text-[#1a1f36] opacity-100 outline-none"
-                                      inputMode="decimal"
-                                      placeholder=""
-                                    />
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                        {formError ? <ErrorMessage>{formError}</ErrorMessage> : null}
-                        </Card>
-                      </div>
-                    </div>
-
-
-                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 xl:items-stretch">
-                      <div ref={billedTransactionsHistoryRef}>
-                        <Card
-                          className="flex h-full flex-col"
-                          bodyClassName="flex-1"
-                          icon={IoDocumentTextOutline}
-                          title="BILLED TRANSACTIONS HISTORY"
-                          subtitle="Check previous billing references already recorded for this boat."
-                          loading={isCreateTabLoading}
-                          skeletonLayout={[
-                            { type: "table", columns: 3, rows: 4 },
-                          ]}
-                        >
-                          {!billingForm.boat_id ? (
-                            <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
-                              Select a boat to view billed transaction history.
-                            </div>
-                          ) : isCreateTabLoading || isBoatBillingDataLoading ? (
-                            <div className="rounded-[10px] border border-slate-200 bg-slate-50/60 p-3">
-                              <div
-                                className="mb-2 grid gap-2 px-1 pr-3"
-                                style={{
-                                  gridTemplateColumns:
-                                    "minmax(160px,1fr) minmax(160px,0.9fr) minmax(140px,0.8fr)",
-                                }}
-                              >
-                                {["Reference", "Date", "Amount (₱)"].map((label) => (
-                                  <p
-                                    key={label}
-                                    className="m-0 text-[11px] font-semibold uppercase tracking-wider"
-                                    style={{ color: "#6F6F82", fontFamily: FONT }}
-                                  >
-                                    {label}
-                                  </p>
-                                ))}
-                              </div>
-                              <div className="space-y-2 pr-1">
-                                {Array.from({ length: 4 }).map((_, index) => (
-                                  <div
-                                    key={index}
-                                    className="grid animate-pulse items-start gap-2 pr-3"
-                                    style={{
-                                      gridTemplateColumns:
-                                        "minmax(160px,1fr) minmax(160px,0.9fr) minmax(140px,0.8fr)",
-                                    }}
-                                  >
-                                    <div className="h-[46px] rounded-[10px] border border-slate-200 bg-slate-100" />
-                                    <div className="h-[46px] rounded-[10px] border border-slate-200 bg-slate-100" />
-                                    <div className="h-[46px] rounded-[10px] border border-slate-200 bg-slate-100" />
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ) : billedTransactionsHistory.length === 0 ? (
-                            <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
-                              No billed transactions found for this boat.
-                            </div>
-                          ) : (
-                            <div className="rounded-[10px] border border-slate-200 bg-slate-50/60 p-3">
-                              <div
-                                className="mb-2 grid gap-2 px-1 pr-3"
-                                style={{
-                                  gridTemplateColumns:
-                                    "minmax(160px,1fr) minmax(160px,0.9fr) minmax(140px,0.8fr)",
-                                }}
-                              >
-                                <p
-                                  className="m-0 text-[11px] font-semibold uppercase tracking-wider"
-                                  style={{ color: "#6F6F82", fontFamily: FONT }}
-                                >
-                                  Reference
-                                </p>
-                                <p
-                                  className="m-0 text-[11px] font-semibold uppercase tracking-wider"
-                                  style={{ color: "#6F6F82", fontFamily: FONT }}
-                                >
-                                  Date
-                                </p>
-                                <p
-                                  className="m-0 text-[11px] font-semibold uppercase tracking-wider"
-                                  style={{ color: "#6F6F82", fontFamily: FONT }}
-                                >
-                                  Amount (₱)
-                                </p>
-                              </div>
-
-                              <div
-                                className="max-h-[220px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
-                                style={{ scrollbarWidth: "thin", scrollbarColor: "#94a3b8 transparent" }}
-                              >
-                                {billedTransactionsHistory.map((transaction) => (
-                                  <div
-                                    key={transaction.id}
-                                    className="mb-2 grid items-start gap-2 pr-3 last:mb-0"
-                                    style={{
-                                      gridTemplateColumns:
-                                        "minmax(160px,1fr) minmax(160px,0.9fr) minmax(140px,0.8fr)",
-                                    }}
-                                  >
-                                    <input
-                                      value={transaction.referenceNumber}
-                                      disabled
-                                      readOnly
-                                      className="h-[46px] rounded-[10px] border border-slate-200 bg-slate-50 px-3 text-[12px] font-medium text-[#1a1f36] opacity-100 outline-none"
-                                    />
-                                    <input
-                                      value={transaction.date}
-                                      disabled
-                                      readOnly
-                                      className="h-[46px] rounded-[10px] border border-slate-200 bg-slate-50 px-3 text-[12px] font-medium text-[#1a1f36] opacity-100 outline-none"
-                                    />
-                                    <input
-                                      value={Number(
-                                        transaction.amount || 0,
-                                      ).toLocaleString("en-PH", {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2,
-                                      })}
-                                      disabled
-                                      readOnly
-                                      className="h-[46px] rounded-[10px] border border-slate-200 bg-slate-50 px-3 text-[12px] font-medium text-[#1a1f36] opacity-100 outline-none"
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </Card>
-                      </div>
-
+              ) : isPaymentsTab ? (
+                <TableCard
+                  title="Payment Records"
+                  subtitle="All payment records in the system."
+                  loading={showPaymentRecordsSkeleton}
+                  headerActionsSkeletonCount={4}
+                  className=""
+                  bodyClassName="overflow-x-auto"
+                  footerClassName="flex items-center justify-between"
+                  actions={
+                    <>
                       <div
-                        className="flex h-full flex-col justify-between rounded-[10px] bg-white px-5 py-5"
-                        style={{
-                          border: "1px solid #e5e7eb",
-                          boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                        className="flex items-center gap-2.5 rounded-[10px] border border-gray-200 bg-white px-4 transition-all"
+                        style={{ height: 42, width: 300 }}
+                        onFocus={(event) => {
+                          event.currentTarget.style.borderColor = "#4096ff";
+                          event.currentTarget.style.boxShadow = "none";
+                        }}
+                        onBlur={(event) => {
+                          event.currentTarget.style.borderColor = "#e5e7eb";
+                          event.currentTarget.style.boxShadow = "none";
                         }}
                       >
-                        <div className="flex flex-1 flex-col justify-center gap-6">
-                          {isCreateTabLoading ? (
-                            <div className="animate-pulse">
-                              <div className="mx-auto h-3 w-24 rounded bg-slate-200" />
-                              <div className="mx-auto mt-3 h-10 w-40 rounded bg-slate-200" />
-                              <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                                <div className="h-[46px] w-[180px] rounded-[10px] bg-slate-200" />
-                                <div className="h-[46px] w-[180px] rounded-[10px] bg-slate-200" />
-                              </div>
-                            </div>
-                          ) : (
-                            <>
-                              <div className="text-center">
-                                <p
-                                  className="m-0 text-[11px] font-semibold uppercase"
-                                  style={{ color: "#6F6F82", fontFamily: FONT }}
-                                >
-                                  Total Amount
-                                </p>
-                                <p className="m-0 mt-2 text-[38px] font-bold text-[#1a1f36]">
-                                  {Number(previewTotal || 0).toLocaleString("en-PH", {
-                                    style: "currency",
-                                    currency: "PHP",
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </p>
-                              </div>
-                              <div className="flex flex-col items-center justify-center gap-3 sm:flex-row sm:items-center">
-                                <button
-                                  type="button"
-                                  onClick={handleProceedToPayment}
-                                  disabled={isSaving || isTransactionLocked}
-                                  className="flex min-w-[180px] items-center justify-center rounded-[10px] border border-[#1a1f36] bg-white px-7 py-3 text-[13px] font-semibold text-[#1a1f36] cursor-pointer transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
-                                >
-                                  {isProceedingToPayment ? (
-                                    <Spinner size={4} />
-                                  ) : (
-                                    "Proceed to Payment"
-                                  )}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={handleSaveBill}
-                                  disabled={isSaving || isTransactionLocked}
-                                  className="flex min-w-[180px] items-center justify-center rounded-[10px] border-none bg-[#1a1f36] px-7 py-3 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
-                                >
-                                  {isGeneratingBill ? (
-                                    <Spinner size={4} />
-                                  ) : (
-                                    "Generate Bill"
-                                  )}
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
+                        <IoSearchOutline
+                          className="flex-shrink-0 text-[17px]"
+                          style={{ color: "#1a1f36" }}
+                        />
+                        <input
+                          value={paymentSearch}
+                          onChange={(event) => {
+                            clearUniversalHighlight();
+                            setPaymentSearch(event.target.value);
+                            setPaymentRequestedPage(1);
+                          }}
+                          placeholder="Search for payment reference no., boat name, date, amount"
+                          className="w-full border-none bg-transparent text-[13px] outline-none"
+                          style={{ fontFamily: FONT, color: "#1a1f36" }}
+                        />
                       </div>
-                    </div>
+                      <TailDropdown
+                        value={paymentPeriodFilter}
+                        onChange={(value) => {
+                          clearUniversalHighlight();
+                          setPaymentPeriodFilter(value);
+                          setPaymentRequestedPage(1);
+                        }}
+                        options={PERIOD_FILTER_OPTIONS}
+                      />
+                      <TailDropdown
+                        value={paymentStatusFilter}
+                        onChange={(value) => {
+                          clearUniversalHighlight();
+                          setPaymentStatusFilter(value);
+                          setPaymentRequestedPage(1);
+                        }}
+                        options={PAYMENT_STATUS_FILTER_OPTIONS}
+                      />
+                      <button
+                        type="button"
+                        onClick={openRecordPaymentModal}
+                        disabled={isTransactionLocked}
+                        className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
+                        style={{ fontFamily: FONT }}
+                      >
+                        <IoCashOutline className="text-[16px]" />
+                        <span>Record Payment</span>
+                      </button>
+                    </>
+                  }
+                  pagination={{
+                    meta: paymentRecordsMeta,
+                    totalPages: paymentRecordsTotalPages,
+                    currentPage: safePaymentPage,
+                    requestedPage: paymentRequestedPage,
+                    isLoading: showPaymentRecordsSkeleton,
+                    onPageChange: requestPaymentPage,
+                  }}
+                >
+                  <div className="relative overflow-x-auto">
+                    <table
+                      className="w-full border-collapse"
+                      style={{ minWidth: 940 }}
+                    >
+                      <thead>
+                        <tr>
+                          <TH>Payment Reference No.</TH>
+                          <TH>Bill Reference No.</TH>
+                          <TH>Boat Name</TH>
+                          <TH>Date</TH>
+                          <TH><div className="text-right">Total Amount(₱)</div></TH>
+                          <TH><div className="text-right">Amount Paid(₱)</div></TH>
+                          <TH>
+                            <div className="text-right">Balance Due(₱)</div>
+                          </TH>
+                          <TH><div className="min-w-[220px]">Remarks</div></TH>
+                          <TH>Action</TH>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {showPaymentRecordsSkeleton ? (
+                          Array.from({ length: PAGE_SIZE }).map((_, index) => (
+                            <tr
+                              key={index}
+                              className="animate-pulse"
+                              style={{ borderBottom: "1px solid #f1f5f9" }}
+                            >
+                              {Array.from({ length: 9 }).map((__, column) => (
+                                <td key={column} className="px-4 py-3">
+                                  {column === 8 ? (
+                                    <div className="h-8 w-8 rounded-[10px] bg-slate-100" />
+                                  ) : (
+                                    <div
+                                      className="h-3 rounded bg-slate-100"
+                                      style={{ width: column <= 2 ? 120 : 90 }}
+                                    />
+                                  )}
+                                </td>
+                              ))}
+                            </tr>
+                          ))
+                        ) : paymentRecordsQuery.isError ? (
+                          <tr>
+                            <td colSpan={9} className="px-4 py-10 text-center">
+                              <div className="flex flex-col items-center gap-3">
+                                <IoAlertCircleOutline className="text-[32px] text-red-400" />
+                                <p className="m-0 text-[13px] font-normal text-red-500">
+                                  Unable to load payment records.
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => paymentRecordsQuery.refetch()}
+                                  className="rounded-[10px] border border-slate-200 bg-white px-4 py-2 text-[13px] font-medium text-[#1a1f36] hover:bg-gray-50"
+                                  style={{ fontFamily: FONT }}
+                                >
+                                  Retry
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : showPaymentRecordsEmptyState ? (
+                          <tr>
+                            <td colSpan={9}>
+                              <NoDataFound title={hasActivePaymentTableFilters ? "No results found" : "No Data Found"} />
+                            </td>
+                          </tr>
+                        ) : (
+                          paymentRecords.map((record, index) => {
+                            const isHighlighted =
+                              highlightedPaymentId &&
+                              String(highlightedPaymentId) === String(record.payment_id);
+
+                            return (
+                              <tr
+                                key={record.payment_id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setDetailPayment(record)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    setDetailPayment(record);
+                                  }
+                                }}
+                                className={`cursor-pointer transition-colors ${highlightedPaymentId ? "table-row-plain" : index % 2 === 0 ? "table-row-even" : "table-row-odd"} ${isHighlighted ? "universal-search-highlight" : ""}`.trim()}
+                                style={{
+                                  borderBottom: "1px solid #f1f5f9",
+                                }}
+                              >
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                                      style={{
+                                        backgroundColor:
+                                          record.status === "paid"
+                                            ? "#16a34a"
+                                            : "#f59e0b",
+                                        minWidth: 10,
+                                        minHeight: 10,
+                                      }}
+                                    />
+                                    <span className="text-[13px] font-semibold text-[#1a1f36]">
+                                      {record.payment_reference}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-[13px] text-slate-700">{record.bill_reference}</td>
+                                <td className="px-4 py-3 text-[13px] text-[#1a1f36]">{record.boat_name || "-"}</td>
+                                <td className="px-4 py-3 text-[13px] text-slate-700">{formatDisplayDate(record.payment_date)}</td>
+                                <td className="px-4 py-3 text-right">
+                                  <span className="inline-block min-w-[96px] text-right text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>
+                                    {Number(record.total_amount || 0).toLocaleString("en-PH", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <span className="inline-block min-w-[96px] text-right text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>
+                                    {Number(record.amount_paid || 0).toLocaleString("en-PH", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <span className="inline-block min-w-[96px] text-right text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>
+                                    {Number(record.balance || 0).toLocaleString("en-PH", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </td>
+                                <td className="min-w-[220px] px-4 py-3 text-[13px] text-slate-700">{record.remarks || "-"}</td>
+                                <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                                  <div className="flex items-center gap-2">
+                                    <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (!isTransactionLocked) openEditPayment(record);
+                                        }}
+                                        disabled={isTransactionLocked}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-[10px] border bg-white transition-colors ${
+                                          isTransactionLocked
+                                            ? "cursor-not-allowed border-slate-200"
+                                            : "cursor-pointer hover:bg-blue-50"
+                                        }`}
+                                        style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}
+                                      >
+                                        <IoCreateOutline
+                                          style={{
+                                            fontSize: "15px",
+                                            color: isTransactionLocked ? "#94a3b8" : "#1a1f36",
+                                          }}
+                                        />
+                                      </button>
+                                    </Tooltip>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
                   </div>
-                </div>
-              )}
+                </TableCard>
+              ) : null}
               </Tabs>
             </div>
           </main>
         </div>
       </div>
+      <BillingStatementModal
+        bill={selectedBillRecord}
+        pdfFile={selectedBillPdfFile}
+        loading={selectedBillPdfLoading}
+        open={Boolean(selectedBillId) && Boolean(selectedBillRecord) && isRecordsTab}
+        onClose={closeBillingDetails}
+      />
+      {showCreateBillingModal ? (
+        <Modal
+          title="Create Billing"
+          onClose={closeCreateBillingModal}
+          onCancel={closeCreateBillingModal}
+          onSave={handleSaveBill}
+          saving={isSaving}
+          saveDisabled={isSaving || isTransactionLocked}
+          saveLabel="Save"
+          saveButtonWidth="170px"
+          closeButtonWidth="170px"
+          maxWidth={BILLING_MODAL_WIDTH}
+          minimumSavingMs={0}
+          closeOnBackdrop
+          bodyClassName="max-h-[64vh] overflow-y-auto !p-5"
+          footerLeftContent={
+            <div>
+              <p
+                className="m-0 text-[11px] font-semibold uppercase"
+                style={{ color: "#6F6F82", fontFamily: FONT }}
+              >
+                Total Billing
+              </p>
+              <p
+                className="m-0 text-[28px] font-bold leading-tight text-[#1a1f36]"
+                style={{ fontVariantNumeric: "tabular-nums" }}
+              >
+                {Number(previewTotal || 0).toLocaleString("en-PH", {
+                  style: "currency",
+                  currency: "PHP",
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </p>
+            </div>
+          }
+        >
+          <div className="grid grid-cols-1 gap-6">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 xl:items-stretch">
+              <Card
+                className="flex h-full flex-col"
+                bodyClassName="flex-1"
+                icon={IoBoatOutline}
+                title="BOAT INFORMATION"
+                subtitle="Choose the boat and billing period for this entry."
+                loading={false}
+              >
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                  <div className="xl:col-span-2">
+                    <Label required>Boat Name</Label>
+                    <SelectField
+                      value={billingForm.boat_id || undefined}
+                      onChange={handleBoatChange}
+                      placeholder="Select boat name"
+                      error={Boolean(fieldErrors.boat_id)}
+                      options={boats.map((boat) => ({
+                        value: String(boat.boat_id),
+                        label: `${boat.boat_name}`,
+                      }))}
+                    />
+                    {fieldErrors.boat_id ? <ErrorMessage>{fieldErrors.boat_id}</ErrorMessage> : null}
+                  </div>
+
+                  <div>
+                    <Label>Boat Owner</Label>
+                    <Input value={previewBoat?.owner?.full_name || ""} readOnly />
+                  </div>
+
+                  <div>
+                    <Label>Boat Type</Label>
+                    <Input
+                      value={
+                        previewBoat?.boat_type?.type_name ||
+                        previewBoat?.boatType?.type_name ||
+                        ""
+                      }
+                      readOnly
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex min-h-[20px] items-center justify-between gap-3">
+                      <p
+                        className="m-0 text-[11px] font-semibold uppercase"
+                        style={{ color: "#6F6F82", fontFamily: FONT }}
+                      >
+                        From Date
+                      </p>
+                      <span className="block h-[18px] w-[52px]" aria-hidden="true" />
+                    </div>
+                    <DatePicker
+                      value={billingForm.date_from || undefined}
+                      onChange={(_, currentDateString) =>
+                        handleDateRangeChange("date_from", currentDateString)
+                      }
+                      placeholder="Select a date to filter"
+                      options={{ useFiscalYearDefault: false }}
+                      containerClassName="w-full"
+                      inputClassName="rounded-[10px] border-slate-200 bg-white text-[13px] text-[#1a1f36] focus:border-[#4096ff] focus:ring-0"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex min-h-[20px] items-center justify-between gap-3">
+                      <p
+                        className="m-0 text-[11px] font-semibold uppercase"
+                        style={{ color: "#6F6F82", fontFamily: FONT }}
+                      >
+                        To Date
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleShowAll}
+                        className="border-none bg-transparent p-0 text-[12px] font-semibold text-blue-600 transition-colors hover:text-blue-700"
+                        style={{ fontFamily: FONT }}
+                      >
+                        Show All
+                      </button>
+                    </div>
+                    <DatePicker
+                      value={billingForm.date_to || undefined}
+                      onChange={(_, currentDateString) =>
+                        handleDateRangeChange("date_to", currentDateString)
+                      }
+                      placeholder="Select a date to filter"
+                      options={{ useFiscalYearDefault: false }}
+                      containerClassName="w-full"
+                      inputClassName="rounded-[10px] border-slate-200 bg-white text-[13px] text-[#1a1f36] focus:border-[#4096ff] focus:ring-0"
+                    />
+                  </div>
+                </div>
+              </Card>
+
+              <div ref={unbilledTransactionsRef}>
+                <Card
+                  className="flex h-full flex-col"
+                  bodyClassName="flex-1"
+                  icon={IoReceiptOutline}
+                  title="UNBILLED TRANSACTIONS"
+                  subtitle="Review all unpaid transactions."
+                  loading={Boolean(billingForm.boat_id && (isBoatBillingDataLoading || isRefreshingUnbilledTransactions))}
+                  loadingBodyOnly={Boolean(billingForm.boat_id && (isBoatBillingDataLoading || isRefreshingUnbilledTransactions))}
+                  skeletonLayout={[{ type: "table", columns: 3, rows: 4 }]}
+                  headerAction={
+                    <button
+                      type="button"
+                      aria-label="Refresh unbilled transactions"
+                      onClick={handleRefreshUnbilledTransactions}
+                      disabled={isRefreshingUnbilledTransactions}
+                      className="flex items-center gap-2 rounded-[10px] border border-slate-200 bg-white px-3 py-2 text-[13px] font-normal text-slate-600 transition hover:border-slate-300 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <IoRefreshOutline className="text-[15px]" />
+                      <span>Refresh</span>
+                    </button>
+                  }
+                >
+                  {!billingForm.boat_id ? (
+                    <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
+                      Select a boat to view unbilled transactions.
+                    </div>
+                  ) : billingForm.items.every((item) => !item.record_id) ? (
+                    <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
+                      No unbilled transactions found for the selected boat and date range.
+                    </div>
+                  ) : (
+                    <div className="rounded-[10px] border border-slate-200 bg-slate-50/60 p-2">
+                      <div
+                        className="mb-2 grid gap-1 px-1 pr-1"
+                        style={{
+                          gridTemplateColumns:
+                            "minmax(0,0.72fr) minmax(0,1fr) minmax(96px,0.72fr)",
+                        }}
+                      >
+                        {["Type", "Date", "Amount (₱)"].map((label) => (
+                          <p
+                            key={label}
+                            className="m-0 truncate text-[10px] font-semibold uppercase tracking-wider"
+                            style={{ color: "#6F6F82", fontFamily: FONT }}
+                          >
+                            {label}
+                          </p>
+                        ))}
+                      </div>
+                      <div
+                        className="max-h-[220px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
+                        style={{ scrollbarWidth: "thin", scrollbarColor: "#94a3b8 transparent" }}
+                      >
+                        {billingForm.items.map((item, index) => {
+                          const records = (availableRecordsByType[item.transaction_type] ?? []).filter((record) => {
+                            if (!billingForm.boat_id) return true;
+                            return record.boatId === billingForm.boat_id;
+                          });
+                          const typeLabel = TRANSACTION_TYPE_OPTIONS.find((option) => option.value === item.transaction_type)?.label || "";
+                          const recordDate = formatLongDisplayDate(
+                            records.find((record) => String(record.value) === String(item.record_id))?.sortDate,
+                          ) || "";
+
+                          return (
+                            <div
+                              key={`${item.transaction_type}-${index}`}
+                              className="mb-2 grid items-start gap-1 pr-1 last:mb-0"
+                              style={{
+                                gridTemplateColumns:
+                                  "minmax(0,0.72fr) minmax(0,1fr) minmax(96px,0.72fr)",
+                              }}
+                            >
+                              <Input value={typeLabel} readOnly readOnlyPlain wrapperClassName="min-w-0" inputClassName="truncate text-[12px]" />
+                              <Input value={recordDate} readOnly readOnlyPlain wrapperClassName="min-w-0" inputClassName="truncate text-[12px]" />
+                              <Input value={item.amount} readOnly readOnlyPlain wrapperClassName="min-w-0" inputClassName="text-[12px]" />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {formError ? <ErrorMessage>{formError}</ErrorMessage> : null}
+                </Card>
+              </div>
+            </div>
+
+            <div ref={billedTransactionsHistoryRef}>
+              <Card
+                className="flex h-full flex-col"
+                bodyClassName="flex-1"
+                icon={IoDocumentTextOutline}
+                title="BILLED TRANSACTIONS HISTORY"
+                subtitle="Check previous billing references already recorded for this boat."
+                loading={Boolean(billingForm.boat_id && isBoatBillingDataLoading)}
+                loadingBodyOnly={Boolean(billingForm.boat_id && isBoatBillingDataLoading)}
+                skeletonLayout={[{ type: "table", columns: 3, rows: 4 }]}
+              >
+                {!billingForm.boat_id ? (
+                  <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
+                    Select a boat to view billed transaction history.
+                  </div>
+                ) : billedTransactionsHistory.length === 0 ? (
+                  <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
+                    No billed transactions found for this boat.
+                  </div>
+                ) : (
+                  <div className="rounded-[10px] border border-slate-200 bg-slate-50/60 p-3">
+                    <div
+                      className="mb-2 grid gap-2 px-1 pr-3"
+                      style={{
+                        gridTemplateColumns:
+                          "minmax(160px,1fr) minmax(160px,0.9fr) minmax(140px,0.8fr)",
+                      }}
+                    >
+                      {["Reference", "Date", "Amount (₱)"].map((label) => (
+                        <p
+                          key={label}
+                          className="m-0 text-[11px] font-semibold uppercase tracking-wider"
+                          style={{ color: "#6F6F82", fontFamily: FONT }}
+                        >
+                          {label}
+                        </p>
+                      ))}
+                    </div>
+                    <div
+                      className="max-h-[220px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
+                      style={{ scrollbarWidth: "thin", scrollbarColor: "#94a3b8 transparent" }}
+                    >
+                      {billedTransactionsHistory.map((transaction) => (
+                        <div
+                          key={transaction.id}
+                          className="mb-2 grid items-start gap-2 pr-3 last:mb-0"
+                          style={{
+                            gridTemplateColumns:
+                              "minmax(160px,1fr) minmax(160px,0.9fr) minmax(140px,0.8fr)",
+                          }}
+                        >
+                          <Input value={transaction.referenceNumber} readOnly readOnlyPlain />
+                          <Input value={transaction.date} readOnly readOnlyPlain />
+                          <Input
+                            value={Number(transaction.amount || 0).toLocaleString("en-PH", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                            readOnly
+                            readOnlyPlain
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </Card>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+      <RecordPaymentModal
+        open={Boolean(paymentModalBill)}
+        bill={paymentModalBill}
+        form={paymentModalForm}
+        paymentScope={paymentModalScope}
+        paymentableBills={paymentableBills}
+        fieldErrors={paymentModalFieldErrors}
+        formError={paymentModalFormError}
+        saving={createPaymentMutation.isPending}
+        onClose={closePaymentModal}
+        onChange={updatePaymentModalForm}
+        onScopeChange={handlePaymentModalScopeChange}
+        onBillChange={handlePaymentModalBillChange}
+        onBoatChange={handlePaymentModalBoatChange}
+        onBillToggle={handlePaymentModalBillToggle}
+        onSelectAllBills={handlePaymentModalSelectAllBills}
+        onShowAllBills={handlePaymentModalShowAllBills}
+        onDateFilterChange={handlePaymentModalDateFilterChange}
+        onSave={handleCreatePaymentFromModal}
+      />
+      <EditPaymentModal
+        open={Boolean(editingPayment)}
+        payment={editingPayment}
+        form={editPaymentForm}
+        errors={editPaymentErrors}
+        saving={updatePaymentMutation.isPending}
+        onClose={closeEditPayment}
+        onChange={updateEditPaymentForm}
+        onSave={handleSavePaymentEdit}
+      />
+      <PaymentDetailsDrawer
+        open={Boolean(detailPayment)}
+        payment={detailPayment}
+        onClose={() => setDetailPayment(null)}
+      />
+      <PayBillPromptModal
+        open={showPayBillPrompt}
+        saving={isSaving}
+        onClose={() => {
+          if (isSaving) return;
+          setShowPayBillPrompt(false);
+        }}
+        onYes={handleGenerateBillAndPay}
+        onNo={handleGenerateBillOnly}
+      />
+      {selectedBillPdfFile ? (
+        <iframe
+          key={selectedBillPdfFile.url}
+          ref={selectedBillPrintFrameRef}
+          src={selectedBillPdfFile.url}
+          title="Billing Statement Print Preload"
+          aria-hidden="true"
+          onLoad={() => setSelectedBillPdfReady(true)}
+          className="fixed bottom-0 right-0 h-0 w-0 border-0"
+        />
+      ) : null}
       <EditBillingModal
         open={Boolean(editingBillId) && isRecordsTab}
         bill={editingBillRecord}
@@ -3024,7 +4562,7 @@ const SuperBilling = () => {
         onBoatChange={handleEditBoatChange}
         onDateRangeChange={handleEditDateRangeChange}
         onShowAll={handleShowAll}
-        onSave={handleSaveBill}
+        onSave={handleGenerateBillOnly}
       />
     </ConfigProvider>
   );

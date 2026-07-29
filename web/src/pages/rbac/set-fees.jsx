@@ -15,13 +15,13 @@ import {
   IoPersonOutline,
   IoPricetagOutline,
   IoSearchOutline,
-  IoTrashOutline,
-  IoWarningOutline,
 } from "react-icons/io5";
 import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
 import DatePicker from "../../components/DatePicker";
+import EndDatePicker from "../../components/EndDatePicker";
 import FilterSelect from "../../components/FilterSelect";
+import FilterButton from "../../components/FilterButton";
 import Legend from "../../components/Legend";
 import Modal from "../../components/Modal";
 import TableCard from "../../components/TableCard";
@@ -129,7 +129,7 @@ const formatDate = (value) => {
 
 
 const TailDropdown = ({ value, onChange, options, height = 42, minWidth = 150 }) => (
-  <FilterSelect value={value} onChange={onChange} options={options} height={height} width={minWidth} />
+  <FilterButton value={value} onChange={onChange} options={options} height={height} width={minWidth} />
 );
 
 const Field = ({ label, required, error, children }) => (
@@ -152,14 +152,37 @@ const ShellInput = ({ ...props }) => (
   <input {...props} className="h-[42px] w-full rounded-xl border border-slate-200 bg-white px-4 text-[13px] font-medium text-[#0d1117] outline-none" style={{ fontFamily: FONT }} />
 );
 
-const ModalInput = ({ label, required, error, icon: Icon, readOnly, ...props }) => (
-  <Field label={label} required={required} error={error}>
-    <div className={`modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border border-slate-200 bg-white px-4 transition-all focus-within:border-[#4096ff] ${readOnly ? "fee-readonly-input" : ""}`.trim()}>
+const ModalInput = ({
+  label,
+  required,
+  error,
+  icon: Icon,
+  readOnly = false,
+  readOnlyPlain = false,
+  wrapperClassName = "",
+  inputStyle = {},
+  inputClassName = "",
+  tabIndex,
+  ...props
+}) => (
+  <Field label={label} required={required} error={readOnly ? "" : error}>
+    <div
+      className={`modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border px-4 transition-all ${
+        readOnly && !readOnlyPlain
+          ? "border-slate-200 bg-slate-100"
+          : error
+            ? "border-red-300 bg-white"
+            : "border-slate-200 bg-white focus-within:border-[#4096ff]"
+      } ${wrapperClassName}`.trim()}
+    >
       <input
         {...props}
         readOnly={readOnly}
-        className="w-full border-none bg-transparent text-[14px] font-medium text-[#0d1117] outline-none placeholder:font-normal placeholder:text-slate-400"
-        style={{ fontFamily: FONT }}
+        tabIndex={readOnly ? -1 : tabIndex}
+        className={`w-full border-none bg-transparent text-[14px] font-medium outline-none placeholder:font-normal placeholder:text-slate-400 ${
+          readOnly && !readOnlyPlain ? "cursor-default text-slate-500" : "text-[#0d1117]"
+        } ${readOnly ? "cursor-default" : ""} ${inputClassName}`.trim()}
+        style={{ fontFamily: FONT, ...inputStyle }}
       />
     </div>
   </Field>
@@ -190,9 +213,28 @@ const ModalShell = ({ open, title, subtitle, children, onClose, onSave, saving, 
           border-color: #fca5a5 !important;
           box-shadow: none !important;
         }
-        .set-fees-modal-shell .fee-applicable-type-select .ant-select-selector,
-        .set-fees-modal-shell .fee-applicable-type-select.ant-select-disabled .ant-select-selector {
+        .set-fees-modal-shell .fee-applicable-type-select:not(.fee-readonly-select) .ant-select-selector {
           background: #ffffff !important;
+        }
+        .set-fees-modal-shell .fee-readonly-select .ant-select-selector,
+        .set-fees-modal-shell .fee-readonly-select.ant-select-disabled .ant-select-selector,
+        .set-fees-modal-shell .fee-readonly-date.ant-picker,
+        .set-fees-modal-shell .fee-readonly-date.ant-picker-disabled,
+        .set-fees-modal-shell .fee-readonly-input {
+          background: #f1f5f9 !important;
+          border-color: #e2e8f0 !important;
+          box-shadow: none !important;
+          cursor: not-allowed !important;
+        }
+        .set-fees-modal-shell .fee-readonly-select .ant-select-selection-item,
+        .set-fees-modal-shell .fee-readonly-select .ant-select-selection-placeholder,
+        .set-fees-modal-shell .fee-readonly-select .ant-select-arrow,
+        .set-fees-modal-shell .fee-readonly-date input,
+        .set-fees-modal-shell .fee-readonly-date .ant-picker-suffix,
+        .set-fees-modal-shell .fee-readonly-input input {
+          color: #475569 !important;
+          opacity: 1 !important;
+          cursor: not-allowed !important;
         }
         .set-fees-modal-shell .fee-readonly-select.ant-select-focused .ant-select-selector,
         .set-fees-modal-shell .fee-readonly-select.ant-select-open .ant-select-selector,
@@ -290,6 +332,21 @@ const upsertFeeRecord = (fees, nextFee) => {
   return sortFeesNewestFirst(updatedFees);
 };
 
+const updateFeeQueryCache = (current, savedFee) => {
+  if (!current?.fees) return current;
+
+  return {
+    ...current,
+    fees: upsertFeeRecord(current.fees, savedFee),
+  };
+};
+
+const runAfterModalClosePaint = (callback) => {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(callback);
+  });
+};
+
 const BOAT_FEE_TYPE_NAMES = new Set(["docking"]);
 const VEHICLE_FEE_TYPE_NAMES = new Set([
   "vehicle ticket daily",
@@ -350,8 +407,6 @@ const SuperSetFees = () => {
   const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
   const [editingFee, setEditingFee] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [archivingFee, setArchivingFee] = useState(null);
-  const [archiveSaving, setArchiveSaving] = useState(false);
   const rawHighlightedFeeId = getFeeHighlightId({ highlightedSearchResult, search: location.search });
   const highlightToken = rawHighlightedFeeId
     ? `${rawHighlightedFeeId}|${location.search}|${highlightedSearchResult?.group || ""}`
@@ -583,7 +638,7 @@ const SuperSetFees = () => {
     }
   };
 
-  const saveFee = async () => {
+  const saveFee = () => {
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -607,117 +662,117 @@ const SuperSetFees = () => {
     if (effectiveTo && effectiveTo < effectiveFrom) nextErrors.effective_to = "Effective to must be after or equal to Effective from.";
     if (Object.keys(nextErrors).length) return setFeeErrors(nextErrors);
 
-    setSaving(true);
     setFeeErrors({});
-    try {
-      const payload = {
-        fee_type_name: normalizeFeeTypeName(feeForm.fee_type_name),
-        boat_type_id: feeForm.boat_type_id || null,
-        vehicle_type_id: feeForm.vehicle_type_id || null,
-        amount: Number(feeForm.amount),
-        effective_from: effectiveFrom,
-        effective_to: effectiveTo || null,
+
+    const payload = {
+      fee_type_name: normalizeFeeTypeName(feeForm.fee_type_name),
+      boat_type_id: feeForm.boat_type_id || null,
+      vehicle_type_id: feeForm.vehicle_type_id || null,
+      amount: Number(feeForm.amount),
+      effective_from: effectiveFrom,
+      effective_to: effectiveTo || null,
+    };
+    const currentEditingFee = editingFee;
+
+    if (currentEditingFee) {
+      const originalPayload = {
+        fee_type_name: normalizeFeeTypeName(currentEditingFee.fee_type_name ?? currentEditingFee.fee_name ?? null),
+        boat_type_id: currentEditingFee.boat_type_id ?? null,
+        vehicle_type_id: currentEditingFee.vehicle_type_id ?? null,
+        amount: Number(currentEditingFee.amount ?? 0),
+        effective_from: normalizeDateValue(currentEditingFee.effective_from),
+        effective_to: normalizeDateValue(currentEditingFee.effective_to) || null,
       };
 
-      if (editingFee) {
-        const originalPayload = {
-          fee_type_name: normalizeFeeTypeName(editingFee.fee_type_name ?? editingFee.fee_name ?? null),
-          boat_type_id: editingFee.boat_type_id ?? null,
-          vehicle_type_id: editingFee.vehicle_type_id ?? null,
-          amount: Number(editingFee.amount ?? 0),
-          effective_from: normalizeDateValue(editingFee.effective_from),
-          effective_to: normalizeDateValue(editingFee.effective_to) || null,
-        };
+      if (JSON.stringify(payload) === JSON.stringify(originalPayload)) {
+        resetFeeModal();
+        showNoChangesToast();
+        return;
+      }
+    }
 
-        if (JSON.stringify(payload) === JSON.stringify(originalPayload)) {
-          resetFeeModal();
-          showNoChangesToast();
-          return;
+    setSaving(true);
+    void (async () => {
+      try {
+        const response = currentEditingFee
+          ? await api.put(`/fees/${currentEditingFee.fee_id}`, payload)
+          : await api.post("/fees", payload);
+        const savedFee = response.data;
+        const wasEditingFee = Boolean(currentEditingFee);
+
+        setSaving(false);
+        resetFeeModal();
+
+        if (wasEditingFee) {
+          showUpdatedToast("Fee", "fee record");
+        } else {
+          showAddedToast("Fee", "fee record");
         }
-      }
 
-      const response = editingFee
-        ? await api.put(`/fees/${editingFee.fee_id}`, payload)
-        : await api.post("/fees", payload);
-      const savedFee = response.data;
+        runAfterModalClosePaint(() => {
+          queryClient.setQueriesData({ queryKey: FEES_DATA_QUERY_KEY, type: "active" }, (current) =>
+            updateFeeQueryCache(current, savedFee)
+          );
+          queryClient.setQueryData(["dockings-data"], (current) => {
+            if (!current) return current;
 
-      queryClient.setQueryData(FEES_DATA_QUERY_KEY, (current) => {
-        if (!current) return current;
+            return {
+              ...current,
+              fees: upsertFeeRecord(current.fees, savedFee),
+            };
+          });
+          queryClient.setQueryData(["docking-lookups"], (current) => {
+            if (!current) return current;
 
-        return {
-          ...current,
-          fees: upsertFeeRecord(current.fees, savedFee),
-        };
-      });
-      queryClient.setQueryData(["dockings-data"], (current) => {
-        if (!current) return current;
+            return {
+              ...current,
+              fees: upsertFeeRecord(current.fees, savedFee),
+            };
+          });
+          queryClient.setQueriesData({ queryKey: ["banyera-data", "lookups"] }, (current) => {
+            if (!current) return current;
 
-        return {
-          ...current,
-          fees: upsertFeeRecord(current.fees, savedFee),
-        };
-      });
+            return {
+              ...current,
+              fees: upsertFeeRecord(current.fees, savedFee),
+            };
+          });
+          queryClient.setQueriesData({ queryKey: ["vehicle-tickets-lookups"] }, (current) => {
+            if (!current) return current;
 
-      if (editingFee) {
-        showUpdatedToast("Fee", "fee record");
-      } else {
-        showAddedToast("Fee", "fee record");
-      }
-      resetFeeModal();
+            return {
+              ...current,
+              fees: upsertFeeRecord(current.fees, savedFee),
+            };
+          });
 
-      void queryClient.invalidateQueries({ queryKey: FEES_DATA_QUERY_KEY, refetchType: "active" });
-      void queryClient.invalidateQueries({ queryKey: ["dockings-data"], refetchType: "active" });
-    } catch (error) {
-      const backendErrors = error.response?.data?.errors;
-      if (backendErrors) {
-        const effectiveFromMessage = backendErrors.effective_from?.[0];
-        const hideEffectiveFromError =
-          effectiveFromMessage ===
-          "A fee with the same type and applicable record is still within its effective period.";
-
-        setFeeErrors({
-          fee_type_name: backendErrors.fee_type_name?.[0],
-          boat_type_id: backendErrors.boat_type_id?.[0] || backendErrors.vehicle_type_id?.[0],
-          amount: backendErrors.amount?.[0],
-          effective_from: hideEffectiveFromError ? undefined : effectiveFromMessage,
-          effective_to: backendErrors.effective_to?.[0],
+          void queryClient.invalidateQueries({ queryKey: FEES_DATA_QUERY_KEY, refetchType: "active" });
+          void queryClient.invalidateQueries({ queryKey: ["fee-report"], refetchType: "active" });
+          void queryClient.invalidateQueries({ queryKey: ["dockings-data"], refetchType: "active" });
+          void queryClient.invalidateQueries({ queryKey: ["docking-lookups"], refetchType: "active" });
+          void queryClient.invalidateQueries({ queryKey: ["banyera-data", "lookups"], refetchType: "active" });
+          void queryClient.invalidateQueries({ queryKey: ["vehicle-tickets-lookups"], refetchType: "active" });
         });
+      } catch (error) {
+        const backendErrors = error.response?.data?.errors;
+        if (backendErrors) {
+          const effectiveFromMessage = backendErrors.effective_from?.[0];
+          const hideEffectiveFromError =
+            effectiveFromMessage ===
+            "A fee with the same type and applicable record is still within its effective period.";
+
+          setFeeErrors({
+            fee_type_name: backendErrors.fee_type_name?.[0],
+            boat_type_id: backendErrors.boat_type_id?.[0] || backendErrors.vehicle_type_id?.[0],
+            amount: backendErrors.amount?.[0],
+            effective_from: hideEffectiveFromError ? undefined : effectiveFromMessage,
+            effective_to: backendErrors.effective_to?.[0],
+          });
+        }
+        showBottomToast("error", "Save Failed", error.response?.data?.message ?? "Unable to save fee record.");
+        setSaving(false);
       }
-      showBottomToast("error", "Save Failed", error.response?.data?.message ?? "Unable to save fee record.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const archiveFee = async () => {
-    if (!archivingFee) return;
-    if (isTransactionLocked) {
-      showBottomToast("error", "Transactions Locked", transactionLockMessage);
-      return;
-    }
-
-    setArchiveSaving(true);
-
-    try {
-      await api.patch(`/fees/${archivingFee.fee_id}/archive`);
-      showBottomToast("success", "Fee Archived", "The expired fee record was archived successfully.");
-      setArchivingFee(null);
-      void Promise.all([
-        queryClient.invalidateQueries({ queryKey: FEES_DATA_QUERY_KEY, refetchType: "active" }),
-        queryClient.invalidateQueries({ queryKey: ["archives-data"], refetchType: "active" }),
-      ]);
-    } catch (error) {
-      if ([404, 409].includes(error.response?.status)) {
-        setArchivingFee(null);
-        void Promise.all([
-          queryClient.invalidateQueries({ queryKey: FEES_DATA_QUERY_KEY, refetchType: "active" }),
-          queryClient.invalidateQueries({ queryKey: ["archives-data"], refetchType: "active" }),
-        ]);
-      }
-      showBottomToast("error", "Archive Failed", error.response?.data?.message ?? "Unable to archive fee record.");
-    } finally {
-      setArchiveSaving(false);
-    }
+    })();
   };
 
   return (
@@ -970,31 +1025,6 @@ const SuperSetFees = () => {
                                     <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
                                   </button>
                                 </Tooltip>
-                                <Tooltip
-                                  title={
-                                    isTransactionLocked
-                                      ? transactionLockMessage
-                                      : status !== "expired"
-                                      ? "Only expired fee records can be archived"
-                                      : "Archive"
-                                  }
-                                >
-                                  <button
-                                    onClick={() => {
-                                      if (isTransactionLocked || status !== "expired") return;
-                                      setArchivingFee(item);
-                                    }}
-                                    disabled={isTransactionLocked || status !== "expired"}
-                                    className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
-                                      isTransactionLocked || status !== "expired"
-                                        ? "cursor-not-allowed border-slate-200 opacity-60"
-                                        : "hover:bg-red-50"
-                                    }`}
-                                    style={{ borderColor: isTransactionLocked || status !== "expired" ? undefined : "#ef4444" }}
-                                  >
-                                    <IoTrashOutline style={{ fontSize: "15px", color: isTransactionLocked || status !== "expired" ? "#94a3b8" : "#ef4444" }} />
-                                  </button>
-                                </Tooltip>
                             </div>
                           </td>
                               </>
@@ -1020,91 +1050,106 @@ const SuperSetFees = () => {
         onSave={saveFee}
         saving={saving}
         saveLabel={editingFee ? "Save" : "Add"}
+        minimumSavingMs={0}
         closeOnBackdrop
         maxWidth="560px"
       >
         <div className="flex flex-col gap-5">
-          <Field label="Fee Type" required error={feeErrors.fee_type_name}>
-            <FilterSelect
-              width="100%"
-              height={46}
-              showSearch={!editingFee}
-              placeholder="Select a fee type"
-              optionFilterProp="label"
-              optionLabelProp="label"
-              open={editingFee ? false : undefined}
-              className={editingFee ? "fee-readonly-select" : undefined}
-              value={feeForm.fee_type_name}
-              onChange={(value) => {
-                if (editingFee) return;
-                setFeeForm((current) => ({
-                  ...current,
-                  fee_type_name: value,
-                  boat_type_id: undefined,
-                  vehicle_type_id: undefined,
-                }));
-                setFeeErrors((current) => ({
-                  ...current,
-                  fee_type_name: undefined,
-                  boat_type_id: undefined,
-                }));
-              }}
-              options={feeTypes.map((item) => ({ value: item.value, label: item.label }))}
-              getPopupContainer={() => document.body}
-              placement="bottomLeft"
+          {editingFee ? (
+            <ModalInput
+              label="Fee Type"
+              required
+              value={feeForm.fee_type_name || ""}
+              readOnly
             />
-          </Field>
-
-          <Field label={selectedApplicableTypeKind === "both" ? "Boat Type / Vehicle Type" : selectedApplicableTypeKind === "vehicle" ? "Vehicle Type" : "Boat Type"} required error={feeErrors.boat_type_id}>
-            <FilterSelect
-              key={selectedApplicableTypeKind || "applicable-type"}
-              width="100%"
-              height={46}
-              showSearch={!editingFee}
-              allowClear={!editingFee}
-              open={editingFee || !feeForm.fee_type_name ? false : undefined}
-              className={["fee-applicable-type-select", editingFee ? "fee-readonly-select" : ""].filter(Boolean).join(" ")}
-              placeholder={
-                !feeForm.fee_type_name
-                  ? "Select a fee type first"
-                  : selectedApplicableTypeKind === "both"
-                    ? "Select a boat type or vehicle type"
-                  : selectedApplicableTypeKind === "vehicle"
-                    ? "Select a vehicle type"
-                    : "Select a boat type"
-              }
-              optionFilterProp="label"
-              value={
-                feeForm.vehicle_type_id
-                  ? `vehicle:${feeForm.vehicle_type_id}`
-                  : feeForm.boat_type_id
-                    ? `boat:${feeForm.boat_type_id}`
-                    : undefined
-              }
-              onChange={(value) => {
-                if (editingFee) return;
-                if (!value) {
-                  setFeeForm((current) => ({ ...current, boat_type_id: undefined, vehicle_type_id: undefined }));
-                } else if (String(value).startsWith("vehicle:")) {
+          ) : (
+            <Field label="Fee Type" required error={feeErrors.fee_type_name}>
+              <FilterSelect
+                width="100%"
+                height={46}
+                showSearch
+                placeholder="Select a fee type"
+                optionFilterProp="label"
+                optionLabelProp="label"
+                value={feeForm.fee_type_name}
+                onChange={(value) => {
                   setFeeForm((current) => ({
                     ...current,
+                    fee_type_name: value,
                     boat_type_id: undefined,
-                    vehicle_type_id: Number(String(value).split(":")[1]),
-                  }));
-                } else {
-                  setFeeForm((current) => ({
-                    ...current,
-                    boat_type_id: Number(String(value).split(":")[1]),
                     vehicle_type_id: undefined,
                   }));
-                }
-                setFeeErrors((current) => ({ ...current, boat_type_id: undefined }));
-              }}
-              options={feeApplicableTypeOptions}
-              getPopupContainer={() => document.body}
-              placement="bottomLeft"
+                  setFeeErrors((current) => ({
+                    ...current,
+                    fee_type_name: undefined,
+                    boat_type_id: undefined,
+                  }));
+                }}
+                options={feeTypes.map((item) => ({ value: item.value, label: item.label }))}
+                getPopupContainer={() => document.body}
+                placement="bottomLeft"
+              />
+            </Field>
+          )}
+
+          {editingFee ? (
+            <ModalInput
+              label={selectedApplicableTypeKind === "both" ? "Boat Type / Vehicle Type" : selectedApplicableTypeKind === "vehicle" ? "Vehicle Type" : "Boat Type"}
+              required
+              value={getFeeApplicableLabel(editingFee) || ""}
+              readOnly
             />
-          </Field>
+          ) : (
+            <Field label={selectedApplicableTypeKind === "both" ? "Boat Type / Vehicle Type" : selectedApplicableTypeKind === "vehicle" ? "Vehicle Type" : "Boat Type"} required error={feeErrors.boat_type_id}>
+              <FilterSelect
+                key={selectedApplicableTypeKind || "applicable-type"}
+                width="100%"
+                height={46}
+                showSearch
+                allowClear
+                open={!feeForm.fee_type_name ? false : undefined}
+                className="fee-applicable-type-select"
+                placeholder={
+                  !feeForm.fee_type_name
+                    ? "Select a fee type first"
+                    : selectedApplicableTypeKind === "both"
+                      ? "Select a boat type or vehicle type"
+                    : selectedApplicableTypeKind === "vehicle"
+                      ? "Select a vehicle type"
+                      : "Select a boat type"
+                }
+                optionFilterProp="label"
+                value={
+                  feeForm.vehicle_type_id
+                    ? `vehicle:${feeForm.vehicle_type_id}`
+                    : feeForm.boat_type_id
+                      ? `boat:${feeForm.boat_type_id}`
+                      : undefined
+                }
+                onChange={(value) => {
+                  if (!value) {
+                    setFeeForm((current) => ({ ...current, boat_type_id: undefined, vehicle_type_id: undefined }));
+                  } else if (String(value).startsWith("vehicle:")) {
+                    setFeeForm((current) => ({
+                      ...current,
+                      boat_type_id: undefined,
+                      vehicle_type_id: Number(String(value).split(":")[1]),
+                    }));
+                  } else {
+                    setFeeForm((current) => ({
+                      ...current,
+                      boat_type_id: Number(String(value).split(":")[1]),
+                      vehicle_type_id: undefined,
+                    }));
+                  }
+                  setFeeErrors((current) => ({ ...current, boat_type_id: undefined }));
+                }}
+                options={feeApplicableTypeOptions}
+                getPopupContainer={() => document.body}
+                placement="bottomLeft"
+              />
+            </Field>
+          )}
 
           <ModalInput
             label="Amount (₱)"
@@ -1137,12 +1182,12 @@ const SuperSetFees = () => {
               }}
               placeholder="Select effective from date"
               containerClassName="w-full"
-              inputClassName={feeErrors.effective_from ? "!border-red-300" : editingFee ? "!border-blue-500" : "!border-slate-200"}
+              inputClassName={feeErrors.effective_from ? "!border-red-300" : "!border-slate-200"}
             />
           </Field>
 
           <Field label="Effective To" error={feeErrors.effective_to}>
-            <DatePicker
+            <EndDatePicker
               value={feeForm.effective_to_year || feeForm.effective_to_month || feeForm.effective_to_day ? buildDateFromParts(feeForm.effective_to_year, feeForm.effective_to_month, feeForm.effective_to_day) : undefined}
               onChange={(_, currentDateString) => {
                 const [year = "", month = "", day = ""] = String(currentDateString || "").split("-");
@@ -1155,175 +1200,15 @@ const SuperSetFees = () => {
                 setFeeErrors((current) => ({ ...current, effective_to: undefined }));
               }}
               placeholder="Select effective to date"
-              options={{ useFiscalYearDefault: false, allowClear: true }}
               containerClassName="w-full"
-              inputClassName={feeErrors.effective_to ? "!border-red-300" : editingFee ? "!border-blue-500" : "!border-slate-200"}
+              inputClassName={feeErrors.effective_to ? "!border-red-300" : "!border-slate-200"}
             />
           </Field>
         </div>
       </Modal>
       ) : null}
 
-      {archivingFee ? (
-        <FeeArchiveModal
-          open={!!archivingFee}
-          title="Archive Fee Record"
-          itemName={getFeeDisplayName(archivingFee)}
-          itemContext={{
-            applicable: getFeeApplicableLabel(archivingFee),
-            amount: formatMoneyValue(archivingFee.amount),
-          }}
-          onClose={() => { if (!archiveSaving) setArchivingFee(null); }}
-          onConfirm={archiveFee}
-          saving={archiveSaving}
-          fontFamily={FONT}
-        />
-      ) : null}
     </ConfigProvider>
-  );
-};
-
-const FeeArchiveModal = ({
-  open,
-  title,
-  itemName,
-  itemContext = null,
-  onClose,
-  onConfirm,
-  saving,
-  warningItems = [],
-  fontFamily = FONT,
-}) => {
-  const [internalSaving, setInternalSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) {
-      setInternalSaving(false);
-    }
-  }, [open]);
-
-  if (!open) return null;
-
-  const archiving = typeof saving === "boolean" ? saving : internalSaving;
-
-  const handleConfirm = async () => {
-    if (typeof saving === "boolean") {
-      onConfirm();
-      return;
-    }
-
-    setInternalSaving(true);
-    try {
-      await onConfirm();
-    } finally {
-      setInternalSaving(false);
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center px-4"
-      style={{ backgroundColor: "rgba(10,13,28,0.55)", backdropFilter: "blur(6px)" }}
-    >
-      <div
-        className="w-full overflow-hidden bg-white"
-        style={{
-          maxWidth: 400,
-          borderRadius: 20,
-          boxShadow: "0 24px 64px rgba(0,0,0,0.2)",
-          fontFamily,
-          animation: "modalPop 0.22s cubic-bezier(0.34,1.56,0.64,1)",
-        }}
-      >
-        <style>{`@keyframes modalPop{from{opacity:0;transform:scale(0.92) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}`}</style>
-
-        <div className="flex flex-col items-center px-6 pb-5 pt-8 text-center">
-          <div
-            className="mb-5 flex items-center justify-center"
-            style={{ width: 68, height: 68, borderRadius: 18, backgroundColor: "#fef2f2" }}
-          >
-            <IoWarningOutline style={{ fontSize: 36, color: "#dc2626" }} />
-          </div>
-          <p className="m-0 mb-2 text-[18px] font-bold" style={{ color: "#0d1117" }}>
-            {title}
-          </p>
-          <p className="m-0 text-[15px] leading-relaxed" style={{ color: "#64748b" }}>
-            {itemContext ? (
-              <>
-                Are you sure you want to archive{" "}
-                <span className="font-bold" style={{ color: "#1a1f36" }}>
-                  "{itemName}"
-                </span>{" "}
-                for{" "}
-                <span className="font-bold" style={{ color: "#1a1f36" }}>
-                  "{itemContext.applicable}"
-                </span>{" "}
-                with fee{" "}
-                <span className="font-bold" style={{ color: "#1a1f36" }}>
-                  "{itemContext.amount}"
-                </span>
-                ?
-              </>
-            ) : (
-              <>
-                Are you sure you want to archive{" "}
-                <span className="font-bold" style={{ color: "#1a1f36" }}>
-                  "{itemName}"
-                </span>
-                ?
-              </>
-            )}
-          </p>
-        </div>
-
-        {warningItems.length > 0 ? (
-          <div className="mx-6 mb-4 overflow-hidden rounded-xl border border-red-200 bg-red-50">
-            <div className="flex flex-col gap-1.5 px-4 py-3">
-              {warningItems.map((warning, index) => {
-                const WarningIcon = warning.icon ?? IoAlertCircleOutline;
-                return (
-                  <div key={`${warning.text}-${index}`} className="flex items-center gap-2">
-                    <WarningIcon className="text-[13px] text-[#dc2626] flex-shrink-0" />
-                    <p className="m-0 text-[13px] leading-relaxed text-[#dc2626]">
-                      {warning.text}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="flex gap-3 px-6 pb-6">
-          <button
-            onClick={onClose}
-            disabled={archiving}
-            className="flex-1 rounded-xl border border-gray-200 bg-white py-2.5 text-[13px] font-semibold cursor-pointer transition-colors hover:bg-gray-50"
-            style={{ fontFamily, color: "#1a1f36" }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={archiving}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-[13px] font-semibold text-white cursor-pointer transition-colors"
-            style={{
-              fontFamily,
-              backgroundColor: archiving ? "#fca5a5" : "#dc2626",
-              border: "none",
-            }}
-            onMouseEnter={(e) => {
-              if (!archiving) e.currentTarget.style.backgroundColor = "#b91c1c";
-            }}
-            onMouseLeave={(e) => {
-              if (!archiving) e.currentTarget.style.backgroundColor = "#dc2626";
-            }}
-          >
-            {archiving ? <Spinner size={4} /> : "Archive"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 };
 

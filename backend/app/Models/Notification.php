@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Events\NotificationUpdated;
 use Illuminate\Database\Eloquent\Model;
 
 class Notification extends Model
@@ -27,6 +28,25 @@ class Notification extends Model
         'read_at' => 'datetime',
         'created_at' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::created(fn (Notification $notification) => static::broadcastNotificationUpdate($notification));
+        static::updated(fn (Notification $notification) => static::broadcastNotificationUpdate($notification));
+    }
+
+    private static function broadcastNotificationUpdate(Notification $notification): void
+    {
+        if (!$notification->recipient_user_id) {
+            return;
+        }
+
+        try {
+            broadcast(new NotificationUpdated($notification));
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
+    }
 
     public function recipientUser()
     {

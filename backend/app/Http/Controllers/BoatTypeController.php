@@ -45,7 +45,7 @@ class BoatTypeController extends Controller
                 'to' => $boatTypes->lastItem(),
             ],
             'stats' => [
-                'total_types' => BoatType::active()->count(),
+                'total_types' => BoatType::withTrashed()->count(),
                 'boat_types_in_use' => BoatType::active()->has('activeBoats')->count(),
                 'boat_types_not_in_use' => BoatType::active()->doesntHave('activeBoats')->count(),
             ],
@@ -112,13 +112,7 @@ class BoatTypeController extends Controller
 
     public function destroy($id)
     {
-        $boatType = BoatType::withCount('activeBoats as boats_count')->findOrFail($id);
-
-        if (($boatType->boats_count ?? 0) > 0) {
-            return response()->json([
-                'message' => 'This boat type has usage count and cannot be archived.',
-            ], 422);
-        }
+        $boatType = BoatType::findOrFail($id);
 
         $boatType->delete();
 

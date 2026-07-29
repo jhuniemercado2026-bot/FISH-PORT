@@ -6,6 +6,7 @@ use App\Models\Boat;
 use App\Models\BoatOwner;
 use App\Models\BoatType;
 use App\Services\ActivityLogService;
+use Cloudinary\Cloudinary;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -32,6 +33,44 @@ class BoatController extends Controller
         return Boat::managementRelations();
     }
 
+    private function cloudinaryUrl(): ?string
+    {
+        $cloudinaryUrl = config('services.cloudinary.url');
+        if ($cloudinaryUrl) {
+            return $cloudinaryUrl;
+        }
+
+        $cloudName = config('services.cloudinary.cloud_name');
+        $apiKey = config('services.cloudinary.api_key');
+        $apiSecret = config('services.cloudinary.api_secret');
+
+        if (! $cloudName || ! $apiKey || ! $apiSecret) {
+            return null;
+        }
+
+        return sprintf('cloudinary://%s:%s@%s', $apiKey, $apiSecret, $cloudName);
+    }
+
+    private function deleteCloudinaryImage(?string $publicId): void
+    {
+        if (! $publicId) {
+            return;
+        }
+
+        $cloudinaryUrl = $this->cloudinaryUrl();
+        if (! $cloudinaryUrl) {
+            return;
+        }
+
+        try {
+            (new Cloudinary($cloudinaryUrl))->uploadApi()->destroy($publicId, [
+                'resource_type' => 'image',
+            ]);
+        } catch (\Throwable $error) {
+            report($error);
+        }
+    }
+
     private function boatIndexQuery()
     {
         return Boat::forManagementIndex();
@@ -39,7 +78,7 @@ class BoatController extends Controller
 
     private function prepareBoatForResponse(Boat $boat): Boat
     {
-        $boat->makeVisible('image_path');
+        $boat->makeVisible(['image_path', 'image_public_id']);
         $boat->makeHidden(['created_by']);
 
         return $boat;
@@ -200,7 +239,7 @@ class BoatController extends Controller
             'boatTypes' => $boatTypes,
             'owners' => $owners,
             'stats' => [
-                'total_registered' => Boat::active()->count(),
+                'total_registered' => Boat::withTrashed()->count(),
                 'active_boats' => Boat::active()->where('status', 'active')->count(),
                 'expired_boats' => Boat::active()->where('status', 'expired')->count(),
                 'suspended_boats' => Boat::active()->where('status', 'suspended')->count(),
@@ -336,15 +375,6 @@ class BoatController extends Controller
     {
         $boat = Boat::findOrFail($id);
 
-        $hasTransactions = $boat->dockings()->exists()
-            || $boat->banyeraTransactions()->exists();
-
-        if ($hasTransactions) {
-            return response()->json([
-                'message' => 'This boat has existing docking or banyera transactions and cannot be archived.',
-            ], 422);
-        }
-
         $boat->delete();
 
         app(ActivityLogService::class)->log(
@@ -376,7 +406,9 @@ class BoatController extends Controller
     {
         $boat = Boat::onlyTrashed()->findOrFail($id);
 
-        if ($boat->image_path && Storage::disk('public')->exists($boat->image_path)) {
+        $this->deleteCloudinaryImage($boat->image_public_id);
+
+        if ($boat->image_path && ! filter_var($boat->image_path, FILTER_VALIDATE_URL) && Storage::disk('public')->exists($boat->image_path)) {
             Storage::disk('public')->delete($boat->image_path);
         }
 
@@ -400,9 +432,43 @@ class BoatController extends Controller
         ]);
 
         $boat = Boat::findOrFail($id);
-        $path = $request->file('image')->store('boats', 'public');
+        $cloudinaryUrl = $this->cloudinaryUrl();
 
-        $boat->update(['image_path' => $path]);
+        if (! $cloudinaryUrl) {
+            return response()->json([
+                'message' => 'Cloudinary is not configured. Please set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.',
+            ], 500);
+        }
+
+        $upload = (new Cloudinary($cloudinaryUrl))->uploadApi()->upload(
+            $request->file('image')->getRealPath(),
+            [
+                'folder' => 'Opol Fish Port/Boat Images',
+                'resource_type' => 'image',
+            ]
+        );
+
+        $path = $upload['secure_url'] ?? $upload['url'] ?? null;
+        $publicId = $upload['public_id'] ?? null;
+
+        if (! $path || ! $publicId) {
+            return response()->json([
+                'message' => 'Cloudinary upload did not return complete image details.',
+            ], 500);
+        }
+
+        $previousPublicId = $boat->image_public_id;
+
+        if ($boat->image_path && ! filter_var($boat->image_path, FILTER_VALIDATE_URL) && Storage::disk('public')->exists($boat->image_path)) {
+            Storage::disk('public')->delete($boat->image_path);
+        }
+
+        $boat->update([
+            'image_path' => $path,
+            'image_public_id' => $publicId,
+        ]);
+
+        $this->deleteCloudinaryImage($previousPublicId);
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
@@ -414,6 +480,7 @@ class BoatController extends Controller
         return response()->json([
             'message'    => 'Image uploaded successfully.',
             'image_path' => $path,
+            'image_public_id' => $publicId,
         ]);
     }
 }

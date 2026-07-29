@@ -17,6 +17,8 @@ export const getDashboardDataQueryOptions = () => ({
       remittances: data?.remittances ?? [],
       dockings: data?.dockings ?? [],
       users: data?.users ?? [],
+      monthlyTargets: data?.monthlyTargets ?? {},
+      yearlyTargets: data?.yearlyTargets ?? {},
     };
   },
   staleTime: 30_000,

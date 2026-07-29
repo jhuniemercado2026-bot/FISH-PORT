@@ -17,13 +17,13 @@ class DatabaseSeeder extends Seeder
         // User::factory(10)->create();
 
         User::firstOrCreate([
-            'email' => 'headofmeoo@gmail.com',
+            'email' => 'headofmeeo.opol@gmail.com',
         ], [
             'password' => Hash::make('password123'),
             'role' => 'head',
             'status' => 'active',
-            'first_name' => 'Head',
-            'last_name' => 'MEEO',
+            'first_name' => 'Jhunie',
+            'last_name' => 'Mercado',
         ]);
 
         User::firstOrCreate([
@@ -36,8 +36,17 @@ class DatabaseSeeder extends Seeder
             'last_name' => 'User',
         ]);
 
+        User::firstOrCreate([
+            'email' => 'occ.mercado.jhunie@gmail.com',
+        ], [
+            'password' => Hash::make('password123'),
+            'role' => 'head',
+            'status' => 'active',
+            'first_name' => 'Jhunie',
+            'last_name' => 'Mercado',
+        ]);
+
         $this->call(BoatTypeLoadTestSeeder::class);
-        $this->call(BoatOwnerLoadTestSeeder::class);
         $this->call(BoatLoadTestSeeder::class);
         $this->call(FeeLoadTestSeeder::class);
         $this->call(DockingLoadTestSeeder::class);

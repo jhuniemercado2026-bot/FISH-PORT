@@ -22,7 +22,7 @@ return new class extends Migration
             $table->unsignedBigInteger('related_id')->nullable();
             $table->boolean('is_read')->default(false);
             $table->timestamp('read_at')->nullable();
-            $table->timestamps();
+            $table->timestamp('created_at')->nullable();
 
             $table->foreign('recipient_user_id')->references('user_id')->on('users')->nullOnDelete();
             $table->foreign('sender_user_id')->references('user_id')->on('users')->nullOnDelete();

@@ -127,7 +127,6 @@ const incrementBoatStats = (stats, statusKey) => {
 const decrementBoatStats = (stats, statusKey) => {
   if (!stats) return stats;
   const nextStats = { ...stats };
-  nextStats.total_registered = adjustStatValue(nextStats.total_registered, -1);
   if (statusKey) {
     nextStats[statusKey] = adjustStatValue(nextStats[statusKey], -1);
   }

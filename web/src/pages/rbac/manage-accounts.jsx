@@ -27,6 +27,7 @@ import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
 import StatusPill from "../../components/StatusPill";
 import FilterSelect from "../../components/FilterSelect";
+import FilterButton from "../../components/FilterButton";
 import Legend from "../../components/Legend";
 import Modal from "../../components/Modal";
 import TableCard from "../../components/TableCard";
@@ -127,7 +128,7 @@ const generatePasswordValue = () => {
 
 
 const TailDropdown = ({ value, onChange, options, height = 42, minWidth = 150 }) => (
-  <FilterSelect value={value} onChange={onChange} options={options} height={height} width={minWidth} />
+  <FilterButton value={value} onChange={onChange} options={options} height={height} width={minWidth} />
 );
 
 const TH = ({ children }) => (

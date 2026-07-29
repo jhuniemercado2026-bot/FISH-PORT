@@ -3,28 +3,29 @@
 namespace App\Http\Controllers;
 
 use App\Models\Boat;
-use Illuminate\Http\Request;
 
 class RegisteredBoatsReportController extends Controller
 {
-    public function index(Request $request)
+    public function index()
     {
-        // Optimize: Use pagination to avoid loading all boats into memory
-        $perPage = (int) $request->query('per_page', 100);
-        $perPage = min($perPage, 1000); // Cap at 1000 to prevent abuse
-
-        $boats = Boat::forManagementIndex()
+        $boats = Boat::withTrashed()
+            ->select('boat_id', 'boat_name', 'owner_id', 'boat_type_id', 'image_path', 'image_public_id', 'status', 'created_at', 'created_by', 'deleted_at')
+            ->with(Boat::managementRelations())
             ->orderByDesc('created_at')
             ->orderByDesc('boat_id')
-            ->paginate($perPage);
+            ->get()
+            ->map(fn (Boat $boat) => $boat->makeVisible('deleted_at'))
+            ->values();
+
+        $total = $boats->count();
 
         return response()->json([
-            'data' => $boats->items(),
+            'data' => $boats,
             'pagination' => [
-                'total' => $boats->total(),
-                'per_page' => $boats->perPage(),
-                'current_page' => $boats->currentPage(),
-                'last_page' => $boats->lastPage(),
+                'total' => $total,
+                'per_page' => $total,
+                'current_page' => 1,
+                'last_page' => 1,
             ],
         ]);
     }

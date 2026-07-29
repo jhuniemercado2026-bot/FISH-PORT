@@ -112,7 +112,9 @@ const Card = ({
   title,
   subtitle,
   children,
+  headerAction = null,
   loading = false,
+  loadingBodyOnly = false,
   skeletonRows = 6,
   skeletonLayout = [],
   className = "",
@@ -127,6 +129,7 @@ const Card = ({
   as: Component = "section",
 }) => {
   const isLoading = useSkeletonLoading(loading);
+  const shouldShowHeaderSkeleton = isLoading && !loadingBodyOnly;
 
   return (
     <Component
@@ -139,10 +142,10 @@ const Card = ({
       aria-busy={isLoading}
     >
       <div
-        className={`flex items-center gap-3 px-5 py-4 ${headerClassName}`.trim()}
+        className={`flex items-center justify-between gap-3 px-5 py-4 ${headerClassName}`.trim()}
         style={{ borderBottom: "1px solid #e5e7eb" }}
       >
-        {isLoading ? (
+        {shouldShowHeaderSkeleton ? (
           <>
             <div className="h-9 w-9 flex-shrink-0 animate-pulse rounded-[10px] bg-slate-200" />
             <div className="min-w-0 flex-1 animate-pulse">
@@ -152,21 +155,24 @@ const Card = ({
           </>
         ) : (
           <>
-            {Icon ? (
-              <div className={`flex h-9 w-9 items-center justify-center rounded-[10px] bg-blue-50 ${iconClassName}`.trim()}>
-                <Icon className="text-[17px] text-blue-500" />
-              </div>
-            ) : null}
-            <div>
-              <p className={`m-0 text-[13px] font-medium text-[#1a1f36] ${titleClassName}`.trim()} style={{ fontFamily }}>
-                {title}
-              </p>
-              {subtitle ? (
-                <p className={`m-0 mt-0.5 text-[11px] text-slate-700 ${subtitleClassName}`.trim()} style={{ fontFamily }}>
-                  {subtitle}
-                </p>
+            <div className="flex min-w-0 items-center gap-3">
+              {Icon ? (
+                <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-blue-50 ${iconClassName}`.trim()}>
+                  <Icon className="text-[17px] text-blue-500" />
+                </div>
               ) : null}
+              <div className="min-w-0">
+                <p className={`m-0 text-[13px] font-medium text-[#1a1f36] ${titleClassName}`.trim()} style={{ fontFamily }}>
+                  {title}
+                </p>
+                {subtitle ? (
+                  <p className={`m-0 mt-0.5 text-[11px] text-slate-700 ${subtitleClassName}`.trim()} style={{ fontFamily }}>
+                    {subtitle}
+                  </p>
+                ) : null}
+              </div>
             </div>
+            {headerAction ? <div className="flex flex-shrink-0 items-center">{headerAction}</div> : null}
           </>
         )}
       </div>

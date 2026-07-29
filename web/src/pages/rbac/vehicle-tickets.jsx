@@ -23,12 +23,16 @@ import {
   IoSearchOutline,
   IoTimeOutline,
   IoTrashOutline,
+  IoArchiveOutline,
   IoWarningOutline,
 } from "react-icons/io5";
 import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
 import FilterSelect from "../../components/FilterSelect";
+import FilterButton from "../../components/FilterButton";
+import IncreaseDecreaseInput from "../../components/IncreaseDecreaseInput";
 import DatePicker from "../../components/DatePicker";
+import EndDatePicker from "../../components/EndDatePicker";
 import Modal from "../../components/Modal";
 import StatusPill from "../../components/StatusPill";
 import TableCard from "../../components/TableCard";
@@ -40,6 +44,7 @@ import Breadcrumbs from "../../components/Breadcrumbs";
 import TitlePage from "../../components/TitlePage";
 import Spinner from "../../components/Spinner";
 import NoDataFound from "../../components/NoDataFound";
+import ArchiveModal from "../../components/ArchiveModal";
 import { useSidebar } from "../../store/sidebarStore";
 import { showAddedToast, showBottomToast, showNoChangesToast, showUpdatedToast } from "../../store/bottomToastStore";
 import api from "../../api/axios";
@@ -47,6 +52,7 @@ import { useVehicleTicketsDataQuery, useVehicleTicketsLookupsQuery, useVehicleTy
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { upsertArchiveItemInDataCache } from "../../utils/archiveCache";
+import { adjustTodaySystemCashReceived, invalidateTodaySystemCashReceived } from "../../utils/remittanceCashCache";
 import { upsertVehicleTicketInCache, updateVehicleTicketStatsInCache, syncVehicleTypeUsageInCache, removeVehicleTicketFromCache } from "../../utils/ticketsCache";
 
 const FONT = "'Montserrat', sans-serif";
@@ -73,13 +79,6 @@ const TABS = [
   { value: "daily", label: "Daily", icon: IoCarOutline },
   { value: "annual", label: "Annual", icon: IoPricetagOutline },
   { value: "types", label: "Vehicle Types", icon: IoListOutline },
-];
-const VEHICLE_TICKET_OVERVIEW_ORDER = [
-  "daily",
-  "annual",
-  "types",
-  "today",
-  "collections",
 ];
 const VEHICLE_TICKET_SEARCH_GROUPS = ["Vehicle Tickets", "Daily Vehicle Tickets", "Annual Vehicle Tickets"];
 const VEHICLE_TYPE_SEARCH_GROUPS = ["Vehicle Type", "Vehicle Types"];
@@ -126,6 +125,7 @@ const getVehicleTicketTabFromLocation = ({ highlightedSearchResult, pathname, se
 const STATUS_FILTER_OPTIONS = [
   { value: "all", label: "All Status" },
   { value: "active", label: "Active" },
+  { value: "expired", label: "Expired" },
   { value: "voided", label: "Voided" },
 ];
 const VEHICLE_TYPE_USAGE_FILTER_OPTIONS = [
@@ -135,6 +135,7 @@ const VEHICLE_TYPE_USAGE_FILTER_OPTIONS = [
 ];
 const VEHICLE_TICKET_TYPE_LEGEND = [
   { key: "active", label: "Active", color: "#16a34a" },
+  { key: "expired", label: "Expired", color: "#ef4444" },
   { key: "voided", label: "Voided", color: "#f59e0b" },
 ];
 const PERIOD_FILTER_OPTIONS = [
@@ -177,6 +178,19 @@ const YEAR_OPTIONS = Array.from({ length: 6 }, (_, idx) => {
 const getTodayDateString = () =>
   new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
 
+const normalizeDateString = (value) => {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+  }
+
+  return raw.slice(0, 10);
+};
+
 const isFutureTicketDate = (dateString) => {
   if (!dateString) return false;
   return dateString > getTodayDateString();
@@ -189,7 +203,7 @@ const filterTicketsByPeriod = (records, period) => {
   const now = new Date(`${todayStr}T00:00:00`);
 
   if (period === "today") {
-    return records.filter((record) => String(record.rawTicketDate || "").slice(0, 10) === todayStr);
+    return records.filter((record) => normalizeDateString(record.rawTicketDate) === todayStr);
   }
 
   if (period === "week") {
@@ -197,21 +211,21 @@ const filterTicketsByPeriod = (records, period) => {
     start.setDate(now.getDate() - now.getDay());
 
     return records.filter((record) => {
-      const date = new Date(`${String(record.rawTicketDate || "").slice(0, 10)}T00:00:00`);
+      const date = new Date(`${normalizeDateString(record.rawTicketDate)}T00:00:00`);
       return !Number.isNaN(date.getTime()) && date >= start && date <= now;
     });
   }
 
   if (period === "month") {
     return records.filter((record) => {
-      const date = new Date(`${String(record.rawTicketDate || "").slice(0, 10)}T00:00:00`);
+      const date = new Date(`${normalizeDateString(record.rawTicketDate)}T00:00:00`);
       return !Number.isNaN(date.getTime()) && date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
     });
   }
 
   if (period === "year") {
     return records.filter((record) => {
-      const date = new Date(`${String(record.rawTicketDate || "").slice(0, 10)}T00:00:00`);
+      const date = new Date(`${normalizeDateString(record.rawTicketDate)}T00:00:00`);
       return !Number.isNaN(date.getTime()) && date.getFullYear() === now.getFullYear();
     });
   }
@@ -254,8 +268,8 @@ const getInitialFeeItems = () => [
 ];
 
 const buildTicketFormFromRecord = (ticket, ticketType = "daily") => {
-  const ticketDate = String(ticket?.ticket_date || getTodayDateString()).slice(0, 10);
-  const endDate = String(ticket?.end_date || "").slice(0, 10);
+  const ticketDate = normalizeDateString(ticket?.ticket_date || getTodayDateString());
+  const endDate = normalizeDateString(ticket?.end_date);
   const ticketDateParts = getDateParts(ticketDate);
   const endDateParts = getDateParts(endDate);
 
@@ -305,7 +319,7 @@ const buildFeeItemsFromRecord = (ticket, fees = [], ticketType = "daily") => {
 
 const formatDisplayDate = (value) => {
   if (!value) return "-";
-  const normalized = String(value).slice(0, 10);
+  const normalized = normalizeDateString(value);
   const [year = "", month = "", day = ""] = normalized.split("-");
   if (!year || !month || !day) return normalized;
   return new Date(Number(year), Number(month) - 1, Number(day)).toLocaleDateString("en-PH", {
@@ -411,12 +425,16 @@ const isLinkedToAnnualRegistration = (controlNumber, annualTickets = []) => {
 };
 
 const isValidAnnualTicket = (ticket) => {
-  if (String(ticket?.ticket_type || "").toLowerCase() !== "annual") return false;
-  if (ticket?.is_voided || ticket?.voided_at) return false;
+  const ticketType = String(ticket?.ticket_type || ticket?.ticketType || "").toLowerCase();
+  const status = String(ticket?.status || "").toLowerCase();
+
+  if (ticketType !== "annual") return false;
+  if (ticket?.is_voided || ticket?.isVoided || ticket?.voided_at || ticket?.voidedAt) return false;
+  if (status === "expired" || status === "voided") return false;
 
   const today = getTodayDateString();
-  const startDate = String(ticket?.ticket_date || "").slice(0, 10);
-  const endDate = String(ticket?.end_date || ticket?.ticket_date || "").slice(0, 10);
+  const startDate = normalizeDateString(ticket?.ticket_date || ticket?.rawTicketDate);
+  const endDate = normalizeDateString(ticket?.end_date || ticket?.rawEndDate || ticket?.ticket_date || ticket?.rawTicketDate);
 
   if (startDate && startDate > today) return false;
   if (endDate && endDate < today) return false;
@@ -465,57 +483,63 @@ const resolveStatus = (ticket) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const ticketDate = ticket.ticket_date ? new Date(`${String(ticket.ticket_date).slice(0, 10)}T00:00:00`) : null;
-  const endDate = ticket.end_date ? new Date(`${String(ticket.end_date).slice(0, 10)}T00:00:00`) : null;
+  const endDate = ticket.end_date ? new Date(`${normalizeDateString(ticket.end_date)}T00:00:00`) : null;
 
   if (endDate && endDate < today) return "expired";
-  if (ticketDate && ticketDate > today) return "pending";
   return "active";
 };
 
-const normalizeTicket = (ticket) => ({
-  id: ticket.ticket_id,
-  controlNumber:
-    String(ticket.ticket_type || "").toLowerCase() === "annual"
-      ? ticket.control_number || `VTC-${String(ticket.ticket_id).padStart(4, "0")}`
-      : ticket.control_number || "",
-  officialReceiptNo: ticket.official_receipt_no || ticket.officialReceiptNo || "-",
-  vehicleTypeId: String(ticket.vehicle_type_id ?? ""),
-  vehicleTypeName: ticket.vehicle_type?.type_name || "-",
-  plateNumber: ticket.plate_number || "-",
-  driverName: ticket.driver_name || "-",
-  ticketType: String(ticket.ticket_type || "").toLowerCase() === "annual" ? "Annual" : "Daily",
-  feeName:
-    ticket.fee?.fee_type_name ||
-    ticket.fee?.fee_type?.fee_name ||
-    ticket.fee?.feeType?.fee_name ||
-    ticket.fee?.fee_name ||
-    "-",
-  feeId: String(ticket.fee_id ?? ""),
-  ticketFee: Number(ticket.ticket_fee || 0),
-  dailyFee: Number(ticket.daily_fee || 0),
-  banyeraFee: Number(ticket.banyera_fee || 0),
-  rawTicketDate: String(ticket.ticket_date || "").slice(0, 10),
-  ticketDate: formatDisplayDate(ticket.ticket_date),
-  endDate: formatDisplayDate(ticket.end_date),
-  status: String(ticket.status || resolveStatus(ticket)),
-  isVoided: Boolean(ticket.is_voided || ticket.voided_at),
-  voidReason: ticket.void_reason || "",
-  voidedAt: ticket.voided_at || null,
-  voidedBy:
-    String(ticket.voided_by_name || "").trim() ||
-    String(ticket.voidedBy?.full_name || "").trim() ||
-    String(ticket.voidedBy?.email || "").trim() ||
-    String(ticket.voided_by?.email || "").trim() ||
-    "-",
-  encodedBy:
-    String(ticket.created_by_name || "").trim() ||
-    String(ticket.createdBy?.full_name || "").trim() ||
-    String(ticket.createdBy?.email || "").trim() ||
-    String(ticket.created_by?.full_name || "").trim() ||
-    String(ticket.created_by?.email || "").trim() ||
-    "-",
-});
+const normalizeTicket = (ticket) => {
+  const resolvedStatus = resolveStatus(ticket);
+  const backendStatus = String(ticket.status || "").toLowerCase();
+  const normalizedBackendStatus = backendStatus === "pending" ? "active" : backendStatus;
+  const isVoided = Boolean(ticket.is_voided || ticket.voided_at);
+
+  return {
+    id: ticket.ticket_id,
+    controlNumber:
+      String(ticket.ticket_type || "").toLowerCase() === "annual"
+        ? ticket.control_number || `VTC-${String(ticket.ticket_id).padStart(4, "0")}`
+        : ticket.control_number || "",
+    officialReceiptNo: ticket.official_receipt_no || ticket.officialReceiptNo || "-",
+    vehicleTypeId: String(ticket.vehicle_type_id ?? ""),
+    vehicleTypeName: ticket.vehicle_type?.type_name || "-",
+    plateNumber: ticket.plate_number || "-",
+    driverName: ticket.driver_name || "-",
+    ticketType: String(ticket.ticket_type || "").toLowerCase() === "annual" ? "Annual" : "Daily",
+    feeName:
+      ticket.fee?.fee_type_name ||
+      ticket.fee?.fee_type?.fee_name ||
+      ticket.fee?.feeType?.fee_name ||
+      ticket.fee?.fee_name ||
+      "-",
+    feeId: String(ticket.fee_id ?? ""),
+    ticketFee: Number(ticket.ticket_fee || 0),
+    dailyFee: Number(ticket.daily_fee || 0),
+    banyeraFee: Number(ticket.banyera_fee || 0),
+    rawTicketDate: normalizeDateString(ticket.ticket_date),
+    rawEndDate: normalizeDateString(ticket.end_date),
+    ticketDate: formatDisplayDate(ticket.ticket_date),
+    endDate: formatDisplayDate(ticket.end_date),
+    status: isVoided ? "voided" : resolvedStatus === "expired" ? "expired" : normalizedBackendStatus || resolvedStatus,
+    isVoided,
+    voidReason: ticket.void_reason || "",
+    voidedAt: ticket.voided_at || null,
+    voidedBy:
+      String(ticket.voided_by_name || "").trim() ||
+      String(ticket.voidedBy?.full_name || "").trim() ||
+      String(ticket.voidedBy?.email || "").trim() ||
+      String(ticket.voided_by?.email || "").trim() ||
+      "-",
+    encodedBy:
+      String(ticket.created_by_name || "").trim() ||
+      String(ticket.createdBy?.full_name || "").trim() ||
+      String(ticket.createdBy?.email || "").trim() ||
+      String(ticket.created_by?.full_name || "").trim() ||
+      String(ticket.created_by?.email || "").trim() ||
+      "-",
+  };
+};
 
 const toMoneyCents = (value) => Math.round(Number(value || 0) * 100);
 
@@ -721,7 +745,7 @@ const isVehicleFee = (fee) => {
 };
 
 const TailDropdown = ({ value, onChange, options, height = 38 }) => (
-  <FilterSelect
+  <FilterButton
     {...VEHICLE_TICKET_FILTER_DROPDOWN_PROPS}
     value={value}
     onChange={onChange}
@@ -802,12 +826,12 @@ const DrawerField = ({ label, required, error, children }) => (
   </div>
 );
 
-const ModalInput = ({ label, required, error, icon: Icon, inputStyle, ...props }) => {
+const ModalInput = ({ label, required, error, icon: Icon, inputStyle, wrapperClassName = "", ...props }) => {
   const visibleError = props.readOnly ? "" : error;
 
   return (
   <DrawerField label={label} required={required} error={visibleError}>
-    <div className="modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border border-slate-200 bg-white px-4 transition-all focus-within:border-[#4096ff]">
+    <div className={`modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border border-slate-200 bg-white px-4 transition-all focus-within:border-[#4096ff] ${wrapperClassName}`}>
       <input
         {...props}
         className="w-full border-none bg-transparent text-[14px] font-medium text-[#0d1117] outline-none placeholder:font-normal placeholder:text-slate-400"
@@ -815,55 +839,6 @@ const ModalInput = ({ label, required, error, icon: Icon, inputStyle, ...props }
       />
     </div>
   </DrawerField>
-  );
-};
-
-const DeleteConfirmModal = ({ open, title, recordLabel, message, deleting, onClose, onConfirm }) => {
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center px-4" style={{ backgroundColor: "rgba(10,13,28,0.55)", backdropFilter: "blur(6px)" }}>
-      <div
-        className="bg-white w-full overflow-hidden"
-        style={{ maxWidth: 400, borderRadius: 20, boxShadow: "0 24px 64px rgba(0,0,0,0.2)", fontFamily: FONT, animation: "modalPop 0.22s cubic-bezier(0.34,1.56,0.64,1)" }}
-      >
-        <style>{`@keyframes modalPop{from{opacity:0;transform:scale(0.92) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}`}</style>
-        <div className="px-6 pt-8 pb-5 flex flex-col items-center text-center">
-          <div className="mb-5 flex items-center justify-center" style={{ width: 68, height: 68, borderRadius: 18, backgroundColor: "#fef2f2" }}>
-            <IoWarningOutline style={{ fontSize: 36, color: "#ef4444" }} />
-          </div>
-          <p className="m-0 text-[18px] font-bold mb-2" style={{ color: "#0d1117" }}>{title}</p>
-          <p className="m-0 text-[15px] leading-relaxed" style={{ color: "#64748b" }}>
-            {message || (
-              <>
-                Are you sure you want to archive{" "}
-                <span className="font-bold" style={{ color: "#1a1f36" }}>"{recordLabel || "this record"}"</span>?
-              </>
-            )}
-          </p>
-        </div>
-        <div className="px-6 pb-6 flex gap-3">
-          <button
-            onClick={onClose}
-            disabled={deleting}
-            className="flex-1 py-2.5 rounded-xl border border-gray-200 bg-white text-[13px] font-semibold cursor-pointer hover:bg-gray-50 transition-colors"
-            style={{ fontFamily: FONT, color: "#1a1f36" }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={deleting}
-            className="flex-1 py-2.5 rounded-xl text-white text-[13px] font-semibold cursor-pointer transition-colors flex items-center justify-center gap-2"
-            style={{ fontFamily: FONT, backgroundColor: deleting ? "#fca5a5" : "#ef4444", border: "none" }}
-            onMouseEnter={(e) => { if (!deleting) e.currentTarget.style.backgroundColor = "#dc2626"; }}
-            onMouseLeave={(e) => { if (!deleting) e.currentTarget.style.backgroundColor = "#ef4444"; }}
-          >
-            {deleting ? <Spinner size={15} /> : "Archive"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 };
 
@@ -904,7 +879,8 @@ const VoidVehicleTicketModal = ({
           value={ticket.vehicleTypeName || "-"}
           readOnly
           disabled
-          inputStyle={{ color: "#64748b" }}
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
         />
         <ModalInput
           label="Date"
@@ -912,7 +888,8 @@ const VoidVehicleTicketModal = ({
           value={ticket.ticketDate || "-"}
           readOnly
           disabled
-          inputStyle={{ color: "#64748b" }}
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
         />
         <ModalInput
           label="Ticket Fee"
@@ -920,7 +897,8 @@ const VoidVehicleTicketModal = ({
           value={`₱${formatMoneyValue(ticket.ticketFee || 0)}`}
           readOnly
           disabled
-          inputStyle={{ color: "#64748b" }}
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
         />
         <DrawerField label="Reason" required error={selectedReason === "others" ? "" : error}>
           <FilterSelect
@@ -1084,7 +1062,7 @@ const AddVehicleTicketDrawer = ({
         const nextFeeId =
           isAnnualRegisteredDailyEntry && row.row_type === "daily"
             ? row.fee_id
-            : row.fee_id || currentRow?.fee_id || "";
+            : row.fee_id || "";
         return {
           ...row,
           fee_id: nextFeeId,
@@ -1093,6 +1071,27 @@ const AddVehicleTicketDrawer = ({
       });
     });
   }, [fees, form.vehicle_type_id, isAnnualRegisteredDailyEntry, isAnnualTicket, open]);
+
+  useEffect(() => {
+    if (!open || !isAnnualTicket || !form.vehicle_type_id) return;
+
+    const selectedFee = getAutoFeeForTicketType(applicableFees, "annual");
+    const nextFeeId = selectedFee ? String(selectedFee.fee_id) : "";
+
+    setFeeItems((current) => {
+      const currentAnnualRow = current[0] ?? { fee_id: "", quantity: "1" };
+      if (String(currentAnnualRow.fee_id || "") === nextFeeId) return current;
+
+      return [
+        {
+          ...currentAnnualRow,
+          fee_id: nextFeeId,
+          quantity: currentAnnualRow.quantity || "1",
+          row_type: "annual",
+        },
+      ];
+    });
+  }, [applicableFees, form.vehicle_type_id, isAnnualTicket, open]);
 
   useEffect(() => {
     setForm((current) => {
@@ -1273,6 +1272,7 @@ const AddVehicleTicketDrawer = ({
     if (!hasFeeSelection) nextErrors.fee_id = "Fee is required.";
     if (!builtTicketDate) nextErrors.ticket_date = "Ticket date is required.";
     if (builtTicketDate && isFutureTicketDate(builtTicketDate)) nextErrors.ticket_date = "Ticket date cannot be in the future.";
+    if (isAnnualTicket && !builtEndDate) nextErrors.end_date = "End date is required.";
     if (builtEndDate && builtEndDate < builtTicketDate) nextErrors.end_date = "End date must be after or equal to ticket date.";
     visibleFeeItems.forEach((item, index) => {
       const isAutoBanyeraRow = item.row_type === "banyera";
@@ -1295,10 +1295,7 @@ const AddVehicleTicketDrawer = ({
         const duplicate = (tickets || []).find((t) => {
           const tPlate = String(t.plate_number || t.plateNumber || "").trim().toLowerCase();
           if (!tPlate) return false;
-          const tType = String(t.ticket_type || t.ticketType || "").toLowerCase();
-          if (tType !== "annual") return false;
-          const tVoided = Boolean(t.is_voided || t.isVoided || t.voided_at || t.voidedAt);
-          if (tVoided) return false;
+          if (!isValidAnnualTicket(t)) return false;
           const tId = String(t.ticket_id || t.id || "");
           const editingId = String(editingTicket?.ticket_id || editingTicket?.id || "");
           if (editingTicket && editingId && tId === editingId) return false;
@@ -1558,35 +1555,15 @@ const AddVehicleTicketDrawer = ({
           {isAnnualTicket ? (
             <>
               <div className={errors.fee_id || errors.fee_item_0 ? "modal-field-control-error" : ""}>
-                <FilterSelect
-                  className="annual-fee-readonly"
-                  width="100%"
-                  height={46}
-                  showSearch={false}
-                  placeholder="Select an active fee"
-                  optionFilterProp="label"
-                  optionLabelProp="label"
-                  getPopupContainer={() => document.body}
-                  placement="bottomLeft"
-                  value={feeItems[0]?.fee_id || undefined}
-                  open={false}
-                  suffixIcon={null}
-                  onMouseDown={(event) => event.preventDefault()}
-                  placeholder={form.vehicle_type_id ? "Select an active fee" : "Select vehicle type first"}
-                  onChange={(value) => {
-                    setFeeItems((current) => [{ ...current[0], fee_id: value ?? "", quantity: current[0]?.quantity || "1" }]);
-                    setErrors((current) => ({
-                      ...current,
-                      fee_id: "",
-                      fee_item_0: "",
-                      ticket_fee: "",
-                    }));
-                  }}
-                  options={applicableFees.map((fee) => ({
-                    value: String(fee.fee_id),
-                    label: formatMoney(fee.amount),
-                  }))}
-                />
+                <div className="modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border border-slate-200 bg-slate-100 px-4 transition-all">
+                  <input
+                    readOnly
+                    value={selectedAnnualFee ? formatMoney(selectedAnnualFee.amount) : ""}
+                    placeholder={form.vehicle_type_id && applicableFees.length === 0 ? "No matching vehicle type fee" : "₱0.00"}
+                    className="w-full cursor-default border-none bg-transparent text-[14px] font-medium text-[#0d1117] outline-none placeholder:font-normal placeholder:text-slate-400"
+                    style={{ fontFamily: FONT }}
+                  />
+                </div>
               </div>
               {errors.fee_id ? (
                 <div className="mt-2 flex items-center gap-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2">
@@ -1616,7 +1593,7 @@ const AddVehicleTicketDrawer = ({
           <div className="rounded-2xl border border-slate-200 bg-white p-3">
             <div
               className="mb-2 grid items-center gap-2 px-1"
-              style={{ gridTemplateColumns: "minmax(0,2.8fr) minmax(72px,0.7fr) minmax(120px,1fr) 36px" }}
+              style={{ gridTemplateColumns: "minmax(0,2fr) minmax(96px,0.65fr) minmax(0,1.2fr) 40px" }}
             >
               <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>DAILY TICKET</p>
               <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Qty</p>
@@ -1651,7 +1628,7 @@ const AddVehicleTicketDrawer = ({
                 <div
                   key={`fee-item-${index}`}
                   className="mb-2 grid items-start gap-2 last:mb-0"
-                  style={{ gridTemplateColumns: "minmax(0,2.8fr) minmax(72px,0.7fr) minmax(120px,1fr) 36px" }}
+                  style={{ gridTemplateColumns: "minmax(0,2fr) minmax(96px,0.65fr) minmax(0,1.2fr) 40px" }}
                 >
                   <div>
                     {showRowLabel ? (
@@ -1670,14 +1647,11 @@ const AddVehicleTicketDrawer = ({
                   </div>
 
                   <div className={showRowLabel ? "pt-[18px]" : ""}>
-                    <input
-                      type="text"
-                      inputMode="numeric"
+                    <IncreaseDecreaseInput
                       value={item.quantity}
-                      onChange={(event) => handleFeeItemQuantityChange(rowType, event.target.value)}
+                      onChange={(value) => handleFeeItemQuantityChange(rowType, value)}
                       placeholder="0"
-                      className="h-[46px] w-full rounded-xl border border-slate-200 bg-white px-3 text-center text-[12px] outline-none"
-                      style={{ fontFamily: FONT }}
+                      ariaLabel={`${rowType} ticket quantity`}
                     />
                     {errors[`fee_qty_${index}`] ? (
                       <div className="mt-2 flex items-center gap-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2">
@@ -1695,7 +1669,7 @@ const AddVehicleTicketDrawer = ({
                       readOnly
                       value={item.fee_id || item.quantity || isZeroedDailyRow ? `₱${formatMoneyValue(subtotal)}` : "₱0.00"}
                       placeholder="₱0.00"
-                      className="h-[46px] w-full rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-medium outline-none"
+                      className="h-[46px] w-full rounded-xl border border-slate-200 bg-slate-100 px-3 text-[12px] font-medium outline-none"
                       style={{ color: item.fee_id || item.quantity || isZeroedDailyRow ? "#0d1117" : "#94a3b8", fontFamily: FONT }}
                     />
                   </div>
@@ -1703,7 +1677,7 @@ const AddVehicleTicketDrawer = ({
                   <div>
                     {showRowLabel ? <div className="mb-1 h-[13px]" /> : null}
                     <div className="flex h-[46px] items-center justify-center">
-                      {item.fee_id && !isZeroedDailyRow ? (
+                      {!isZeroedDailyRow ? (
                         <button
                           type="button"
                           onClick={() => handleFeeItemRemove(rowType)}
@@ -1737,18 +1711,13 @@ const AddVehicleTicketDrawer = ({
             value={buildDateFromParts(form.ticket_date_year, form.ticket_date_month, form.ticket_date_day)}
             onChange={(_, currentDateString) => {
               const [year = "", month = "", day = ""] = String(currentDateString || "").split("-");
-              setForm((current) =>
-                syncAnnualEndDate(
-                  {
-                    ...current,
-                    ticket_date: currentDateString || "",
-                    ticket_date_year: year,
-                    ticket_date_month: month,
-                    ticket_date_day: day,
-                  },
-                  isAnnualTicket
-                )
-              );
+              setForm((current) => ({
+                ...current,
+                ticket_date: currentDateString || "",
+                ticket_date_year: year,
+                ticket_date_month: month,
+                ticket_date_day: day,
+              }));
               setErrors((current) => ({ ...current, ticket_date: "" }));
             }}
             placeholder="Select ticket date"
@@ -1759,30 +1728,28 @@ const AddVehicleTicketDrawer = ({
         </DrawerField>
 
         {isAnnualTicket ? (
-          // End date auto-calculated and shown as a labeled, read-only input
-          <ModalInput
-            label="End Date"
-            error={errors.end_date}
-            icon={IoCalendarOutline}
-            value={(function () {
-              const built = buildDateFromParts(form.ticket_date_year, form.ticket_date_month, form.ticket_date_day);
-              const next = addOneYearToDateString(built);
-              return next ? formatDisplayDate(next) : "";
-            })()}
-            readOnly
-            disabled
-            inputStyle={{ color: "#64748b" }}
-          />
+          <DrawerField label="End Date" error={errors.end_date}>
+            <EndDatePicker
+              value={form.end_date_year || form.end_date_month || form.end_date_day ? buildDateFromParts(form.end_date_year, form.end_date_month, form.end_date_day) : undefined}
+              onChange={(_, currentDateString) => {
+                setForm((current) => applyEndDate(current, currentDateString || ""));
+                setErrors((current) => ({ ...current, end_date: "" }));
+              }}
+              placeholder="Select end date"
+              containerClassName="w-full"
+              inputClassName={errors.end_date ? "border-red-300" : "border-slate-200"}
+            />
+          </DrawerField>
         ) : null}
 
         <ModalInput
           label="Ticket Fee"
-          required
           icon={IoCashOutline}
           readOnly
           disabled={isEditingAnnualTicket}
           value={form.ticket_fee ? formatMoney(form.ticket_fee) : ""}
           placeholder="₱0.00"
+          wrapperClassName="!bg-slate-100"
           inputStyle={{ color: isEditingAnnualTicket ? "#64748b" : Number(form.ticket_fee || 0) > 0 ? "#0d1117" : "#94a3b8" }}
         />
       </div>
@@ -2028,7 +1995,7 @@ const SuperVehicleTickets = () => {
   const [activeTab, setActiveTab] = useState(initialActiveTab);
   const breadcrumbLabel = activeTab === "daily" ? "Daily Vehicle Tickets" : activeTab === "annual" ? "Annual Vehicle Tickets" : "Vehicle Types";
   const [requestedPage, setRequestedPage] = useState(1);
-  const [currentPage, setCurrentPage] = useState(1);
+  const currentPage = useDebouncedValue(requestedPage, 150);
   const [typesPage, setTypesPage] = useState(1);
   const typePage = typesPage;
   const [showAddDrawer, setShowAddDrawer] = useState(false);
@@ -2113,6 +2080,7 @@ const SuperVehicleTickets = () => {
     setDismissedHighlightToken("");
   }, [location.key]);
   const ticketTypeFilter = activeTab === "daily" || activeTab === "annual" ? activeTab : "all";
+  const serverStatusFilter = activeTab === "annual" && statusFilter === "expired" ? "all" : statusFilter;
   const lookupsQuery = useVehicleTicketsLookupsQuery({
     enabled: showAddDrawer || Boolean(editingTicket),
   });
@@ -2129,13 +2097,13 @@ const SuperVehicleTickets = () => {
     page: currentPage,
     perPage: PAGE_SIZE,
     search: debouncedSearch,
-    status: statusFilter,
+    status: serverStatusFilter,
     period: ticketPeriodFilter,
     vehicleType: "all",
     ticketType: ticketTypeFilter,
     highlightTicketId: highlightedTicketId,
     filters: {
-      status: statusFilter,
+      status: serverStatusFilter,
       period: ticketPeriodFilter,
       vehicleType: "all",
       ticketType: ticketTypeFilter,
@@ -2173,7 +2141,10 @@ const SuperVehicleTickets = () => {
   const ticketStats = data?.stats ?? {
     annual_tickets: 0,
     daily_tickets: 0,
+    annual_tickets_today: 0,
     daily_tickets_today: 0,
+    daily_collections_today: 0,
+    annual_collections_today: 0,
     today_collections: 0,
   };
   const rawVehicleTypes = sortVehicleTypesByCreatedAt(
@@ -2196,7 +2167,6 @@ const SuperVehicleTickets = () => {
   const fees = lookupsQuery.data?.fees ?? [];
   const resetTicketPage = () => {
     setRequestedPage(1);
-    setCurrentPage(1);
   };
   const vehicleFees = useMemo(() => {
     const matchedVehicleFees = fees.filter((fee) => isVehicleFee(fee));
@@ -2311,17 +2281,35 @@ const SuperVehicleTickets = () => {
     queryClient.setQueriesData({ queryKey: ["vehicle-tickets-data", "vehicle-types"] }, (previous) => {
       if (!previous?.vehicleTypes) return previous;
 
-      const nextVehicleTypes = (previous.vehicleTypes ?? []).filter(
-        (type) => String(type?.vehicle_type_id ?? "") !== String(id)
+      const previousVehicleTypes = previous.vehicleTypes ?? [];
+      const removedVehicleType = previousVehicleTypes.find(
+        (type) => String(type?.vehicle_type_id ?? type?.id ?? "") === String(id)
+      );
+      const removedWasUsed = Number(removedVehicleType?.tickets_count ?? removedVehicleType?.ticketsUsing ?? 0) > 0;
+      const nextVehicleTypes = previousVehicleTypes.filter(
+        (type) => String(type?.vehicle_type_id ?? type?.id ?? "") !== String(id)
       );
 
-      if (nextVehicleTypes.length === (previous.vehicleTypes ?? []).length) {
+      if (nextVehicleTypes.length === previousVehicleTypes.length) {
         return previous;
       }
+
+      const nextVehicleTypesSummary = previous.vehicleTypesSummary
+        ? {
+            ...previous.vehicleTypesSummary,
+            used: removedWasUsed
+              ? Math.max(0, Number(previous.vehicleTypesSummary.used ?? 0) - 1)
+              : previous.vehicleTypesSummary.used,
+            unused: removedWasUsed
+              ? previous.vehicleTypesSummary.unused
+              : Math.max(0, Number(previous.vehicleTypesSummary.unused ?? 0) - 1),
+          }
+        : previous.vehicleTypesSummary;
 
       return {
         ...previous,
         vehicleTypes: nextVehicleTypes,
+        vehicleTypesSummary: nextVehicleTypesSummary,
         vehicleTypesMeta: previous.vehicleTypesMeta
           ? {
               ...previous.vehicleTypesMeta,
@@ -2360,6 +2348,10 @@ const SuperVehicleTickets = () => {
     if (includeLookups) {
       void queryClient.invalidateQueries({ queryKey: ["vehicle-tickets-lookups"], refetchType: "active" });
     }
+
+    invalidateTodaySystemCashReceived(queryClient);
+    void queryClient.invalidateQueries({ queryKey: ["vehicle-ticket-report"], refetchType: "active" });
+    void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
   };
 
   const createTicketMutation = useMutation({
@@ -2374,6 +2366,7 @@ const SuperVehicleTickets = () => {
       upsertTicketInCache(savedTicket);
       updateVehicleTicketStatsInCache(queryClient, savedTicket, "add");
       syncVehicleTypeUsageInCache(queryClient, savedTicket);
+      adjustTodaySystemCashReceived(queryClient, savedTicket?.ticket_date, savedTicket?.ticket_fee);
       setShowAddDrawer(false);
       setEditingTicket(null);
       showAddedToast("Vehicle Ticket", "vehicle ticket");
@@ -2531,7 +2524,10 @@ const SuperVehicleTickets = () => {
     onSettled: () => setDeletingTicketId(null),
   });
 
-  const filteredTickets = tickets;
+  const filteredTickets = useMemo(() => {
+    if (statusFilter === "all") return tickets;
+    return tickets.filter((ticket) => String(ticket.status || "").toLowerCase() === statusFilter);
+  }, [statusFilter, tickets]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -2540,7 +2536,6 @@ const SuperVehicleTickets = () => {
     setActiveTab(getVehicleTicketTabFromLocation({ highlightedSearchResult, pathname: location.pathname, search: location.search }));
     if (params.get("highlight")?.startsWith("ticket-")) {
       setRequestedPage(1);
-      setCurrentPage(1);
     }
     if (params.get("highlight")?.startsWith("vehicle-type-")) {
       setActiveTab("types");
@@ -2569,15 +2564,18 @@ const SuperVehicleTickets = () => {
   const isTicketInitialLoading = !isError && isLoading && !data && !showAddDrawer && !editingTicket;
   const isTicketOverviewLoading = false;
   const requestTicketPage = (pageOrUpdater) => {
-    void queryClient.cancelQueries({ queryKey: ["vehicle-tickets-data"] });
+    clearUniversalHighlight();
 
-    const nextPage = typeof pageOrUpdater === "function"
-      ? pageOrUpdater(requestedPage)
-      : pageOrUpdater;
-    const normalizedPage = Math.min(Math.max(1, Number(nextPage) || 1), totalPages);
+    setRequestedPage((page) => {
+      const nextPage = typeof pageOrUpdater === "function" ? pageOrUpdater(page) : pageOrUpdater;
+      const boundedPage = Math.min(Math.max(1, Number(nextPage) || 1), totalPages);
 
-    setRequestedPage(normalizedPage);
-    setCurrentPage(normalizedPage);
+      if (boundedPage !== page) {
+        void queryClient.cancelQueries({ queryKey: ["vehicle-tickets-data"], type: "active" });
+      }
+
+      return boundedPage;
+    });
   };
   const highlightedTicketIndex =
     highlightedTicketId
@@ -2591,17 +2589,15 @@ const SuperVehicleTickets = () => {
   useEffect(() => {
     if (highlightedTicketIndex < 0) return;
     setRequestedPage(safePage);
-    setCurrentPage(safePage);
-  }, [highlightedTicketIndex]);
+  }, [highlightedTicketIndex, safePage]);
 
   useEffect(() => {
     if (!highlightedTicketId) return;
     const resolvedPage = Number(ticketsMeta.current_page || 0);
-    if (resolvedPage > 0 && (resolvedPage !== currentPage || resolvedPage !== requestedPage)) {
+    if (resolvedPage > 0 && resolvedPage !== requestedPage) {
       setRequestedPage(resolvedPage);
-      setCurrentPage(resolvedPage);
     }
-  }, [currentPage, highlightedTicketId, requestedPage, ticketsMeta.current_page]);
+  }, [highlightedTicketId, requestedPage, ticketsMeta.current_page]);
 
   useEffect(() => {
     if (highlightedVehicleTypeIndex < 0) return;
@@ -2617,19 +2613,8 @@ const SuperVehicleTickets = () => {
   }, [highlightedVehicleTypeId, typePage, vehicleTypesMeta.current_page]);
 
   useEffect(() => {
-    if (requestedPage === currentPage) return undefined;
-
-    const timeout = window.setTimeout(() => {
-      setCurrentPage(requestedPage);
-    }, 140);
-
-    return () => window.clearTimeout(timeout);
-  }, [currentPage, requestedPage]);
-
-  useEffect(() => {
     if (requestedPage <= totalPages) return;
     setRequestedPage(totalPages);
-    setCurrentPage(totalPages);
   }, [requestedPage, totalPages]);
 
   const totalTypePages = Math.max(1, Number(vehicleTypesMeta.last_page || 1));
@@ -2648,17 +2633,25 @@ const SuperVehicleTickets = () => {
 
   const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
   const isLockedTicketDate = (value) =>
-    Boolean(transactionLock?.date) && String(value || "").slice(0, 10) === transactionLock.date;
-  const isDailyTicketEditableToday = (ticket) =>
-    ticket?.ticketType !== "Daily" || String(ticket?.rawTicketDate || "").slice(0, 10) === todayManila;
+    Boolean(transactionLock?.date) && normalizeDateString(value) === transactionLock.date;
+  const isTicketEditableToday = (ticket) => {
+    const ticketType = String(ticket?.ticketType || "").toLowerCase();
+    if (ticketType !== "daily" && ticketType !== "annual") return true;
+    return normalizeDateString(ticket?.rawTicketDate || ticket?.ticket_date) === todayManila;
+  };
+  const getVoidRestrictionMessage = (ticket) => {
+    const ticketType = String(ticket?.ticketType || "").toLowerCase();
+    if (ticketType === "annual") {
+      return "Only today's annual vehicle ticket records can be voided.";
+    }
+    return "Only today's daily vehicle ticket records can be voided.";
+  };
   const isTodayDateLocked = transactionLock?.date === todayManila;
   const annualTickets = ticketStats.annual_tickets ?? 0;
   const dailyTickets = ticketStats.daily_tickets ?? 0;
+  const annualTicketsToday = ticketStats.annual_tickets_today ?? 0;
   const dailyTicketsToday = ticketStats.daily_tickets_today ?? 0;
-  const todayCollections = Number(
-    ticketStats.today_collections ??
-      (Number(ticketStats.daily_collections_today ?? 0) + Number(ticketStats.annual_collections_today ?? 0))
-  );
+  const dailyCollectionsToday = Number(ticketStats.daily_collections_today ?? 0);
 
   const vehicleTypesTotal = vehicleTypesSummary.total ?? vehicleTypes.length;
   const vehicleTypesInUse = vehicleTypesSummary.used ?? vehicleTypes.filter((type) => type.ticketsUsing > 0).length;
@@ -2707,8 +2700,8 @@ const SuperVehicleTickets = () => {
       return;
     }
 
-    if (ticket.ticketType !== "Annual" && !isDailyTicketEditableToday(ticket)) {
-      showBottomToast("error", "Void Disabled", "Only today's daily vehicle ticket records can be voided.");
+    if (!isTicketEditableToday(ticket)) {
+      showBottomToast("error", "Void Disabled", getVoidRestrictionMessage(ticket));
       return;
     }
 
@@ -2789,24 +2782,22 @@ const SuperVehicleTickets = () => {
     createVehicleTypeMutation.mutate({ type_name: trimmedTypeName });
   };
 
-  const ticketOverviewCardsByKey = {
-    daily: { title: "Total Daily Tickets", value: dailyTickets, icon: IoCarOutline, tone: "blue", loading: isOverviewLoading },
-    annual: { title: "Total Annual Tickets", value: annualTickets, icon: IoCarOutline, tone: "slate", loading: isOverviewLoading },
-    today: { title: "Today's Daily Ticket", value: dailyTicketsToday, icon: IoCarOutline, tone: "blue", loading: isOverviewLoading },
-    collections: { title: "Today's Ticket Collections", value: formatPeso(todayCollections), icon: IoCashOutline, tone: "green", loading: isOverviewLoading },
-  };
-  const ticketOverviewCards = VEHICLE_TICKET_OVERVIEW_ORDER.filter((key) => key !== "types").map((key, index) => ({
-    ...ticketOverviewCardsByKey[key],
-    key,
-    order: index + 1,
-  }));
   const displayOverviewCards = activeTab === "types"
     ? [
         { key: "totalVehicleTypes", title: "Total Vehicle Types", value: vehicleTypesTotal, icon: IoCarOutline, tone: "amber", loading: isOverviewLoading },
         { key: "vehicleTypesInUse", title: "Vehicle Types in Use", value: vehicleTypesInUse, icon: IoCheckmarkCircleOutline, tone: "green", loading: isOverviewLoading },
         { key: "vehicleTypesNotInUse", title: "Vehicle Types Not in Use", value: vehicleTypesNotInUse, icon: IoCloseCircleOutline, tone: "amber", loading: isOverviewLoading },
       ]
-    : ticketOverviewCards;
+    : activeTab === "annual"
+      ? [
+          { key: "totalAnnualTickets", title: "Total Annual Tickets", value: annualTickets, icon: IoCarOutline, tone: "slate", loading: isOverviewLoading },
+          { key: "annualTicketsToday", title: "Today's Annual Ticket", value: annualTicketsToday, icon: IoCarOutline, tone: "blue", loading: isOverviewLoading },
+        ]
+      : [
+          { key: "totalDailyTickets", title: "Total Daily Tickets", value: dailyTickets, icon: IoCarOutline, tone: "blue", loading: isOverviewLoading },
+          { key: "dailyTicketsToday", title: "Today's Daily Ticket", value: dailyTicketsToday, icon: IoCarOutline, tone: "blue", loading: isOverviewLoading },
+          { key: "dailyCollectionsToday", title: "Today's Ticket Collections", value: formatPeso(dailyCollectionsToday), icon: IoCashOutline, tone: "green", loading: isOverviewLoading },
+        ];
 
   return (
     <ConfigProvider theme={antTheme}>
@@ -2886,7 +2877,7 @@ const SuperVehicleTickets = () => {
                 <Breadcrumbs items={[{ label: "Dashboard", to: "/dashboard" }, { label: breadcrumbLabel }]} fontFamily={FONT} loading={isOverviewLoading} />
               </div>
 
-              <div className={`mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 ${activeTab === "types" ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
+              <div className={`mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 ${activeTab === "annual" ? "xl:grid-cols-2" : "xl:grid-cols-3"}`}>
                 {displayOverviewCards.map((card, index) => (
                   <OverviewCard
                     key={card.key}
@@ -2942,14 +2933,24 @@ const SuperVehicleTickets = () => {
                       ? "All record of annual vehicle tickets."
                       : "All record of daily vehicle tickets."
                   }
-                  loading={isTicketInitialLoading}
                   headerActionsSkeletonCount={5}
                   className=""
                   bodyClassName="overflow-x-auto"
                   footerClassName="flex items-center justify-between"
                   actions={
                     <>
-                      <div className="modal-input-shell flex h-[46px] items-center gap-2.5 rounded-[10px] border border-slate-200 bg-white px-4 transition-all focus-within:border-[#4096ff]" style={{ width: 300 }}>
+                      <div
+                        className="flex items-center gap-2.5 rounded-[10px] border border-gray-200 bg-white px-4 transition-all"
+                        style={{ height: 42, width: 300 }}
+                        onFocus={(event) => {
+                          event.currentTarget.style.borderColor = "#4096ff";
+                          event.currentTarget.style.boxShadow = "none";
+                        }}
+                        onBlur={(event) => {
+                          event.currentTarget.style.borderColor = "#e5e7eb";
+                          event.currentTarget.style.boxShadow = "none";
+                        }}
+                      >
                         <IoSearchOutline className="flex-shrink-0 text-[17px]" style={{ color: "#1a1f36" }} />
                         <input
                           value={search}
@@ -3061,6 +3062,13 @@ const SuperVehicleTickets = () => {
                               const isHighlighted =
                                 highlightedTicketId &&
                                 String(highlightedTicketId) === String(ticket.id);
+                              const statusDotColor = ticket.isVoided
+                                ? "#f59e0b"
+                                : ticket.status === "expired"
+                                  ? "#ef4444"
+                                  : activeTab === "daily" || ticket.ticketType === "Annual"
+                                    ? "#16a34a"
+                                    : "#2563eb";
                               return (
                             <tr
                               key={ticket.id}
@@ -3076,7 +3084,7 @@ const SuperVehicleTickets = () => {
                                 <div className="flex items-center gap-2">
                                   <span
                                     className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                                    style={{ backgroundColor: ticket.isVoided ? "#f59e0b" : activeTab === "daily" ? "#16a34a" : ticket.ticketType === "Annual" ? "#16a34a" : "#2563eb", minWidth: 10, minHeight: 10 }}
+                                    style={{ backgroundColor: statusDotColor, minWidth: 10, minHeight: 10 }}
                                   />
                                   <span className="text-[13px] font-normal" style={{ color: "#1a1f36" }}>{ticket.vehicleTypeName}</span>
                                 </div>
@@ -3130,13 +3138,13 @@ const SuperVehicleTickets = () => {
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
                                   {(ticket.ticketType === "Daily" || ticket.ticketType === "Annual") ? (
-                                  <Tooltip title={isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) ? transactionLockMessage : ticket.ticketType !== "Annual" && !isDailyTicketEditableToday(ticket) ? "Only today's daily vehicle ticket records can be voided" : ticket.isVoided ? "Restore" : "Void"}>
+                                  <Tooltip title={isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) ? transactionLockMessage : !isTicketEditableToday(ticket) ? getVoidRestrictionMessage(ticket) : ticket.isVoided ? "Restore" : "Void"}>
                                       <button
                                         type="button"
                                         onClick={(event) => {
                                           event.stopPropagation();
                                           clearUniversalHighlight();
-                                          if (deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || (ticket.ticketType !== "Annual" && !isDailyTicketEditableToday(ticket))) return;
+                                          if (deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket)) return;
                                           if (ticket.isVoided) {
                                             setDeletingTicketId(ticket.id);
                                             restoreVoidedTicketMutation.mutate(ticket.id);
@@ -3144,15 +3152,15 @@ const SuperVehicleTickets = () => {
                                           }
                                           openVoidTicket(ticket);
                                         }}
-                                        disabled={deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || (ticket.ticketType !== "Annual" && !isDailyTicketEditableToday(ticket))}
+                                        disabled={deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket)}
                                         className={`w-8 h-8 rounded-lg border flex items-center justify-center bg-white transition-colors ${
-                                          deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || (ticket.ticketType !== "Annual" && !isDailyTicketEditableToday(ticket))
+                                          deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket)
                                             ? "cursor-not-allowed border-slate-200"
                                             : ticket.isVoided
                                               ? "cursor-pointer hover:bg-emerald-50"
                                               : "cursor-pointer hover:bg-amber-50"
                                         }`}
-                                        style={{ borderColor: deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || (ticket.ticketType !== "Annual" && !isDailyTicketEditableToday(ticket)) ? undefined : ticket.isVoided ? "#10b981" : "#f59e0b" }}
+                                        style={{ borderColor: deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket) ? undefined : ticket.isVoided ? "#10b981" : "#f59e0b" }}
                                       >
                                         {ticket.isVoided ? (
                                           <IoReloadOutline style={{ fontSize: "16px", color: "#10b981" }} />
@@ -3354,27 +3362,27 @@ const SuperVehicleTickets = () => {
                                       <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
                                     </button>
                                   </Tooltip>
-                                  <Tooltip title={isTransactionLocked ? transactionLockMessage : (Number(type.dailyTicketsUsing ?? 0) > 0 || Number(type.annualTicketsUsing ?? 0) > 0) ? "Cannot archive vehicle types with usage count" : "Archive"}>
+                                  <Tooltip title={isTransactionLocked ? transactionLockMessage : "Archive"}>
                                     <button
                                       type="button"
                                       onClick={(event) => {
                                         event.stopPropagation();
                                         clearUniversalHighlight();
-                                        if (isTransactionLocked || Number(type.dailyTicketsUsing ?? 0) > 0 || Number(type.annualTicketsUsing ?? 0) > 0) return;
+                                        if (isTransactionLocked) return;
                                         setPendingDeleteVehicleType(type);
                                       }}
-                                      disabled={isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id) || Number(type.dailyTicketsUsing ?? 0) > 0 || Number(type.annualTicketsUsing ?? 0) > 0}
+                                      disabled={isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id)}
                                       className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
-                                        isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id) || Number(type.dailyTicketsUsing ?? 0) > 0 || Number(type.annualTicketsUsing ?? 0) > 0
+                                        isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id)
                                           ? "cursor-not-allowed border-slate-200"
                                           : "cursor-pointer hover:bg-red-50"
                                       }`}
-                                      style={{ borderColor: isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id) || Number(type.dailyTicketsUsing ?? 0) > 0 || Number(type.annualTicketsUsing ?? 0) > 0 ? undefined : "#ef4444" }}
+                                      style={{ borderColor: isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id) ? undefined : "#ef4444" }}
                                     >
                                       {archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id ? (
                                         <span className="text-red-500"><Spinner size={15} /></span>
                                       ) : (
-                                        <IoTrashOutline style={{ fontSize: "15px", color: (isTransactionLocked || Number(type.dailyTicketsUsing ?? 0) > 0 || Number(type.annualTicketsUsing ?? 0) > 0) ? "#94a3b8" : "#ef4444" }} />
+                                        <IoArchiveOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#ef4444" }} />
                                       )}
                                     </button>
                                   </Tooltip>
@@ -3488,11 +3496,11 @@ const SuperVehicleTickets = () => {
           );
         }}
       />
-      <DeleteConfirmModal
+      <ArchiveModal
         open={Boolean(pendingDeleteVehicleType)}
         title="Archive Vehicle Type"
-        recordLabel={pendingDeleteVehicleType?.typeName || "this record"}
-        deleting={deletingVehicleTypeId === pendingDeleteVehicleType?.id}
+        itemName={pendingDeleteVehicleType?.typeName || "this record"}
+        saving={deletingVehicleTypeId === pendingDeleteVehicleType?.id}
         onClose={() => {
           if (deletingVehicleTypeId) return;
           setPendingDeleteVehicleType(null);

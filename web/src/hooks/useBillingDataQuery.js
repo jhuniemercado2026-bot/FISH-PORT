@@ -66,7 +66,7 @@ export const getBillingDataQueryOptions = ({
           signal,
         }).catch(err => {
           console.error("Error fetching bills:", err);
-          return { data: { data: [], meta: { current_page: 1, last_page: 1, per_page: perPage, total: 0, from: 0, to: 0 }, stats: { total_records: 0, today_records: 0 } } };
+          return { data: { data: [], meta: { current_page: 1, last_page: 1, per_page: perPage, total: 0, from: 0, to: 0 }, stats: { total_records: 0, total_payment_records: 0, today_records: 0, today_payments: 0 } } };
         }),
         includeBoats ? api.get("/boats", { params: { all: 1 }, signal }).catch(err => {
           console.error("Error fetching boats:", err);
@@ -107,7 +107,9 @@ export const getBillingDataQueryOptions = ({
         ),
         stats: billsPayload.stats ?? {
           total_records: Array.isArray(billsPayload) ? bills.length : billsPayload.meta?.total ?? bills.length,
+          total_payment_records: payments.length,
           today_records: 0,
+          today_payments: 0,
         },
         boats: extractCollection(boatsRes?.data),
         dockings,
@@ -129,7 +131,9 @@ export const getBillingDataQueryOptions = ({
         },
         stats: {
           total_records: 0,
+          total_payment_records: 0,
           today_records: 0,
+          today_payments: 0,
         },
         boats: [],
         dockings: [],
@@ -208,6 +212,7 @@ export const getBillingFormLookupsQueryOptions = ({
         compact: 1,
         boat_id: boatId || undefined,
         fiscal_year: skipFiscalYear ? undefined : fiscalYear,
+        status: "active",
       };
       const [dockingsRes, banyeraRes] = await Promise.all([
         api.get("/dockings", { params, signal }).catch(err => {

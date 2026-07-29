@@ -5,12 +5,9 @@ namespace App\Models;
 use App\Enums\FeeTypeName;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Fee extends Model
 {
-    use SoftDeletes;
-
     protected $primaryKey = 'fee_id';
 
     protected $fillable = [
@@ -77,11 +74,6 @@ class Fee extends Model
     public function vehicleTickets()
     {
         return $this->hasMany(VehicleTicket::class, 'fee_id', 'fee_id');
-    }
-
-    public function scopeArchived($query)
-    {
-        return $query->onlyTrashed();
     }
 
     public function scopeForTableIndex($query)

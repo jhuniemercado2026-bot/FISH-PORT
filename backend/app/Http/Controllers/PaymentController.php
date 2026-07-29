@@ -78,7 +78,11 @@ class PaymentController extends Controller
                 $total = $hydratedPayments->count();
                 $offset = ($page - 1) * $perPage;
                 $items = $hydratedPayments->slice($offset, $perPage)->values();
-                $records = collect($items->map(fn ($payment) => $this->transformPaymentRecord($payment)));
+                $paymentHistoryByBillId = $this->paymentHistoriesForBills($items->pluck('bill_id'));
+                $records = collect($items->map(fn ($payment) => $this->transformPaymentRecord(
+                    $payment,
+                    $paymentHistoryByBillId[(string) $payment->bill_id] ?? []
+                )));
                 $meta = [
                     'current_page' => $page,
                     'last_page' => max(1, (int) ceil($total / $perPage)),
@@ -101,11 +105,10 @@ class PaymentController extends Controller
                 $response['stats'] = $this->paymentStats($request);
             } else {
                 $response['stats'] = [
-                    'paid_count' => 0,
-                    'partial_count' => 0,
-                    'today_payments_count' => 0,
-                    'today_cash_received' => 0.0,
-                    'today_receivables' => 0.0,
+                    'total_records' => 0,
+                    'total_payment_records' => 0,
+                    'today_records' => 0,
+                    'today_payments' => 0,
                 ];
             }
 
@@ -138,7 +141,12 @@ class PaymentController extends Controller
 
         abort_unless($payment !== null, 404);
 
-        return response()->json($this->transformPaymentRecord($payment));
+        $paymentHistoryByBillId = $this->paymentHistoriesForBills(collect([$payment->bill_id]));
+
+        return response()->json($this->transformPaymentRecord(
+            $payment,
+            $paymentHistoryByBillId[(string) $payment->bill_id] ?? []
+        ));
     }
 
     public function store(Request $request)
@@ -532,8 +540,14 @@ class PaymentController extends Controller
         $query = $this->paymentRecordQuery()->tableSort();
         $this->applyFiscalYear($query, $request, 'p.payment_date');
 
-        return Payment::hydrateRunningTotals(collect($query->get()))
-            ->map(fn ($payment) => $this->transformPaymentRecord($payment))
+        $payments = Payment::hydrateRunningTotals(collect($query->get()));
+        $paymentHistoryByBillId = $this->paymentHistoriesForBills($payments->pluck('bill_id'));
+
+        return $payments
+            ->map(fn ($payment) => $this->transformPaymentRecord(
+                $payment,
+                $paymentHistoryByBillId[(string) $payment->bill_id] ?? []
+            ))
             ->values();
     }
 
@@ -542,17 +556,24 @@ class PaymentController extends Controller
         $today = now('Asia/Manila');
         $fiscalYear = $this->fiscalYear($request);
         $statsDate = $fiscalYear
-            ? $today->copy()->year($fiscalYear)->toDateString()
-            : $today->toDateString();
-        $paymentsQuery = Payment::query();
+            ? $today->copy()->year($fiscalYear)
+            : $today;
+        $billsQuery = DB::table('bills');
+        $this->applyFiscalYear($billsQuery, $request, 'bills.created_at');
+        $paymentsQuery = DB::table('payments');
         $this->applyFiscalYear($paymentsQuery, $request, 'payments.payment_date');
 
         return [
-            'paid_count' => (clone $paymentsQuery)->where('status', 'paid')->count(),
-            'partial_count' => (clone $paymentsQuery)->where('status', 'partial')->count(),
-            'today_payments_count' => (clone $paymentsQuery)->whereDate('payment_date', $statsDate)->count(),
-            'today_cash_received' => (float) (clone $paymentsQuery)->whereDate('payment_date', $statsDate)->sum('amount_paid'),
-            'today_receivables' => $this->todayReceivablesTotal($statsDate),
+            'total_records' => (clone $billsQuery)->count(),
+            'total_payment_records' => (clone $paymentsQuery)->count(),
+            'today_records' => (clone $billsQuery)->whereBetween('created_at', [
+                $statsDate->copy()->startOfDay(),
+                $statsDate->copy()->endOfDay(),
+            ])->count(),
+            'today_payments' => (clone $paymentsQuery)->whereBetween('payment_date', [
+                $statsDate->copy()->startOfDay(),
+                $statsDate->copy()->endOfDay(),
+            ])->count(),
         ];
     }
 
@@ -624,8 +645,14 @@ class PaymentController extends Controller
             $this->applyFiscalYear($query, $request, 'b.created_at');
         }
 
-        return $query->get()
-            ->map(fn ($bill) => $this->transformPaymentableBill($bill))
+        $bills = $query->get();
+        $paymentHistoryByBillId = $this->paymentHistoriesForBills($bills->pluck('bill_id'));
+
+        return $bills
+            ->map(fn ($bill) => $this->transformPaymentableBill(
+                $bill,
+                $paymentHistoryByBillId[(string) $bill->bill_id] ?? []
+            ))
             ->values();
     }
 
@@ -680,7 +707,42 @@ class PaymentController extends Controller
             ->whereRaw('(b.total_amount - COALESCE(payment_totals.total_paid, 0)) > 0');
     }
 
-    private function transformPaymentRecord(object $payment): array
+    private function paymentHistoriesForBills($billIds)
+    {
+        $billIds = collect($billIds)
+            ->filter(fn ($billId) => $billId !== null && $billId !== '')
+            ->map(fn ($billId) => (int) $billId)
+            ->unique()
+            ->values();
+
+        if ($billIds->isEmpty()) {
+            return collect();
+        }
+
+        return DB::table('payments')
+            ->whereIn('bill_id', $billIds)
+            ->orderBy('payment_date')
+            ->orderBy('payment_id')
+            ->get()
+            ->groupBy(fn ($payment) => (string) $payment->bill_id)
+            ->map(fn ($payments) => $payments
+                ->map(fn ($payment) => [
+                    'payment_id' => $payment->payment_id,
+                    'payment_reference' => $payment->payment_reference_no,
+                    'official_receipt_no' => $payment->official_receipt_no,
+                    'payment_date' => $payment->payment_date,
+                    'amount_paid' => (float) $payment->amount_paid,
+                    'payment_method' => $payment->payment_method,
+                    'payment_method_label' => $this->paymentMethodLabel($payment->payment_method),
+                    'remarks' => $payment->remarks,
+                    'created_at' => $payment->created_at,
+                ])
+                ->values()
+                ->all()
+            );
+    }
+
+    private function transformPaymentRecord(object $payment, array $paymentTransactionsHistory = []): array
     {
         $billReference = $this->formatBillReference($payment->bill_reference_no, $payment->bill_id);
         $paymentReference = $payment->payment_reference_no;
@@ -704,13 +766,14 @@ class PaymentController extends Controller
             'balance' => (float) $payment->balance,
             'status' => $payment->status,
             'remarks' => $payment->remarks,
+            'payment_transactions_history' => $paymentTransactionsHistory,
             'received_by_name' => $this->joinName($payment->received_by_first_name, $payment->received_by_last_name) ?: $payment->received_by_email,
             'created_at' => $payment->created_at,
             'updated_at' => $payment->updated_at,
         ];
     }
 
-    private function transformPaymentableBill(object $bill): array
+    private function transformPaymentableBill(object $bill, array $paymentTransactionsHistory = []): array
     {
         return [
             'bill_id' => $bill->bill_id,
@@ -725,6 +788,7 @@ class PaymentController extends Controller
             'amount_due' => (float) $bill->total_amount,
             'total_paid' => (float) $bill->total_paid,
             'balance' => (float) $bill->balance,
+            'payment_transactions_history' => $paymentTransactionsHistory,
         ];
     }
 

@@ -361,7 +361,7 @@ export const buildDockingPdf = async ({
   const firstRowItems = [
     ["Report Type", reportTypeLabel],
     ["Coverage", reportDateLabel],
-    ["Day", reportDayLabel],
+    ...(filterType === "daily" ? [["Day", reportDayLabel]] : []),
     ["Prepared By", preparedBy],
   ];
   const secondRowItems = [

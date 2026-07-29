@@ -1,6 +1,6 @@
 import React from "react";
 import "typeface-montserrat";
-import DatePicker from "../components/DatePicker";
+import ReportDailyDatePicker from "../components/ReportDailyDatePicker";
 import FilterSelect from "../components/FilterSelect";
 
 import { IoDocumentTextOutline, IoSyncOutline } from "react-icons/io5";
@@ -25,6 +25,8 @@ const ReportsInnerTopbar = ({
   onBanyeraFilterTypeChange,
   remittanceFilterType,
   onRemittanceFilterTypeChange,
+  billingFilterType,
+  onBillingFilterTypeChange,
   vehicleDailyFilterType,
   onVehicleDailyFilterTypeChange,
   monthOptions,
@@ -38,6 +40,7 @@ const ReportsInnerTopbar = ({
   const isRevenueReport = activeReport === "revenue";
   const isDailyReport = activeReport === "daily";
   const isRemittanceReport = activeReport === "remittance";
+  const isBillingReport = activeReport === "billing";
   const isMonthlyReport = activeReport === "monthly";
   const isYearlyReport = activeReport === "yearly";
 
@@ -58,6 +61,7 @@ const ReportsInnerTopbar = ({
     isBanyeraReport ||
     isBfarReport ||
     isRemittanceReport ||
+    isBillingReport ||
     isDailyVehicleTicketReport ||
     isVehicleTicketReport ||
     isVehicleTypesReport ||
@@ -78,6 +82,8 @@ const ReportsInnerTopbar = ({
       ? banyeraFilterType
       : isDailyVehicleTicketReport
       ? vehicleDailyFilterType
+      : isBillingReport
+      ? billingFilterType
       : remittanceFilterType;
 
   const onFilterTypeChange =
@@ -91,6 +97,8 @@ const ReportsInnerTopbar = ({
       ? onBanyeraFilterTypeChange
       : isDailyVehicleTicketReport
       ? onVehicleDailyFilterTypeChange
+      : isBillingReport
+      ? onBillingFilterTypeChange
       : onRemittanceFilterTypeChange;
 
   const showDaily =
@@ -135,13 +143,12 @@ const ReportsInnerTopbar = ({
           {/* DAILY */}
           {showDaily && (
             <div className={REPORT_INPUT_WIDTH_CLASS}>
-              <DatePicker
+              <ReportDailyDatePicker
                 value={dailyDate || undefined}
                 onChange={onDailyDateChange}
                 placeholder="Select a Day"
                 dateFormat="YYYY-MM-DD"
                 containerClassName="w-full"
-                options={{ useFiscalYearDefault: false }}
               />
             </div>
           )}
@@ -207,6 +214,7 @@ const ReportsInnerTopbar = ({
             <IoDocumentTextOutline size={18} />
             Export Excel
           </button>
+
         </div>
 
       ) : isReadonlyInputStyleReport ? (
@@ -250,6 +258,7 @@ const ReportsInnerTopbar = ({
             <IoDocumentTextOutline size={18} />
             Export Excel
           </button>
+
         </div>
 
       ) : (

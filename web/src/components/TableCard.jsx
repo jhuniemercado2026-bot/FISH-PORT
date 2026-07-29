@@ -152,7 +152,13 @@ const TableCard = ({
                     <div
                       key={`table-card-action-skeleton-${index}`}
                       className={`h-[42px] animate-pulse rounded-[10px] border border-slate-200 bg-slate-100 ${
-                        index === 0 ? "w-[280px] max-w-full" : index === headerActionsSkeletonCount - 1 ? "w-[140px]" : "w-[120px]"
+                        index === 0
+                          ? "w-[280px] max-w-full"
+                          : headerActionsSkeletonCount >= 4 && index === headerActionsSkeletonCount - 1
+                            ? "w-[150px]"
+                            : index === headerActionsSkeletonCount - 1
+                              ? "w-[140px]"
+                              : "w-[120px]"
                       }`}
                     />
                   ))

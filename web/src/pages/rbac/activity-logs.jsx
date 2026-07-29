@@ -17,7 +17,7 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
 import StatusPill from "../../components/StatusPill";
-import FilterSelect from "../../components/FilterSelect";
+import FilterButton from "../../components/FilterButton";
 import Legend from "../../components/Legend";
 import TableCard from "../../components/TableCard";
 import OverviewCard from "../../components/Overview";
@@ -181,15 +181,6 @@ const getBillReference = (bill, payment, fallback = "") =>
       fallback
   ).trim();
 
-const getVehicleTicketReference = (ticket, fallback = "vehicle ticket") =>
-  String(
-    ticket?.control_number ||
-      ticket?.ticket_reference ||
-      ticket?.ticket_reference_no ||
-      ticket?.official_receipt_no ||
-      fallback
-  ).trim();
-
 const getVehicleTypeName = (ticket) =>
   String(ticket?.vehicle_type?.type_name || ticket?.vehicleType?.type_name || ticket?.vehicle_type_name || "").trim();
 
@@ -240,6 +231,10 @@ const formatActivityDetails = (details, context = {}) => {
 
   const vehicleTicketMatch = normalized.match(/\bCreated\s+(daily|annual)\s+vehicle ticket for vehicle type\s+"([^"]+)"\.?/i);
   if (vehicleTicketMatch) {
+    if (/\bwith the amount of\b/i.test(normalized)) {
+      return normalized;
+    }
+
     const [, ticketType, vehicleTypeName] = vehicleTicketMatch;
     const ticket = findVehicleTicketForLog({
       ticketType,
@@ -247,12 +242,10 @@ const formatActivityDetails = (details, context = {}) => {
       tickets: context.vehicleTickets,
       logTimestamp: context.logTimestamp,
     });
-    const ticketReference = getVehicleTicketReference(ticket);
-    const amount = formatMoney(ticket?.ticket_fee);
+    const amount = ticket ? formatMoney(ticket?.ticket_fee) : "";
 
     return [
-      `Created ${ticketType.toLowerCase()} vehicle ticket "${ticketReference}"`,
-      `for vehicle type "${vehicleTypeName}"`,
+      `Created ${ticketType.toLowerCase()} vehicle ticket for vehicle type "${vehicleTypeName}"`,
       amount ? `with the amount of ${amount}.` : "",
     ].filter(Boolean).join(" ");
   }
@@ -266,9 +259,17 @@ const formatActivityDetails = (details, context = {}) => {
       tickets: context.vehicleTickets,
       logTimestamp: context.logTimestamp,
     });
-    const vehicleTypeName = getVehicleTypeName(ticket) || "vehicle type";
+    if (!ticket) {
+      return normalized;
+    }
 
-    return `Created ${ticketType.toLowerCase()} vehicle ticket for vehicle type "${vehicleTypeName}".`;
+    const vehicleTypeName = getVehicleTypeName(ticket) || "vehicle type";
+    const amount = formatMoney(ticket?.ticket_fee);
+
+    return [
+      `Created ${ticketType.toLowerCase()} vehicle ticket for vehicle type "${vehicleTypeName}"`,
+      amount ? `with the amount of ${amount}.` : "",
+    ].filter(Boolean).join(" ");
   }
 
   return normalized
@@ -380,7 +381,7 @@ const getActivityLogOverviewStats = (data) => {
       tone: "red",
     },
     {
-      title: "Logged Today",
+      title: "Today's Logged",
       value: stats.today_count,
       icon: IoCalendarOutline,
       tone: "green",
@@ -665,7 +666,7 @@ const SuperActivityLogs = () => {
                       )}
                     </div>
                     
-                    <FilterSelect
+                    <FilterButton
                       {...ACTIVITY_LOG_FILTER_DROPDOWN_PROPS}
                       value={periodFilter}
                       onChange={(value) => {
@@ -677,7 +678,7 @@ const SuperActivityLogs = () => {
                       width={150}
                       height={42}
                     />
-                    <FilterSelect
+                    <FilterButton
                       {...ACTIVITY_LOG_FILTER_DROPDOWN_PROPS}
                       value={statusFilter}
                       onChange={(value) => {

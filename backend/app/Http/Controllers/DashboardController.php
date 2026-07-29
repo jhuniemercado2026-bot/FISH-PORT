@@ -6,10 +6,14 @@ use App\Models\BanyeraTransaction;
 use App\Models\Bill;
 use App\Models\Boat;
 use App\Models\Docking;
+use App\Models\MonthlyTarget;
 use App\Models\Payment;
 use App\Models\Remittance;
 use App\Models\User;
 use App\Models\VehicleTicket;
+use App\Models\YearlyTarget;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class DashboardController extends Controller
 {
@@ -127,6 +131,90 @@ class DashboardController extends Controller
             'users' => User::query()
                 ->select(['user_id'])
                 ->get(),
+            'monthlyTargets' => MonthlyTarget::query()
+                ->orderBy('target_year')
+                ->orderBy('target_month')
+                ->get()
+                ->mapWithKeys(fn (MonthlyTarget $target) => [
+                    sprintf('%d-%02d', $target->target_year, $target->target_month) => (float) $target->amount,
+                ]),
+            'yearlyTargets' => YearlyTarget::query()
+                ->orderBy('target_year')
+                ->get()
+                ->mapWithKeys(fn (YearlyTarget $target) => [
+                    (string) $target->target_year => (float) $target->amount,
+                ]),
+        ]);
+    }
+
+    public function saveMonthlyTarget(Request $request)
+    {
+        $validated = $request->validate([
+            'year' => ['required', 'integer', 'min:2000', 'max:2100'],
+            'month' => ['required', 'integer', 'min:1', 'max:12'],
+            'amount' => ['required', 'numeric', 'min:0', 'max:999999999999.99'],
+        ]);
+
+        $userId = Auth::id();
+
+        $target = MonthlyTarget::query()->updateOrCreate(
+            [
+                'target_year' => (int) $validated['year'],
+                'target_month' => (int) $validated['month'],
+            ],
+            [
+                'amount' => $validated['amount'],
+                'updated_by' => $userId,
+            ],
+        );
+
+        if ($target->wasRecentlyCreated && $userId) {
+            $target->created_by = $userId;
+            $target->save();
+        }
+
+        return response()->json([
+            'message' => 'Monthly target saved successfully.',
+            'target' => [
+                'year' => $target->target_year,
+                'month' => $target->target_month,
+                'amount' => (float) $target->amount,
+                'key' => sprintf('%d-%02d', $target->target_year, $target->target_month),
+            ],
+        ]);
+    }
+
+    public function saveYearlyTarget(Request $request)
+    {
+        $validated = $request->validate([
+            'year' => ['required', 'integer', 'min:2000', 'max:2100'],
+            'amount' => ['required', 'numeric', 'min:0', 'max:999999999999.99'],
+        ]);
+
+        $userId = Auth::id();
+
+        $target = YearlyTarget::query()->updateOrCreate(
+            [
+                'target_year' => (int) $validated['year'],
+            ],
+            [
+                'amount' => $validated['amount'],
+                'updated_by' => $userId,
+            ],
+        );
+
+        if ($target->wasRecentlyCreated && $userId) {
+            $target->created_by = $userId;
+            $target->save();
+        }
+
+        return response()->json([
+            'message' => 'Yearly target saved successfully.',
+            'target' => [
+                'year' => $target->target_year,
+                'amount' => (float) $target->amount,
+                'key' => (string) $target->target_year,
+            ],
         ]);
     }
 }

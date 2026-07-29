@@ -75,7 +75,7 @@ const formatPdfDate = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
   return date.toLocaleDateString("en-PH", {
-    month: "long",
+    month: "short",
     day: "numeric",
     year: "numeric",
   });
@@ -753,7 +753,7 @@ export const buildStatementOfAccountPdf = async ({
     fillColor: COLORS.black,
     borderWidth: 0,
   });
-  composer.drawCenteredText("Statement of Account", textCenterX, rightLowerSectionCenterY - 3, {
+  composer.drawCenteredText("Boat Statement", textCenterX, rightLowerSectionCenterY - 3, {
     fontSize: 12,
     bold: true,
     color: COLORS.black,
@@ -767,8 +767,8 @@ export const buildStatementOfAccountPdf = async ({
   const leftBottom = boxTop - leftRowHeight;
 
   const leftItems = [
-    ["Name", record?.owner_name || "-"],
-    ["Boat", record?.boat_name || "-"],
+    ["Boat Name", record?.boat_name || "-"],
+    ["Boat Owner", record?.owner_name || "-"],
     ["Boat Type", record?.boat_type || "-"],
   ];
 
@@ -813,7 +813,6 @@ export const buildStatementOfAccountPdf = async ({
     ["Status", record?.statement_status_label || "-"],
   ];
   const accountSecondRowItems = [
-    ["Previous Balance", formatPdfMoney(0)],
     ["Credits", formatPdfMoney(record?.total_paid || 0)],
     ["New Charges", formatPdfMoney(record?.total_billed || 0)],
     ["Total Balance Due", formatPdfMoney(record?.balance_due || 0)],

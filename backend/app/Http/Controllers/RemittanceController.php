@@ -98,6 +98,9 @@ class RemittanceController extends Controller
             'total_remittances' => (float) (clone $statsQuery)->sum('amount'),
             'total_surplus' => (float) (clone $statsQuery)->sum('surplus'),
             'total_deficit' => (float) (clone $statsQuery)->sum('deficit'),
+            'today_remittances' => (float) (clone $statsQuery)
+                ->whereDate('date', Carbon::now('Asia/Manila')->toDateString())
+                ->sum('amount'),
         ];
 
         if ($request->boolean('all')) {
@@ -212,8 +215,7 @@ class RemittanceController extends Controller
 
         Notification::create([
             'title' => 'New remittance submitted',
-            'message' => 'Remittance "' . $remittance->remittance_reference_no . '" was submitted for ' .
-                Carbon::createFromFormat('Y-m-d', $date, 'Asia/Manila')->format('F j, Y') . '.',
+            'message' => $this->remittanceSubmittedMessage($remittance),
             'recipient_user_id' => $headUserId,
             'sender_user_id' => Auth::id(),
             'related_type' => 'remittance',
@@ -293,10 +295,19 @@ class RemittanceController extends Controller
             ->where('related_type', 'remittance')
             ->where('related_id', $remittance->remittance_id)
             ->where('recipient_user_id', $headUserId)
+            ->where('title', 'New remittance submitted')
             ->update([
-                'is_read' => true,
-                'read_at' => now(),
+                'message' => $this->remittanceSubmittedMessage($remittance),
+                'sender_user_id' => Auth::id(),
+                'is_read' => false,
+                'read_at' => null,
             ]);
+
+        Notification::query()
+            ->where('related_type', 'remittance')
+            ->where('related_id', $remittance->remittance_id)
+            ->where('title', 'Remittance remitted')
+            ->delete();
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
@@ -333,13 +344,7 @@ class RemittanceController extends Controller
             'status' => 'remitted',
         ]);
 
-        $remittedAt = Carbon::now('Asia/Manila');
-        $remittanceDate = Carbon::parse($remittance->date, 'Asia/Manila')->toDateString();
         $headUserId = $this->resolveHeadUserId();
-        $coordinatorUserId = $this->resolveCoordinatorRecipientUserId($remittance);
-        $remittedMessage = 'Remittance "' . $remittance->remittance_reference_no . '" was remitted at ' .
-            $remittedAt->format('g:i A') . ' for ' . $remittanceDate . ' with the amount of PHP ' .
-            number_format((float) $remittance->amount, 2) . '. All transaction are close now.';
 
         Notification::query()
             ->where('related_type', 'remittance')
@@ -351,21 +356,11 @@ class RemittanceController extends Controller
                 'read_at' => now(),
             ]);
 
-        $this->upsertRemittanceStatusNotification(
-            remittance: $remittance,
-            recipientUserId: $headUserId,
-            senderUserId: $user?->user_id,
-            message: $remittedMessage,
-            isRead: false,
-        );
-
-        $this->upsertRemittanceStatusNotification(
-            remittance: $remittance,
-            recipientUserId: $coordinatorUserId,
-            senderUserId: $user?->user_id,
-            message: $remittedMessage,
-            isRead: false,
-        );
+        Notification::query()
+            ->where('related_type', 'remittance')
+            ->where('related_id', $remittance->remittance_id)
+            ->where('title', 'Remittance remitted')
+            ->delete();
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
@@ -402,21 +397,11 @@ class RemittanceController extends Controller
             'status' => 'pending',
         ]);
 
-        $this->upsertRemittanceStatusNotification(
-            remittance: $remittance,
-            recipientUserId: $this->resolveHeadUserId(),
-            senderUserId: $user?->user_id,
-            message: null,
-            isRead: true,
-        );
-
-        $this->upsertRemittanceStatusNotification(
-            remittance: $remittance,
-            recipientUserId: $this->resolveCoordinatorRecipientUserId($remittance),
-            senderUserId: $user?->user_id,
-            message: null,
-            isRead: true,
-        );
+        Notification::query()
+            ->where('related_type', 'remittance')
+            ->where('related_id', $remittance->remittance_id)
+            ->where('title', 'Remittance remitted')
+            ->delete();
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
@@ -454,60 +439,13 @@ class RemittanceController extends Controller
             ->value('user_id');
     }
 
-    private function resolveCoordinatorRecipientUserId(Remittance $remittance): ?int
+    private function remittanceSubmittedMessage(Remittance $remittance): string
     {
-        $submittedBy = (int) ($remittance->submitted_by ?? 0);
-        if ($submittedBy > 0) {
-            return $submittedBy;
-        }
+        $submittedAt = Carbon::parse($remittance->created_at ?? now())->timezone('Asia/Manila');
+        $remittanceDate = Carbon::parse($remittance->date, 'Asia/Manila')->format('F j, Y');
 
-        return User::query()
-            ->where('role', 'coordinator')
-            ->orderBy('user_id')
-            ->value('user_id');
-    }
-
-    private function upsertRemittanceStatusNotification(
-        Remittance $remittance,
-        ?int $recipientUserId,
-        ?int $senderUserId,
-        ?string $message,
-        bool $isRead
-    ): void {
-        if (!$recipientUserId) {
-            return;
-        }
-
-        $notification = Notification::query()
-            ->where('related_type', 'remittance')
-            ->where('related_id', $remittance->remittance_id)
-            ->where('recipient_user_id', $recipientUserId)
-            ->where('title', 'Remittance remitted')
-            ->latest('notification_id')
-            ->first();
-
-        $payload = [
-            'title' => 'Remittance remitted',
-            'sender_user_id' => $senderUserId,
-            'is_read' => $isRead,
-            'read_at' => $isRead ? now() : null,
-        ];
-
-        if ($message !== null) {
-            $payload['message'] = $message;
-        }
-
-        if ($notification) {
-            $notification->update($payload);
-            return;
-        }
-
-        Notification::create([
-            ...$payload,
-            'message' => $message ?? 'Remittance status updated.',
-            'recipient_user_id' => $recipientUserId,
-            'related_type' => 'remittance',
-            'related_id' => $remittance->remittance_id,
-        ]);
+        return 'Remittance "' . $remittance->remittance_reference_no . '" was submitted at ' .
+            $submittedAt->format('g:i A') . ' for ' . $remittanceDate . ' with the amount of PHP ' .
+            number_format((float) $remittance->amount, 2) . '. Transactions are locked now.';
     }
 }

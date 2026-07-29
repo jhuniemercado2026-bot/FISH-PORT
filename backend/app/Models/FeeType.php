@@ -23,7 +23,7 @@ class FeeType extends Model
 
     public function activeFees()
     {
-        return $this->hasMany(Fee::class, 'fee_type_id', 'fee_type_id')->whereNull('deleted_at');
+        return $this->hasMany(Fee::class, 'fee_type_id', 'fee_type_id');
     }
 
     public function createdBy()

@@ -8,6 +8,7 @@ import {
   IoCreateOutline, IoShieldCheckmarkOutline,
   IoLocationOutline,
   IoAlertCircleOutline,
+  IoCloudUploadOutline,
   IoEyeOutline,
   IoEyeOffOutline,
   IoChevronDownOutline,
@@ -15,10 +16,10 @@ import {
 } from "react-icons/io5";
 import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
-import DatePicker from "../../components/DatePicker";
 import BirthdayPicker from "../../components/BirthdayPicker";
 import FilterSelect from "../../components/FilterSelect";
 import Modal, { ModalFieldError, ModalTextInput } from "../../components/Modal";
+import Spinner from "../../components/Spinner";
 import Breadcrumbs from "../../components/Breadcrumbs";
 import TitlePage from "../../components/TitlePage";
 import api from "../../api/axios";
@@ -64,6 +65,54 @@ const InfoRow = ({ label, value }) => (
   </div>
 );
 
+const DataActionCard = ({ icon: Icon, title, description, actionLabel, actionIcon: ActionIcon, loading = false, disabled = false, onAction, showIcon = true }) => (
+  <div className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+    <div className="flex min-h-[92px] items-center justify-between gap-4 px-6 py-4">
+      <div className="flex min-w-0 items-center gap-4">
+        {showIcon && Icon ? (
+          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-slate-50 border border-slate-200">
+            <Icon className="text-[21px]" style={{ color: "#1a1f36" }} />
+          </div>
+        ) : null}
+        <div className="min-w-0">
+          <h3 className="m-0 text-[14px] font-medium uppercase" style={{ color: "#1a1f36" }}>{title}</h3>
+          <p className="m-0 mt-0.5 text-[12px] text-slate-700">{description}</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onAction}
+        disabled={disabled || loading}
+        className="inline-flex h-10 flex-shrink-0 items-center justify-center gap-2 rounded-xl border-2 bg-white px-4 text-[12px] font-semibold text-[#1a1f36] cursor-pointer transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        style={{ borderColor: "#1a1f36", fontFamily: FONT, minWidth: 132 }}
+      >
+        {loading ? <Spinner size={4} /> : (
+          <>
+            <ActionIcon className="text-[15px]" />
+            {actionLabel}
+          </>
+        )}
+      </button>
+    </div>
+  </div>
+);
+
+const getRequestErrorMessage = async (error, fallback) => {
+  const data = error?.response?.data;
+
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text();
+      const parsed = JSON.parse(text);
+      return parsed?.message || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  return data?.message || fallback;
+};
+
 // -- Avatar component -------------------------------------------------
 const Avatar = ({ initials, size = 80, className = "" }) => {
   const [imgError, setImgError] = useState(false);
@@ -82,7 +131,15 @@ const SkeletonBlock = ({ className = "", style = {} }) => (
   <div className={`rounded bg-slate-100 ${className}`.trim()} style={style} />
 );
 
-const SettingsSkeleton = () => (
+const getStoredUserRole = () => {
+  try {
+    return String(JSON.parse(localStorage.getItem("user") || "{}")?.role || "").trim().toLowerCase();
+  } catch {
+    return "";
+  }
+};
+
+const SettingsSkeleton = ({ showRecovery = false }) => (
   <div className="animate-pulse">
     <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
       <div className="overflow-hidden rounded-[10px] border border-[#1A1F36] bg-[#1A1F36]">
@@ -121,18 +178,28 @@ const SettingsSkeleton = () => (
       </div>
     </div>
 
-    <div className="overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-        <div>
-          <SkeletonBlock className="mb-2 h-3 w-24" />
-          <SkeletonBlock className="h-3 w-48" />
+    <div className={`grid grid-cols-1 gap-5 ${showRecovery ? "lg:grid-cols-2" : ""}`}>
+      <div className="overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-sm">
+        <div className="flex min-h-[92px] items-center justify-between gap-4 px-6 py-4">
+          <div>
+            <SkeletonBlock className="mb-2 h-3 w-24" />
+            <SkeletonBlock className="h-3 w-48" />
+          </div>
+          <SkeletonBlock className="h-9 w-9 rounded-xl" />
         </div>
-        <SkeletonBlock className="h-9 w-9 rounded-xl" />
       </div>
-      <div className="px-6 pb-5 pt-3">
-        <SkeletonBlock className="mb-2 h-3 w-24" />
-        <SkeletonBlock className="h-4 w-32" />
-      </div>
+
+      {showRecovery && (
+        <div className="overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-sm">
+          <div className="flex min-h-[92px] items-center justify-between gap-4 px-6 py-4">
+            <div>
+              <SkeletonBlock className="mb-2 h-3 w-24" />
+              <SkeletonBlock className="h-3 w-64 max-w-full" />
+            </div>
+            <SkeletonBlock className="h-9 w-28 rounded-[10px]" />
+          </div>
+        </div>
+      )}
     </div>
   </div>
 );
@@ -143,7 +210,10 @@ const SettingsSkeleton = () => (
 const UserProfileTab = ({ showToast }) => {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useSettingsQuery();
-  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const {
+    isTransactionLocked,
+    transactionLockMessage,
+  } = useTransactionLockQuery();
   const profile = data?.user ?? null;
   const [saving,            setSaving]            = useState(false);
   const [showPersonalModal, setShowPersonalModal] = useState(false);
@@ -160,11 +230,14 @@ const UserProfileTab = ({ showToast }) => {
   const [pwResendCount, setPwResendCount] = useState(0);
   const [resendingPwCode, setResendingPwCode] = useState(false);
   const [showPwFields, setShowPwFields] = useState({ current: false, new_pass: false, confirm: false });
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [pendingRecoveryFile, setPendingRecoveryFile] = useState(null);
   const selectedFiscalYear = useFiscalYearStore((state) => state.fiscalYear);
   const setSelectedFiscalYear = useFiscalYearStore((state) => state.setFiscalYear);
   const [fiscalYearDropdownOpen, setFiscalYearDropdownOpen] = useState(false);
 
   const pwCodeInputRefs = useRef([]);
+  const recoveryFileInputRef = useRef(null);
 
   useEffect(() => {
     if (profile) localStorage.setItem("user", JSON.stringify(profile));
@@ -205,6 +278,44 @@ const UserProfileTab = ({ showToast }) => {
   const initials = profile
     ? `${String(profile.first_name || "").trim().charAt(0)}${String(profile.last_name || "").trim().charAt(0)}`.toUpperCase()
     : "";
+  const normalizedProfileRole = String(profile?.role || getStoredUserRole()).trim().toLowerCase();
+  const canRecoverDatabase = normalizedProfileRole === "head";
+
+  const handleRecoveryFileChange = (event) => {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".sql")) {
+      showToast("error", "Invalid File", "Please select a .sql backup file.");
+      return;
+    }
+
+    setPendingRecoveryFile(file);
+  };
+
+  const handleRecoverDatabase = async () => {
+    if (!pendingRecoveryFile || recoveryLoading) return;
+
+    const formData = new FormData();
+    formData.append("backup_file", pendingRecoveryFile);
+
+    setRecoveryLoading(true);
+    try {
+      const response = await api.post("/database/recover", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setPendingRecoveryFile(null);
+      await queryClient.cancelQueries();
+      await queryClient.invalidateQueries({ refetchType: "all" });
+      showToast("success", "Recovery Complete", response.data?.message || "Database recovered successfully.");
+    } catch (err) {
+      showToast("error", "Recovery Failed", await getRequestErrorMessage(err, "Unable to recover the database from the selected file."));
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
 
   const buildBirthday = () => {
     const birthday = String(tmpP.birthday || "").trim();
@@ -497,7 +608,7 @@ const UserProfileTab = ({ showToast }) => {
   };
 
   if (isLoading && !profile) {
-    return <SettingsSkeleton />;
+    return <SettingsSkeleton showRecovery={canRecoverDatabase} />;
   }
 
   return (
@@ -608,26 +719,78 @@ const UserProfileTab = ({ showToast }) => {
         </div>
       </div>
 
-      {/* -- Security Card -- */}
-      <div className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden mb-5">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <div>
-            <h3 className="m-0 text-[14px] font-medium uppercase" style={{ color: "#1a1f36" }}>Security</h3>
-            <p className="m-0 text-[12px] mt-0.5 text-slate-700">Manage your account password</p>
-          </div>
-          <button onClick={() => { if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; } setPwErr(""); setPwCode([...EMPTY_VERIFICATION_CODE]); setPwCodeErr(""); setPwFieldErrors(EMPTY_PASSWORD_ERRORS); setTmpPw(EMPTY_PASSWORD_FORM); setShowPwCodeModal(false); setShowPwFields({ current: false, new_pass: false, confirm: false }); setShowPwModal(true); }}
-            disabled={isTransactionLocked}
-            className="flex items-center justify-center w-9 h-9 rounded-xl border-2 cursor-pointer bg-white disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "#1a1f36", color: "#1a1f36" }}>
-            <IoCreateOutline style={{ fontSize: "20px", color: isTransactionLocked ? "#94a3b8" : undefined }} />
-          </button>
-        </div>
-        <div className="px-6 pt-3 pb-5">
-          <div>
-            <p className="m-0 mb-1 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82" }}>Password</p>
-            <p className="m-0 text-[15px] font-medium text-slate-700">............</p>
+      <div className={`grid grid-cols-1 gap-5 mb-5 ${canRecoverDatabase ? "lg:grid-cols-2" : ""}`}>
+        {/* -- Security Card -- */}
+        <div className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
+          <div className="flex min-h-[92px] items-center justify-between gap-4 px-6 py-4">
+            <div>
+              <h3 className="m-0 text-[14px] font-medium uppercase" style={{ color: "#1a1f36" }}>Security</h3>
+              <p className="m-0 text-[12px] mt-0.5 text-slate-700">Manage your account password</p>
+            </div>
+            <button onClick={() => { if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; } setPwErr(""); setPwCode([...EMPTY_VERIFICATION_CODE]); setPwCodeErr(""); setPwFieldErrors(EMPTY_PASSWORD_ERRORS); setTmpPw(EMPTY_PASSWORD_FORM); setShowPwCodeModal(false); setShowPwFields({ current: false, new_pass: false, confirm: false }); setShowPwModal(true); }}
+              disabled={isTransactionLocked}
+              className="flex items-center justify-center w-9 h-9 rounded-xl border-2 cursor-pointer bg-white disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "#1a1f36", color: "#1a1f36" }}>
+              <IoCreateOutline style={{ fontSize: "20px", color: isTransactionLocked ? "#94a3b8" : undefined }} />
+            </button>
           </div>
         </div>
+
+        {canRecoverDatabase && (
+          <DataActionCard
+            icon={IoCloudUploadOutline}
+            title="Recovery"
+            description="Recover the database from a selected SQL file."
+            actionLabel="Recover File"
+            actionIcon={IoCloudUploadOutline}
+            loading={recoveryLoading}
+            disabled={false}
+            onAction={() => recoveryFileInputRef.current?.click()}
+            showIcon={false}
+          />
+        )}
       </div>
+
+      {canRecoverDatabase && (
+        <input
+          ref={recoveryFileInputRef}
+          type="file"
+          accept=".sql"
+          className="hidden"
+          onChange={handleRecoveryFileChange}
+        />
+      )}
+
+      {pendingRecoveryFile && (
+        <Modal
+          title="Recover Database"
+          onClose={() => {
+            if (!recoveryLoading) setPendingRecoveryFile(null);
+          }}
+          onSave={handleRecoverDatabase}
+          saving={recoveryLoading}
+          saveLabel="Recover"
+          savingLabel=""
+          saveButtonWidth="118px"
+          closeLabel="Cancel"
+          maxWidth="520px"
+        >
+          <div className="rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-4">
+            <div className="flex items-start gap-3">
+              <IoAlertCircleOutline className="mt-0.5 flex-shrink-0 text-[20px] text-amber-600" />
+              <div className="min-w-0">
+                <p className="m-0 text-[14px] font-semibold text-[#1a1f36]">Confirm database recovery</p>
+                <p className="m-0 mt-1 text-[13px] leading-6 text-slate-700">
+                  This will recover the database using the selected SQL file. A safety backup will be created before recovery starts.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-[10px] border border-slate-200 bg-white px-4 py-3">
+            <p className="m-0 mb-1 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82" }}>Selected File</p>
+            <p className="m-0 break-words text-[13px] font-medium text-slate-700">{pendingRecoveryFile.name}</p>
+          </div>
+        </Modal>
+      )}
 
       {/* -- Personal Info Modal -- */}
       {showPersonalModal && (

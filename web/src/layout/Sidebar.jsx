@@ -217,10 +217,9 @@ const Sidebar = ({
     const annualVehicleTicketsPath = "/annual-vehicle-tickets";
     const vehicleTypesPath = "/vehicle-types";
     const billingPath = "/billing";
-    const createBillingPath = "/create-billing";
-    const paymentsPath = "/payments";
-    const recordPaymentPath = "/record-payment";
-    const soaPath = "/statement-of-account";
+    const billingPaymentsPath = "/billing-payments";
+    const collectionsPath = "/collections";
+    const soaPath = "/owner-statement";
     const reportsPath = "/reports";
     const remittancePath = "/remittance";
     const archivesPath = "/archives";
@@ -239,13 +238,15 @@ const Sidebar = ({
       [vehicleTicketsPath, "Vehicle Tickets"],
       [annualVehicleTicketsPath, "Vehicle Tickets"],
       [vehicleTypesPath, "Vehicle Tickets"],
-      [billingPath, "Bills"],
-      [createBillingPath, "Bills"],
-      [paymentsPath, "Payments"],
-      [recordPaymentPath, "Payments"],
-      [soaPath, "Boat Statement"],
+      [billingPath, "Billing"],
+      [billingPaymentsPath, "Billing"],
+      [collectionsPath, "Collections"],
+      ["/payments", "Collections"],
+      [soaPath, "Statement of Account"],
+      ["/boat-statement", "Statement of Account"],
+      ["/statement-of-account", "Statement of Account"],
       [reportsPath, "Reports"],
-      [remittancePath, "Remittance"],
+      [remittancePath, "Collections"],
       ["/notification", "Notification"],
       ["/set-fees", "Set Fees"],
       ["/manage-accounts", "Accounts"],
@@ -288,9 +289,10 @@ const Sidebar = ({
         { type: "item", icon: IoCalendarOutline, label: "Docking", path: "/docking" },
         { type: "item", icon: IoFishOutline, label: "Banyera", path: "/banyera" },
         { type: "item", icon: IoCarOutline, label: "Vehicle Tickets", path: "/daily-vehicle-tickets" },
-        { type: "item", icon: IoReceiptOutline, label: "Bills", path: "/billing" },
-        { type: "item", icon: IoCashOutline, label: "Payments", path: "/payments" },
-        { type: "item", icon: IoDocumentTextOutline, label: "Boat Statement", path: "/statement-of-account" },
+        { type: "item", icon: IoReceiptOutline, label: "Billing", path: "/billing" },
+        { type: "item", icon: IoCashOutline, label: "Collections", path: "/collections" },
+        { type: "item", icon: IoDocumentTextOutline, label: "Statement of Account", path: "/owner-statement" },
+        { type: "item", icon: IoPricetagOutline, label: "Set Fees", path: "/set-fees" },
       ],
     },
     {
@@ -302,13 +304,11 @@ const Sidebar = ({
     {
       label: "Others",
       items: [
-        { type: "item", icon: IoPricetagOutline, label: "Set Fees", path: "/set-fees" },
-        { type: "item", icon: IoCashOutline, label: "Remittance", path: "/remittance" },
         {
           type: "item", icon: IoPeopleOutline, label: "Accounts", path: "/manage-accounts"
         },
-        { type: "item", icon: IoNotificationsOutline, label: "Notification", path: "/notification"             },
         { type: "item", icon: IoArchiveOutline,       label: "Archives",     path: "/archives" },
+        { type: "item", icon: IoNotificationsOutline, label: "Notification", path: "/notification"             },
         { type: "item", icon: IoTimeOutline,          label: "Activity Logs", path: "/activity-logs" },
       ],
     },

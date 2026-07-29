@@ -73,20 +73,31 @@ class BoatLoadTestSeeder extends Seeder
             throw new \RuntimeException('Expected 50 Type Test rows to exist before seeding boats.');
         }
 
+        $ownerUser = User::query()
+            ->where('email', 'boat-owner-load-test@example.com')
+            ->first();
+
+        if (! $ownerUser) {
+            throw new \RuntimeException('Expected the boat owner test user to exist before seeding boats.');
+        }
+
         $boatOwners = BoatOwner::query()
-            ->where('owner_firstname', 'Owner')
-            ->where('owner_lastname', 'like', 'Test %')
+            ->where('created_by', $ownerUser->user_id)
+            ->whereNull('deleted_at')
             ->orderBy('owner_lastname')
+            ->orderBy('owner_firstname')
             ->limit(50)
             ->get();
 
         if ($boatOwners->count() < 50) {
-            throw new \RuntimeException('Expected 50 Owner Test rows to exist before seeding boats.');
+            throw new \RuntimeException('Expected 50 owner rows from BoatOwnerLoadTestSeeder before seeding boats.');
         }
 
         foreach (range(1, 100) as $number) {
             $boatType = $boatTypes[($number - 1) % $boatTypes->count()];
-            $boatOwner = $boatOwners[($number - 1) % $boatOwners->count()];
+            $boatOwner = $number <= $boatOwners->count()
+                ? $boatOwners[$number - 1]
+                : $boatOwners[($number - 1) % $boatOwners->count()];
 
             Boat::updateOrCreate(
                 ['boat_name' => sprintf('Boat Test %d', $number)],
@@ -97,6 +108,19 @@ class BoatLoadTestSeeder extends Seeder
                     'created_by' => $user->user_id,
                 ]
             );
+        }
+
+        $usedOwnerIds = Boat::query()
+            ->where('boat_name', 'like', 'Boat Test %')
+            ->whereNull('deleted_at')
+            ->whereNotNull('owner_id')
+            ->pluck('owner_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($usedOwnerIds->count() < $boatOwners->count()) {
+            throw new \RuntimeException('Expected every seeded boat owner to be connected to at least one boat.');
         }
 
         BoatType::query()

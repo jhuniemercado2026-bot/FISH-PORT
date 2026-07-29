@@ -206,6 +206,9 @@ export const getVehicleTypesDataQueryOptions = ({
 
 const QUERY_OPTION_KEYS = new Set(["enabled", "staleTime", "gcTime", "refetchOnReconnect", "refetchOnWindowFocus", "placeholderData", "keepPreviousData", "select", "retry"]);
 
+const getQueryTicketType = (queryKey) =>
+  String(queryKey?.[1]?.filters?.ticketType ?? "all").toLowerCase();
+
 const looksLikeQueryOptions = (value) =>
   value &&
   typeof value === "object" &&
@@ -218,10 +221,12 @@ export const useVehicleTicketsDataQuery = (filters = {}, queryOptions = {}) => {
   const resolvedFilters = looksLikeQueryOptions(filters) ? {} : filters;
   const resolvedQueryOptions = looksLikeQueryOptions(filters) ? filters : queryOptions;
   const fiscalYear = useFiscalYearStore((state) => state.fiscalYear);
+  const currentTicketType = String(resolvedFilters.ticketType ?? resolvedFilters.filters?.ticketType ?? "all").toLowerCase();
 
   return useQuery({
     ...getVehicleTicketsDataQueryOptions({ ...resolvedFilters, fiscalYear: resolvedFilters.skipFiscalYear ? undefined : fiscalYear }),
-    placeholderData: (previousData) => previousData,
+    placeholderData: (previousData, previousQuery) =>
+      getQueryTicketType(previousQuery?.queryKey) === currentTicketType ? previousData : undefined,
     keepPreviousData: true,
     ...resolvedQueryOptions,
   });

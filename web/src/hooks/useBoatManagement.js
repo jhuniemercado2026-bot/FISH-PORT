@@ -66,6 +66,7 @@ export const getRegisteredBoatsDataQueryOptions = ({
   includeBoats = false,
   includeBoatTypes = false,
   includeOwners = false,
+  includeArchivedLookups = false,
   boat = false,
 } = {}) => ({
   queryKey: [
@@ -94,6 +95,7 @@ export const getRegisteredBoatsDataQueryOptions = ({
       includeBoats,
       includeBoatTypes,
       includeOwners,
+      includeArchivedLookups,
       boat,
     },
   ],
@@ -122,6 +124,7 @@ export const getRegisteredBoatsDataQueryOptions = ({
       include_boats: includeBoats ? 1 : 0,
       include_boat_types: includeBoatTypes ? 1 : 0,
       include_owners: includeOwners ? 1 : 0,
+      include_archived_lookups: includeArchivedLookups ? 1 : 0,
       boat: boat ? 1 : 0,
     };
 
@@ -421,15 +424,19 @@ const extractOwnerInfoReport = (payload) => {
     : Array.isArray(payload?.data)
     ? payload.data
     : [];
+  const totalOwners = Number(payload?.totalOwners ?? payload?.total_owners ?? payload?.pagination?.total ?? owners.length);
 
-  return { owners };
+  return { owners, totalOwners: Number.isFinite(totalOwners) ? totalOwners : owners.length };
 };
 
 export const getOwnerInfoReportQueryOptions = () => ({
   queryKey: ["owner-info-report"],
   queryFn: async ({ signal }) => {
     try {
-      const response = await api.get("/owner-info-reports", { signal });
+      const response = await api.get("/owner-info-reports", {
+        params: { per_page: 1000 },
+        signal,
+      });
       return extractOwnerInfoReport(response.data);
     } catch (error) {
       console.error("Error fetching owner info report:", error);

@@ -26,10 +26,12 @@ class UniversalSearchController extends Controller
         $validated = $request->validate([
             'q' => ['nullable', 'string', 'max:255'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:60'],
+            'fiscal_year' => ['nullable', 'regex:/^\d{4}$/'],
         ]);
 
         $query = trim((string) ($validated['q'] ?? ''));
         $limit = (int) ($validated['limit'] ?? 30);
+        $fiscalYear = $this->fiscalYear($request);
 
         if (mb_strlen($query) < 1) {
             return response()->json(['results' => []]);
@@ -37,23 +39,23 @@ class UniversalSearchController extends Controller
 
         $isHead = strtolower((string) $request->user()?->role) === 'head';
         $results = collect()
-            ->merge($this->boats($query))
-            ->merge($this->boatTypes($query))
-            ->merge($this->boatOwners($query))
-            ->merge($this->bills($query))
-            ->merge($this->payments($query))
-            ->merge($this->dockings($query))
-            ->merge($this->banyera($query))
-            ->merge($this->fishClassifications($query))
-            ->merge($this->vehicleTypes($query))
-            ->merge($this->vehicleTickets($query))
-            ->merge($this->remittances($query))
-            ->merge($this->statements($query));
+            ->merge($this->boats($query, $fiscalYear))
+            ->merge($this->boatTypes($query, $fiscalYear))
+            ->merge($this->boatOwners($query, $fiscalYear))
+            ->merge($this->bills($query, $fiscalYear))
+            ->merge($this->payments($query, $fiscalYear))
+            ->merge($this->dockings($query, $fiscalYear))
+            ->merge($this->banyera($query, $fiscalYear))
+            ->merge($this->fishClassifications($query, $fiscalYear))
+            ->merge($this->vehicleTypes($query, $fiscalYear))
+            ->merge($this->vehicleTickets($query, $fiscalYear))
+            ->merge($this->remittances($query, $fiscalYear))
+            ->merge($this->statements($query, $fiscalYear));
 
         if ($isHead) {
             $results = $results
-                ->merge($this->users($query, $request->user()?->user_id))
-                ->merge($this->fees($query));
+                ->merge($this->users($query, $request->user()?->user_id, $fiscalYear))
+                ->merge($this->fees($query, $fiscalYear));
         }
 
         $ranked = $results
@@ -69,12 +71,17 @@ class UniversalSearchController extends Controller
         return response()->json(['results' => $ranked]);
     }
 
-    private function boats(string $search): Collection
+    private function boats(string $search, ?int $fiscalYear): Collection
     {
-        return Boat::forManagementIndex()
+        $query = Boat::forManagementIndex()
             ->managementFilters($search)
-            ->latest('created_at')
-            ->limit(8)
+            ->latest('created_at');
+
+        if ($fiscalYear) {
+            $query->whereYear('created_at', $fiscalYear);
+        }
+
+        return $query->limit(8)
             ->get()
             ->map(function (Boat $boat) {
                 $ownerName = trim(($boat->owner?->owner_firstname ?? '') . ' ' . ($boat->owner?->owner_lastname ?? '')) ?: '-';
@@ -86,12 +93,17 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function boatTypes(string $search): Collection
+    private function boatTypes(string $search, ?int $fiscalYear): Collection
     {
-        return BoatType::forManagementIndex()
+        $query = BoatType::forManagementIndex()
             ->managementFilters($search)
-            ->latest()
-            ->limit(6)
+            ->latest();
+
+        if ($fiscalYear) {
+            $query->whereYear('created_at', $fiscalYear);
+        }
+
+        return $query->limit(6)
             ->get()
             ->map(function (BoatType $type) {
                 $title = $type->type_name ?: "Boat Type #{$type->boat_type_id}";
@@ -107,12 +119,17 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function boatOwners(string $search): Collection
+    private function boatOwners(string $search, ?int $fiscalYear): Collection
     {
-        return BoatOwner::forManagementIndex()
+        $query = BoatOwner::forManagementIndex()
             ->managementFilters($search)
-            ->latest()
-            ->limit(6)
+            ->latest();
+
+        if ($fiscalYear) {
+            $query->whereYear('created_at', $fiscalYear);
+        }
+
+        return $query->limit(6)
             ->get()
             ->map(function (BoatOwner $owner) {
                 $title = trim(($owner->owner_firstname ?? '') . ' ' . ($owner->owner_lastname ?? '')) ?: "Boat Owner #{$owner->owner_id}";
@@ -128,17 +145,22 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function bills(string $search): Collection
+    private function bills(string $search, ?int $fiscalYear): Collection
     {
-        return Bill::query()
+        $query = Bill::query()
             ->with(['boat:boat_id,boat_name,boat_type_id', 'boat.boatType:boat_type_id,type_name'])
             ->where(function ($query) use ($search) {
                 $query->where('bill_reference_no', 'like', "%{$search}%")
                     ->orWhere('total_amount', 'like', "%{$search}%")
                     ->orWhereHas('boat', fn ($boat) => $boat->where('boat_name', 'like', "%{$search}%"))
                     ->orWhereHas('boat.boatType', fn ($type) => $type->where('type_name', 'like', "%{$search}%"));
-            })
-            ->latest('bill_id')
+            });
+
+        if ($fiscalYear) {
+            $query->whereYear('created_at', $fiscalYear);
+        }
+
+        return $query->latest('bill_id')
             ->limit(8)
             ->get()
             ->map(function (Bill $bill) {
@@ -151,9 +173,9 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function payments(string $search): Collection
+    private function payments(string $search, ?int $fiscalYear): Collection
     {
-        return Payment::query()
+        $query = Payment::query()
             ->leftJoin('bills as b', 'b.bill_id', '=', 'payments.bill_id')
             ->leftJoin('boats as boat', 'boat.boat_id', '=', 'b.boat_id')
             ->where(function ($query) use ($search) {
@@ -161,8 +183,16 @@ class UniversalSearchController extends Controller
                     ->orWhere('payments.amount_paid', 'like', "%{$search}%")
                     ->orWhereDate('payments.payment_date', $search)
                     ->orWhere('boat.boat_name', 'like', "%{$search}%");
-            })
-            ->select('payments.*', 'boat.boat_name')
+            });
+
+        if ($fiscalYear) {
+            $query->where(function ($yearQuery) use ($fiscalYear) {
+                $yearQuery->whereYear('payments.payment_date', $fiscalYear)
+                    ->orWhereYear('payments.created_at', $fiscalYear);
+            });
+        }
+
+        return $query->select('payments.*', 'boat.boat_name')
             ->latest('payments.payment_id')
             ->limit(8)
             ->get()
@@ -174,18 +204,26 @@ class UniversalSearchController extends Controller
                     $this->money($payment->amount_paid),
                 ]);
 
-                return $this->result("payment-{$payment->payment_id}", $title, $subtitle, 'Payments', "/payments?highlight=payment-{$payment->payment_id}", [$title, $payment->boat_name, $this->date($payment->payment_date ?: $payment->created_at), $this->money($payment->amount_paid)]);
+                return $this->result("payment-{$payment->payment_id}", $title, $subtitle, 'Payments', "/billing-payments?highlight=payment-{$payment->payment_id}", [$title, $payment->boat_name, $this->date($payment->payment_date ?: $payment->created_at), $this->money($payment->amount_paid)]);
             });
     }
 
-    private function dockings(string $search): Collection
+    private function dockings(string $search, ?int $fiscalYear): Collection
     {
-        return Docking::forTableIndex()
+        $query = Docking::forTableIndex()
             ->searchTable($search)
             ->orderByDesc('docking_date')
             ->orderByDesc('created_at')
-            ->orderByDesc('docking_id')
-            ->limit(8)
+            ->orderByDesc('docking_id');
+
+        if ($fiscalYear) {
+            $query->where(function ($yearQuery) use ($fiscalYear) {
+                $yearQuery->whereYear('dockings.docking_date', $fiscalYear)
+                    ->orWhereYear('dockings.created_at', $fiscalYear);
+            });
+        }
+
+        return $query->limit(8)
             ->get()
             ->map(function (Docking $docking) {
                 $title = $docking->boat?->boat_name ?: "Docking #{$docking->docking_id}";
@@ -194,14 +232,22 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function banyera(string $search): Collection
+    private function banyera(string $search, ?int $fiscalYear): Collection
     {
-        return BanyeraTransaction::forTableIndex(true)
+        $query = BanyeraTransaction::forTableIndex(true)
             ->searchTable($search)
             ->orderByDesc('banyera_transactions.transaction_date')
             ->orderByDesc('banyera_transactions.created_at')
-            ->orderByDesc('banyera_transactions.banyera_id')
-            ->limit(8)
+            ->orderByDesc('banyera_transactions.banyera_id');
+
+        if ($fiscalYear) {
+            $query->where(function ($yearQuery) use ($fiscalYear) {
+                $yearQuery->whereYear('banyera_transactions.transaction_date', $fiscalYear)
+                    ->orWhereYear('banyera_transactions.created_at', $fiscalYear);
+            });
+        }
+
+        return $query->limit(8)
             ->get()
             ->map(function (BanyeraTransaction $transaction) {
                 $reference = 'BNY-' . str_pad((string) $transaction->banyera_id, 4, '0', STR_PAD_LEFT);
@@ -212,14 +258,19 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function fishClassifications(string $search): Collection
+    private function fishClassifications(string $search, ?int $fiscalYear): Collection
     {
-        return FishClassification::query()
+        $query = FishClassification::query()
             ->whereNull('deleted_at')
             ->where('classification_name', 'like', "{$search}%")
             ->orderBy('classification_name')
-            ->orderBy('classification_id')
-            ->limit(8)
+            ->orderBy('classification_id');
+
+        if ($fiscalYear) {
+            $query->whereYear('created_at', $fiscalYear);
+        }
+
+        return $query->limit(8)
             ->get()
             ->map(function (FishClassification $classification) {
                 $title = $classification->classification_name ?: "Fish Classification #{$classification->classification_id}";
@@ -235,14 +286,19 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function vehicleTypes(string $search): Collection
+    private function vehicleTypes(string $search, ?int $fiscalYear): Collection
     {
-        return VehicleType::query()
+        $query = VehicleType::query()
             ->whereNull('deleted_at')
             ->where('type_name', 'like', "{$search}%")
             ->orderBy('type_name')
-            ->orderBy('vehicle_type_id')
-            ->limit(6)
+            ->orderBy('vehicle_type_id');
+
+        if ($fiscalYear) {
+            $query->whereYear('created_at', $fiscalYear);
+        }
+
+        return $query->limit(6)
             ->get()
             ->map(function (VehicleType $type) {
                 $title = $type->type_name ?: "Vehicle Type #{$type->vehicle_type_id}";
@@ -258,7 +314,7 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function vehicleTickets(string $search): Collection
+    private function vehicleTickets(string $search, ?int $fiscalYear): Collection
     {
         $mapTicket = function (VehicleTicket $ticket) {
             $title = $ticket->vehicleType?->type_name ?: "Ticket #{$ticket->ticket_id}";
@@ -291,8 +347,16 @@ class UniversalSearchController extends Controller
                     ->where('ticket_fee', 'like', "%{$search}%")
                     ->orWhereDate('ticket_date', $search)
                     ->orWhereHas('vehicleType', fn ($type) => $type->where('type_name', 'like', "%{$search}%"));
-            })
-            ->latest('ticket_id')
+            });
+
+        if ($fiscalYear) {
+            $dailyTickets->where(function ($yearQuery) use ($fiscalYear) {
+                $yearQuery->whereYear('ticket_date', $fiscalYear)
+                    ->orWhereYear('created_at', $fiscalYear);
+            });
+        }
+
+        $dailyTickets = $dailyTickets->latest('ticket_id')
             ->limit(8)
             ->get()
             ->map($mapTicket);
@@ -307,8 +371,16 @@ class UniversalSearchController extends Controller
                     ->orWhere('ticket_fee', 'like', "%{$search}%")
                     ->orWhereDate('ticket_date', $search)
                     ->orWhereHas('vehicleType', fn ($type) => $type->where('type_name', 'like', "%{$search}%"));
-            })
-            ->latest('ticket_id')
+            });
+
+        if ($fiscalYear) {
+            $annualTickets->where(function ($yearQuery) use ($fiscalYear) {
+                $yearQuery->whereYear('ticket_date', $fiscalYear)
+                    ->orWhereYear('created_at', $fiscalYear);
+            });
+        }
+
+        $annualTickets = $annualTickets->latest('ticket_id')
             ->limit(8)
             ->get()
             ->map($mapTicket);
@@ -318,9 +390,9 @@ class UniversalSearchController extends Controller
             ->merge($annualTickets);
     }
 
-    private function remittances(string $search): Collection
+    private function remittances(string $search, ?int $fiscalYear): Collection
     {
-        return Remittance::query()
+        $query = Remittance::query()
             ->where(function ($query) use ($search) {
                 $query->where('remittance_reference_no', 'like', "%{$search}%")
                     ->orWhere('amount', 'like', "%{$search}%")
@@ -328,8 +400,16 @@ class UniversalSearchController extends Controller
                     ->orWhere('deficit', 'like', "%{$search}%")
                     ->orWhere('remarks', 'like', "%{$search}%")
                     ->orWhereDate('date', $search);
-            })
-            ->latest('remittance_id')
+            });
+
+        if ($fiscalYear) {
+            $query->where(function ($yearQuery) use ($fiscalYear) {
+                $yearQuery->whereYear('date', $fiscalYear)
+                    ->orWhereYear('created_at', $fiscalYear);
+            });
+        }
+
+        return $query->latest('remittance_id')
             ->limit(6)
             ->get()
             ->map(fn (Remittance $remittance) => $this->result(
@@ -342,13 +422,18 @@ class UniversalSearchController extends Controller
             ));
     }
 
-    private function users(string $search, ?int $currentUserId): Collection
+    private function users(string $search, ?int $currentUserId, ?int $fiscalYear): Collection
     {
-        return User::query()
+        $query = User::query()
             ->where('user_id', '!=', $currentUserId)
             ->where('email', 'like', "%{$search}%")
-            ->latest('user_id')
-            ->limit(6)
+            ->latest('user_id');
+
+        if ($fiscalYear) {
+            $query->whereYear('created_at', $fiscalYear);
+        }
+
+        return $query->limit(6)
             ->get()
             ->map(function (User $user) {
                 return $this->result(
@@ -362,12 +447,17 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function statements(string $search): Collection
+    private function statements(string $search, ?int $fiscalYear): Collection
     {
-        return Boat::query()
+        $boatResults = Boat::query()
             ->where('boat_name', 'like', "%{$search}%")
-            ->latest('boat_id')
-            ->limit(6)
+            ->latest('boat_id');
+
+        if ($fiscalYear) {
+            $boatResults->whereYear('created_at', $fiscalYear);
+        }
+
+        $boatResults = $boatResults->limit(6)
             ->get()
             ->map(function (Boat $boat) {
                 $title = $boat->boat_name ?: "Boat #{$boat->boat_id}";
@@ -376,24 +466,54 @@ class UniversalSearchController extends Controller
                     "boat-{$boat->boat_id}",
                     $title,
                     '',
-                    'Statement of Account',
-                    "/statement-of-account?highlight=boat-{$boat->boat_id}",
+                    'Boat Statement',
+                    "/boat-statement?highlight=boat-{$boat->boat_id}",
                     [$title]
                 );
             });
+
+        $ownerResults = BoatOwner::query()
+            ->whereRaw("TRIM(CONCAT(COALESCE(owner_firstname, ''), ' ', COALESCE(owner_lastname, ''))) like ?", ["%{$search}%"])
+            ->latest('owner_id');
+
+        if ($fiscalYear) {
+            $ownerResults->whereYear('created_at', $fiscalYear);
+        }
+
+        $ownerResults = $ownerResults->limit(6)
+            ->get()
+            ->map(function (BoatOwner $owner) {
+                $title = trim(($owner->owner_firstname ?? '') . ' ' . ($owner->owner_lastname ?? '')) ?: "Owner #{$owner->owner_id}";
+
+                return $this->result(
+                    "owner-{$owner->owner_id}",
+                    $title,
+                    '',
+                    'Owner Statement',
+                    "/owner-statement?highlight=owner-{$owner->owner_id}",
+                    [$title]
+                );
+            });
+
+        return collect($boatResults)->merge($ownerResults);
     }
 
-    private function fees(string $search): Collection
+    private function fees(string $search, ?int $fiscalYear): Collection
     {
-        return Fee::query()
+        $query = Fee::query()
             ->with(['boatType:boat_type_id,type_name', 'vehicleType:vehicle_type_id,type_name'])
             ->where(function ($query) use ($search) {
                 $query->where('fee_type_name', 'like', "%{$search}%")
                     ->orWhere('amount', 'like', "%{$search}%")
                     ->orWhereHas('boatType', fn ($type) => $type->where('type_name', 'like', "%{$search}%"))
                     ->orWhereHas('vehicleType', fn ($type) => $type->where('type_name', 'like', "%{$search}%"));
-            })
-            ->latest('fee_id')
+            });
+
+        if ($fiscalYear) {
+            $query->whereYear('created_at', $fiscalYear);
+        }
+
+        return $query->latest('fee_id')
             ->limit(6)
             ->get()
             ->map(function (Fee $fee) {

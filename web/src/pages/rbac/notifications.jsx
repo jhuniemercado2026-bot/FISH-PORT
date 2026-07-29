@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ConfigProvider } from "antd";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -11,7 +11,7 @@ import {
 } from "react-icons/io5";
 import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
-import FilterSelect from "../../components/FilterSelect";
+import FilterButton from "../../components/FilterButton";
 import Legend from "../../components/Legend";
 import TableCard from "../../components/TableCard";
 import OverviewCard from "../../components/Overview";
@@ -57,7 +57,7 @@ const TH = ({ children }) => (
 );
 
 const TailDropdown = ({ value, onChange, options, height = 42, minWidth = 150 }) => (
-  <FilterSelect value={value} onChange={onChange} options={options} height={height} width={minWidth} />
+  <FilterButton value={value} onChange={onChange} options={options} height={height} width={minWidth} />
 );
 
 
@@ -240,21 +240,43 @@ const NotificationsPage = () => {
     },
   });
 
-  const getNotificationTargetPath = (notification) => {
+  const getNotificationNavigationTarget = (notification) => {
     const relatedType = String(notification?.related_type || "").trim().toLowerCase();
+    const relatedId = notification?.related_id;
 
-    if (relatedType === "remittance") {
-      return "/remittance";
+    if (relatedType === "remittance" && relatedId) {
+      const highlightId = `remittance-${relatedId}`;
+
+      return {
+        pathname: "/remittance",
+        search: `?highlight=${highlightId}`,
+        state: {
+          universalSearchResult: {
+            id: highlightId,
+            group: "Remittance",
+            path: `/remittance?highlight=${highlightId}`,
+            title: notification?.title || "Remittance",
+            subtitle: notification?.message || "",
+          },
+        },
+      };
     }
 
-    return "/notification";
+    return {
+      pathname: "/notification",
+      search: "",
+      state: null,
+    };
   };
 
   const handleNotificationRowClick = async (row) => {
-    const targetPath = getNotificationTargetPath(row);
+    const target = getNotificationNavigationTarget(row);
 
     if (!row?.notification_id) {
-      navigate(targetPath);
+      navigate(
+        { pathname: target.pathname, search: target.search },
+        { state: target.state }
+      );
       return;
     }
 
@@ -266,7 +288,10 @@ const NotificationsPage = () => {
       }
     }
 
-    navigate(targetPath);
+    navigate(
+      { pathname: target.pathname, search: target.search },
+      { state: target.state }
+    );
   };
 
   return (
@@ -387,45 +412,45 @@ const NotificationsPage = () => {
                         </tr>
                       ) : (
                         paginatedRows.map((row, index) => (
-                          <tr
-                            key={row.notification_id}
-                            onClick={() => handleNotificationRowClick(row)}
-                            className={`transition-colors cursor-pointer ${index % 2 === 0 ? "table-row-even" : "table-row-odd"}`}
-                            style={{
-                              borderBottom: "1px solid #f1f5f9",
-                              backgroundColor: !row.is_read ? "#f3f4f6" : "#ffffff",
-                            }}
-                          >
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                            <tr
+                              key={row.notification_id}
+                              onClick={() => handleNotificationRowClick(row)}
+                              className={`transition-colors cursor-pointer ${index % 2 === 0 ? "table-row-even" : "table-row-odd"}`}
+                              style={{
+                                borderBottom: "1px solid #f1f5f9",
+                                backgroundColor: !row.is_read ? "#f3f4f6" : "#ffffff",
+                              }}
+                            >
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                                    style={{
+                                      backgroundColor: row.is_read ? "#16a34a" : "#f59e0b",
+                                      minWidth: 10,
+                                      minHeight: 10,
+                                    }}
+                                  />
+                                  <span className="text-[13px] font-semibold text-[#1a1f36]">
+                                    {row.title || "-"}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-[13px] text-[#1a1f36]">
+                                <div
+                                  className="overflow-hidden break-words"
                                   style={{
-                                    backgroundColor: row.is_read ? "#16a34a" : "#f59e0b",
-                                    minWidth: 10,
-                                    minHeight: 10,
+                                    lineHeight: "1.35",
+                                    maxWidth: 320,
+                                    whiteSpace: "normal",
                                   }}
-                                />
-                                <span className="text-[13px] font-semibold text-[#1a1f36]">
-                                  {row.title || "-"}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-[13px] text-[#1a1f36]">
-                              <div
-                                className="overflow-hidden break-words"
-                                style={{
-                                  lineHeight: "1.35",
-                                  maxWidth: 320,
-                                  whiteSpace: "normal",
-                                }}
-                              >
-                                {row.message || "-"}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-[13px] text-[#1a1f36]">{formatNotificationDate(row.created_at)}</td>
-                            <td className="px-4 py-3 text-[13px] text-[#1a1f36]">{formatNotificationTime(row.created_at)}</td>
-                          </tr>
+                                >
+                                  {row.message || "-"}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-[13px] text-[#1a1f36]">{formatNotificationDate(row.created_at)}</td>
+                              <td className="px-4 py-3 text-[13px] text-[#1a1f36]">{formatNotificationTime(row.created_at)}</td>
+                            </tr>
                         ))
                       )}
                     </tbody>

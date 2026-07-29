@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Schema;
 class NotificationLoadTestSeeder extends Seeder
 {
     private const YEAR_TARGETS = [
-        2026 => 200,
+        2026 => 100,
     ];
 
     public function run(): void
@@ -40,7 +40,7 @@ class NotificationLoadTestSeeder extends Seeder
 
         // Use the requested head account as recipient so the frontend can display the seeded notifications.
         $recipientUsers = User::query()
-            ->where('email', 'headofmeoo@gmail.com')
+            ->where('email', 'headofmeeo.opol@gmail.com')
             ->pluck('user_id')
             ->toArray();
 

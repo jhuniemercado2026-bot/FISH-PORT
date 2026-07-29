@@ -1,14 +1,24 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { getAuthToken } from "../../../api/auth";
+import { buildApiHeaders, getApiBaseUrl } from "../../../api/axios";
 import { updateAuthUser } from "../../../api/auth";
 import { useProfileStore } from "../../../store/profileStore";
 import BirthdayPicker from "../../../components/BirthdayPicker";
 import { ActivityIndicator, Pressable, ScrollView, StatusBar, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+type TransactionLockState = {
+  is_locked?: boolean | null;
+  message?: string | null;
+  unlock_at?: string | null;
+  remittance_reference_no?: string | null;
+};
 
 export default function PersonalDetailsScreen() {
   const router = useRouter();
+  const authToken = getAuthToken();
   const profile = useProfileStore((state) => state);
 
   const nameParts =
@@ -58,11 +68,39 @@ export default function PersonalDetailsScreen() {
   const [addressError, setAddressError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [transactionLock, setTransactionLock] = useState<TransactionLockState | null>(null);
   const [address, setAddress] = useState(
     typeof profile.address === "string" && profile.address.trim()
       ? profile.address.trim()
       : ""
   );
+
+  useEffect(() => {
+    async function loadTransactionLockState() {
+      if (!authToken) {
+        setTransactionLock(null);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/transaction-lock`, {
+          headers: buildApiHeaders(authToken),
+        });
+        const json = await response.json().catch(() => null);
+        const lock = json?.transaction_lock;
+
+        if (lock && (lock.is_locked || lock.message)) {
+          setTransactionLock(lock);
+        } else {
+          setTransactionLock(null);
+        }
+      } catch {
+        setTransactionLock(null);
+      }
+    }
+
+    loadTransactionLockState();
+  }, [authToken]);
 
   const displayName = `${firstName}${lastName ? ` ${lastName}` : ""}`.trim();
   const initials = (() => {
@@ -160,6 +198,11 @@ export default function PersonalDetailsScreen() {
   };
 
   const handleSave = async () => {
+    if (transactionLock?.is_locked) {
+      setSaveError(transactionLock.message || "Transactions are view-only at the moment.");
+      return;
+    }
+
     const fullName = `${firstName}${lastName ? ` ${lastName}` : ""}`.trim();
 
     setSaveError("");
@@ -415,12 +458,23 @@ export default function PersonalDetailsScreen() {
               {renderErrorCard(addressError)}
             </View>
 
+            {transactionLock?.is_locked ? (
+              <View className="mt-4 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3">
+                <View className="flex-row items-center">
+                  <Ionicons name="lock-closed-outline" size={16} color="#DC2626" />
+                  <Text className="ml-2 flex-1 text-[12px] leading-4 text-[#991B1B]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    {transactionLock.message || "Transactions are view-only at the moment."}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
             <View className="mt-6 mb-4 px-1">
               <Pressable
                 onPress={handleSave}
-                disabled={isSaving}
+                disabled={isSaving || Boolean(transactionLock?.is_locked)}
                 className={`h-14 flex-row items-center justify-center rounded-[10px] ${
-                  isSaving ? "bg-[#9CA3AF]" : "bg-[#1A1F36]"
+                  isSaving || transactionLock?.is_locked ? "bg-[#9CA3AF]" : "bg-[#1A1F36]"
                 }`}
               >
                 {isSaving ? (

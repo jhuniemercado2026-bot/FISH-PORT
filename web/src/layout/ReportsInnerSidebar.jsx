@@ -9,6 +9,7 @@ import {
   IoTimeOutline,
   IoCarOutline,
   IoMailOutline,
+  IoReceiptOutline,
 } from "react-icons/io5";
 import "typeface-montserrat";
 
@@ -16,14 +17,15 @@ const FONT = "'Montserrat', sans-serif";
 
 export const REPORT_TABS = [
   { key: "revenue", label: "Revenue", icon: IoStatsChartOutline },
-  { key: "remittance", label: "Remittance", icon: IoMailOutline },
   { key: "registered-boats", label: "Registered Boats", icon: IoBoatOutline },
   { key: "owner-info", label: "Owner Info", icon: IoPeopleOutline },
   { key: "docking", label: "Docking", icon: IoBoatOutline },
   { key: "banyera", label: "Banyera", icon: IoFishOutline },
   { key: "fisheries-bfar", label: "Fisheries (BFAR)", icon: IoFishOutline },
   { key: "daily-vehicle-ticket", label: "Daily Vehicle Ticket", icon: IoCarOutline },
-  { key: "vehicle-ticket", label: "Vehicle Ticket Report", icon: IoCarOutline },
+  { key: "vehicle-ticket", label: "Annual Vehicle Ticket", icon: IoCarOutline },
+  { key: "billing", label: "Billing", icon: IoReceiptOutline },
+  { key: "remittance", label: "Remittance", icon: IoMailOutline },
   { key: "fees", label: "Fees", icon: IoPricetagOutline },
 ];
 

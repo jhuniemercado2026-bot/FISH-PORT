@@ -29,11 +29,12 @@ class Cors
             && preg_match('#^http://(localhost|127\\.0\\.0\\.1)(:\\d+)?$#', $origin);
 
         if (in_array($origin, $allowedOrigins) || $isLocalhostOrigin) {
-            $response->header('Access-Control-Allow-Origin',      $origin)
-                     ->header('Access-Control-Allow-Methods',     'GET, POST, PUT, PATCH, DELETE, OPTIONS')
-                     ->header('Access-Control-Allow-Headers',     'Content-Type, Authorization, Accept, X-Requested-With, X-CSRF-TOKEN')
-                     ->header('Access-Control-Allow-Credentials', 'true')
-                     ->header('Access-Control-Max-Age',           '86400'); // cache preflight for 24hrs
+            $response->headers->set('Access-Control-Allow-Origin',      $origin);
+            $response->headers->set('Access-Control-Allow-Methods',     'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+            $response->headers->set('Access-Control-Allow-Headers',     'Content-Type, Authorization, Accept, X-Requested-With, X-CSRF-TOKEN');
+            $response->headers->set('Access-Control-Allow-Credentials', 'true');
+            $response->headers->set('Access-Control-Max-Age',           '86400'); // cache preflight for 24hrs
+            $response->headers->set('Access-Control-Expose-Headers',    'Content-Disposition');
         }
 
         return $response;

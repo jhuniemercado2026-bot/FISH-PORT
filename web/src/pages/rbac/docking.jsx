@@ -27,6 +27,7 @@ import DatePicker from "../../components/DatePicker";
 import TimePicker from "../../components/TimePicker";
 import DetailDrawer, { DrawerInfoCard, DrawerSection } from "../../components/Drawer";
 import FilterSelect from "../../components/FilterSelect";
+import FilterButton from "../../components/FilterButton";
 import Modal from "../../components/Modal";
 import NoDataFound from "../../components/NoDataFound";
 import TableCard from "../../components/TableCard";
@@ -144,18 +145,34 @@ const parseDateTimeValue = (value) => {
   if (!value) return null;
 
   const raw = String(value).trim();
-  const isoMatch = raw.match(
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?Z$/
-  );
+  const timezoneMatch = raw.match(/[zZ]$|[+-]\d{2}:?\d{2}$/);
 
-  if (isoMatch) {
+  if (timezoneMatch) {
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })
+      .formatToParts(date)
+      .reduce((acc, part) => {
+        if (part.type !== "literal") acc[part.type] = part.value;
+        return acc;
+      }, {});
+
     return {
-      year: Number(isoMatch[1]),
-      month: Number(isoMatch[2]),
-      day: Number(isoMatch[3]),
-      hour: Number(isoMatch[4]),
-      minute: Number(isoMatch[5]),
-      second: Number(isoMatch[6] ?? "0"),
+      year: Number(parts.year),
+      month: Number(parts.month),
+      day: Number(parts.day),
+      hour: Number(parts.hour === "24" ? "0" : parts.hour),
+      minute: Number(parts.minute),
+      second: Number(parts.second),
     };
   }
 
@@ -542,16 +559,18 @@ const Field = ({ label, required, children, error, hint }) => (
   </div>
 );
 
-const ModalInput = ({ label, required, error, icon: Icon, inputStyle, ...props }) => {
+const ModalInput = ({ label, required, error, icon: Icon, inputStyle, wrapperClassName = "", ...props }) => {
   const isReadOnly = !!props.readOnly;
+  const isDisabled = !!props.disabled;
   const visibleError = isReadOnly ? "" : error;
+  const isMuted = isReadOnly || isDisabled;
 
   return (
     <Field label={label} required={required} error={visibleError}>
-      <div className={`modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border border-slate-200 px-4 transition-all ${isReadOnly ? "bg-white" : "bg-white focus-within:border-[#4096ff]"}`}>
+      <div className={`modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border border-slate-200 px-4 transition-all ${isMuted ? "bg-slate-50" : "bg-white focus-within:border-[#4096ff]"} ${wrapperClassName}`}>
         <input
           {...props}
-          className={`w-full border-none bg-transparent text-[14px] font-medium outline-none placeholder:font-normal placeholder:text-slate-400 ${isReadOnly ? "cursor-default text-[#0d1117]" : "text-[#0d1117]"}`}
+          className={`w-full border-none bg-transparent text-[14px] font-medium outline-none placeholder:font-normal placeholder:text-slate-400 ${isMuted ? "cursor-not-allowed text-slate-500" : "text-[#0d1117]"}`}
           style={{ fontFamily: FONT, ...inputStyle }}
         />
       </div>
@@ -591,7 +610,8 @@ const VoidDockingModal = ({
           value={docking?.boat?.boat_name || "-"}
           readOnly
           disabled
-          inputStyle={{ color: "#64748b" }}
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
         />
         <ModalInput
           label="Date"
@@ -599,7 +619,17 @@ const VoidDockingModal = ({
           value={formatDate(docking?.docking_date)}
           readOnly
           disabled
-          inputStyle={{ color: "#64748b" }}
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
+        />
+        <ModalInput
+          label="Time"
+          icon={IoTimeOutline}
+          value={formatTime(docking?.docking_date)}
+          readOnly
+          disabled
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
         />
         <ModalInput
           label={`Docking Fee`}
@@ -607,7 +637,8 @@ const VoidDockingModal = ({
           value={formatPeso(docking?.docking_fee)}
           readOnly
           disabled
-          inputStyle={{ color: "#64748b" }}
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
         />
         <Field label="Reason" required error={selectedReason === "others" ? "" : error}>
           <FilterSelect
@@ -801,26 +832,39 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
   }, [open, prefillDate, initialDocking, normalizedServerErrors, fiscalYear]);
 
   const selectedBoat = boats.find((b) => String(b.boat_id) === String(form.boat_id));
-  const availableFees = fees.filter((fee) => {
+  const selectedBoatTypeId = selectedBoat ? getBoatTypeId(selectedBoat) : "";
+  const availableFees = useMemo(() => fees.filter((fee) => {
     if (!isDockingFee(fee)) return false;
     if (!isFeeActive(fee)) return false;
     if (!selectedBoat) return false;
-    return String(fee.boat_type_id || "") === getBoatTypeId(selectedBoat);
-  });
+    return String(fee.boat_type_id || "") === selectedBoatTypeId;
+  }), [fees, selectedBoat, selectedBoatTypeId]);
 
   useEffect(() => {
-    if (!selectedBoat) return;
-    if (form.fee_id) return;
-    if (availableFees.length === 0) return;
+    if (!selectedBoat) {
+      if (!form.fee_id && !form.docking_fee) return;
+      setForm((current) => ({ ...current, fee_id: "", docking_fee: "" }));
+      return;
+    }
+
+    if (availableFees.length === 0) {
+      if (!form.fee_id && !form.docking_fee) return;
+      setForm((current) => ({ ...current, fee_id: "", docking_fee: "" }));
+      return;
+    }
 
     const matchingFee = availableFees[0];
+    const nextFeeId = String(matchingFee.fee_id);
+    const nextDockingFee = matchingFee?.amount != null ? String(matchingFee.amount) : "";
+    if (String(form.fee_id || "") === nextFeeId && String(form.docking_fee || "") === nextDockingFee) return;
+
     setForm((current) => ({
       ...current,
-      fee_id: String(matchingFee.fee_id),
-      docking_fee: matchingFee?.amount != null ? String(matchingFee.amount) : "",
+      fee_id: nextFeeId,
+      docking_fee: nextDockingFee,
     }));
     setErrors((current) => ({ ...current, fee_id: "" }));
-  }, [selectedBoat, availableFees, form.fee_id]);
+  }, [selectedBoat, availableFees, form.fee_id, form.docking_fee]);
 
   if (!open) return null;
 
@@ -833,7 +877,7 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
     const builtDockingDate = buildDateFromParts(form.docking_date_year, form.docking_date_month, form.docking_date_day);
     const builtDockingTime = buildTwentyFourHourTime(form.docking_time_hour, form.docking_time_minute, form.docking_time_meridiem);
     if (!form.boat_id)      next.boat_id      = "Please select a boat.";
-    if (!form.fee_id)       next.fee_id       = "Fee is required pls";
+    if (!form.fee_id)       next.fee_id       = "Fee is required";
     if (!builtDockingDate)  next.docking_date = "Docking date is required.";
     if (builtDockingDate && isFutureDockingDate(builtDockingDate)) {
       next.docking_date = "Docking date cannot be in the future.";
@@ -874,7 +918,7 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
 
   return (
     <Modal
-      title={initialDocking ? "Edit Docking Record" : "Add Docking Record"}
+      title={initialDocking ? "Edit Docking" : "Add Docking"}
       onClose={onClose}
       onSave={handleSave}
       saving={saving}
@@ -909,6 +953,7 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
           readOnly
           value={selectedBoat?.boat_type?.type_name || selectedBoat?.boatType?.type_name || ""}
           placeholder="-"
+          wrapperClassName="!bg-slate-100"
         />
 
         <ModalInput
@@ -917,10 +962,11 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
           readOnly
           value={selectedBoat?.owner?.full_name || selectedBoat?.owner_name || ""}
           placeholder="-"
+          wrapperClassName="!bg-slate-100"
         />
 
         <Field label="Applicable Fee" required error={errors.fee_id}>
-          <div className="modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border border-slate-200 bg-white px-4 transition-all">
+          <div className="modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border border-slate-200 bg-slate-100 px-4 transition-all">
             <input
               readOnly
               value={applicableFeeValue}
@@ -979,6 +1025,7 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
             setErrors((c) => ({ ...c, docking_fee: "" }));
           }}
           placeholder={`${PESO}0.00`}
+          wrapperClassName="!bg-slate-100"
         />
       </div>
     </Modal>
@@ -1117,7 +1164,10 @@ const EditDockingDrawer = ({ docking, open, boats, fees, onClose, onSubmit, savi
                 setForm((c) => ({ ...c, boat_id: value ?? "", fee_id: undefined, docking_fee: "" }));
                 setErrors((c) => ({ ...c, boat_id: "", fee_id: "" }));
               }}
-              options={boats.map((boat) => ({ value: String(boat.boat_id), label: `${boat.boat_name}` }))}
+              options={boats.map((boat) => ({
+                value: String(boat.boat_id),
+                label: `${boat.boat_name}`,
+              }))}
             />
           </Field>
         </div>
@@ -1606,6 +1656,8 @@ const SuperDocking = () => {
         updateDockingStatsInCache(queryClient, nextDocking, "void");
       }
       void queryClient.invalidateQueries({ queryKey: ["dockings-calendar"] });
+      void queryClient.invalidateQueries({ queryKey: ["docking-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
       setPendingVoidDocking(null);
       setVoidReasonOption("");
       setVoidReasonCustom("");
@@ -1635,6 +1687,8 @@ const SuperDocking = () => {
         updateDockingStatsInCache(queryClient, nextDocking, "restore");
       }
       void queryClient.invalidateQueries({ queryKey: ["dockings-calendar"] });
+      void queryClient.invalidateQueries({ queryKey: ["docking-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
       showBottomToast("success", "Docking Restored", response?.message ?? "The docking record was restored successfully.");
     },
     onError: (error) => {
@@ -1679,6 +1733,8 @@ const SuperDocking = () => {
         showAddedToast("Docking", "docking record");
       }
       void queryClient.invalidateQueries({ queryKey: ["dockings-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["docking-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
       if (savedDocking) {
         syncDockingCalendarCache(savedDocking);
       }
@@ -2106,7 +2162,7 @@ const SuperDocking = () => {
                       style={{ fontFamily: FONT, color: "#1a1f36" }}
                     />
                   </div>
-                  <FilterSelect
+                  <FilterButton
                     {...DOCKING_FILTER_DROPDOWN_PROPS}
                     value={periodFilter}
                     onChange={(value) => {
@@ -2117,7 +2173,7 @@ const SuperDocking = () => {
                     height={42}
                     options={PERIOD_OPTIONS}
                   />
-                  <FilterSelect
+                  <FilterButton
                     {...DOCKING_FILTER_DROPDOWN_PROPS}
                     value={statusFilter}
                     onChange={(value) => {

@@ -32,8 +32,6 @@ return new class extends Migration
             // Composite index for vehicle_type_id + effective_from (filter + sort combo)
             $table->index(['vehicle_type_id', 'effective_from'], 'idx_fees_vehicle_type_effective');
 
-            // Composite index for soft deletes + created_at (common query pattern)
-            $table->index(['deleted_at', 'created_at'], 'idx_fees_deleted_created');
         });
     }
 
@@ -49,7 +47,6 @@ return new class extends Migration
             $table->dropIndex('idx_fees_type_effective');
             $table->dropIndex('idx_fees_boat_type_effective');
             $table->dropIndex('idx_fees_vehicle_type_effective');
-            $table->dropIndex('idx_fees_deleted_created');
         });
     }
 };

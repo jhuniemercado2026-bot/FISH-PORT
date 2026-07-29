@@ -6,14 +6,12 @@ import {
   IoArchiveOutline,
   IoBoatOutline,
   IoCarOutline,
-  IoCashOutline,
   IoLayersOutline,
   IoPersonOutline,
   IoRefreshOutline,
   IoSearchOutline,
   IoCalendarOutline,
   IoFishOutline,
-  IoWarningOutline,
 } from "react-icons/io5";
 import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
@@ -28,8 +26,8 @@ import OverviewCard from "../../components/Overview";
 import Tabs from "../../components/Tabs";
 import Breadcrumbs from "../../components/Breadcrumbs";
 import TitlePage from "../../components/TitlePage";
-import Spinner from "../../components/Spinner";
 import NoDataFound from "../../components/NoDataFound";
+import RestoreModal from "../../components/RestoreModal";
 
 const FONT = "'Montserrat', sans-serif";
 const ARCHIVE_FOCUS_COLOR = "#4096ff";
@@ -45,7 +43,6 @@ const TABS = [
   { key: "boatOwners", label: "Boat Owners", icon: IoPersonOutline },
   { key: "fishClassifications", label: "Fish Classifications", icon: IoFishOutline },
   { key: "vehicleTypes", label: "Vehicle Types", icon: IoCarOutline },
-  { key: "fees", label: "Fees", icon: IoCashOutline },
 ];
 
 // Table header matches the visual language used in Registered Boats.
@@ -100,32 +97,9 @@ const getArchivedAt = (item) => item?.deleted_at ?? item?.archived_at ?? item?.d
 const getArchiveItemName = (tab, item) => {
   if (tab === "boats") return item?.boat_name ?? "this record";
   if (tab === "boatTypes") return item?.type_name ?? "this record";
-  if (tab === "fees") return item?.fee_type_name ?? item?.fee_name ?? "this record";
   if (tab === "fishClassifications") return item?.classification_name ?? "this record";
   if (tab === "vehicleTypes") return item?.type_name ?? "this record";
   return item?.full_name || getBoatOwnerName(item) || "this record";
-};
-
-const getFeeApplicableLabel = (fee) =>
-  fee?.boat_type?.type_name ??
-  fee?.boatType?.type_name ??
-  fee?.vehicle_type?.type_name ??
-  fee?.vehicleType?.type_name ??
-  "General / Ticket Fee";
-
-const formatMoneyValue = (value) => {
-  const numeric = Number(value ?? 0);
-  if (Number.isNaN(numeric)) return "0.00";
-  return numeric.toLocaleString("en-PH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-};
-
-const formatEffectivityRange = (item) => {
-  const effectiveFrom = formatDateOnly(item?.effective_from);
-  const effectiveTo = item?.effective_to ? formatDateOnly(item.effective_to) : "Onward";
-  return `${effectiveFrom} - ${effectiveTo}`;
 };
 
 const startOfToday = () => {
@@ -179,15 +153,6 @@ const RESOURCE_META = {
     permanentDeletePath: (item) => `/boat-owners/${item.owner_id}/permanent`,
     getKey: (item) => `boat-owner-${item.owner_id}`,
   },
-  fees: {
-    label: "Archived Fee Records",
-    emptyMessage: "No archived fee records found.",
-    restoreLabel: "Restore Fee Record",
-    restorePath: (item) => `/fees/${item.fee_id}/restore`,
-    permanentDeleteLabel: "Fee record",
-    permanentDeletePath: () => null,
-    getKey: (item) => `fee-${item.fee_id}`,
-  },
   fishClassifications: {
     label: "Archived Fish Classifications",
     emptyMessage: "No archived fish classifications found.",
@@ -208,80 +173,6 @@ const RESOURCE_META = {
   },
 };
 
-const ArchiveActionModal = ({ open, tab, item, onClose, onConfirm }) => {
-  const [processing, setProcessing] = useState(false);
-  if (!open || !item) return null;
-
-  const itemLabel =
-    tab === "boats" ? "Boat" :
-    tab === "boatTypes" ? "Boat Type" :
-    tab === "boatOwners" ? "Boat Owner" :
-    tab === "fishClassifications" ? "Fish Classification" :
-    tab === "vehicleTypes" ? "Vehicle Type" :
-    "Fee";
-  const actionLabel = `Restore ${itemLabel}`;
-  const accentBg = "#eff6ff";
-  const accentColor = "#2563eb";
-  const buttonBg = "#1a1f36";
-  const buttonHover = "#2d3561";
-  const processingBg = "#1a1f36";
-  const buttonText = "Restore";
-
-  const handleConfirm = async () => {
-    setProcessing(true);
-    try {
-      await onConfirm();
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center px-4"
-      style={{ backgroundColor: "rgba(10,13,28,0.55)", backdropFilter: "blur(6px)" }}
-    >
-      <div
-        className="bg-white w-full overflow-hidden"
-        style={{ maxWidth: 400, borderRadius: 20, boxShadow: "0 24px 64px rgba(0,0,0,0.2)", fontFamily: FONT, animation: "modalPop 0.22s cubic-bezier(0.34,1.56,0.64,1)" }}
-      >
-        <style>{`@keyframes modalPop{from{opacity:0;transform:scale(0.92) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}`}</style>
-        <div className="px-6 pt-8 pb-5 flex flex-col items-center text-center">
-          <div className="mb-5 flex items-center justify-center" style={{ width: 68, height: 68, borderRadius: 18, backgroundColor: accentBg }}>
-            <IoWarningOutline style={{ fontSize: 36, color: accentColor }} />
-          </div>
-          <p className="m-0 text-[18px] font-bold mb-2" style={{ color: "#0d1117" }}>{actionLabel}</p>
-          <p className="m-0 text-[15px] leading-relaxed" style={{ color: "#64748b" }}>
-            Are you sure you want to restore{" "}
-            <span className="font-bold" style={{ color: "#1a1f36" }}>"{getArchiveItemName(tab, item)}"</span>?{" "}
-           
-          </p>
-        </div>
-        <div className="px-6 pb-6 flex gap-3">
-          <button
-            onClick={onClose}
-            disabled={processing}
-            className="flex-1 py-2.5 rounded-xl border border-gray-200 bg-white text-[13px] font-semibold cursor-pointer hover:bg-gray-50 transition-colors"
-            style={{ fontFamily: FONT, color: "#1a1f36" }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={processing}
-            className="flex-1 py-2.5 rounded-xl text-white text-[13px] font-semibold cursor-pointer transition-colors flex items-center justify-center gap-2"
-            style={{ fontFamily: FONT, backgroundColor: processing ? processingBg : buttonBg, border: "none", opacity: processing ? 0.7 : 1 }}
-            onMouseEnter={(e) => { if (!processing) e.currentTarget.style.backgroundColor = buttonHover; }}
-            onMouseLeave={(e) => { if (!processing) e.currentTarget.style.backgroundColor = buttonBg; }}
-          >
-            {processing ? <Spinner size={4} /> : buttonText}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // Page component keeps layout wiring separate from archive presentation logic.
 const SuperArchived = () => {
   const [activeItem, setActiveItem] = useState("Archives");
@@ -292,12 +183,10 @@ const SuperArchived = () => {
   const [restoringKey, setRestoringKey] = useState(null);
   const [actionModal, setActionModal] = useState({ open: false, item: null });
   const [search, setSearch] = useState("");
-  const [feeTypeSearch, setFeeTypeSearch] = useState("");
   const [fishNameSearch, setFishNameSearch] = useState("");
   const [vehicleTypeSearch, setVehicleTypeSearch] = useState("");
   const didRunTableFilterResetRef = React.useRef(false);
   const debouncedSearch = useDebounce(search, SEARCH_DEBOUNCE_MS);
-  const debouncedFeeTypeSearch = useDebounce(feeTypeSearch, SEARCH_DEBOUNCE_MS);
   const debouncedFishNameSearch = useDebounce(fishNameSearch, SEARCH_DEBOUNCE_MS);
   const debouncedVehicleTypeSearch = useDebounce(vehicleTypeSearch, SEARCH_DEBOUNCE_MS);
 
@@ -309,9 +198,7 @@ const SuperArchived = () => {
     ? debouncedFishNameSearch
     : activeTab === "vehicleTypes"
       ? debouncedVehicleTypeSearch
-      : activeTab === "fees"
-        ? debouncedFeeTypeSearch
-        : debouncedSearch;
+      : debouncedSearch;
   const { data, isLoading, isFetching, isPlaceholderData, isError, error } = useArchivedDataQuery({
     type: activeTab,
     page: currentPage,
@@ -376,7 +263,7 @@ const SuperArchived = () => {
 
     setRequestedPage(1);
     setCurrentPage(1);
-  }, [activeTab, debouncedSearch, debouncedFeeTypeSearch, debouncedFishNameSearch]);
+  }, [activeTab, debouncedSearch, debouncedFishNameSearch]);
 
   React.useEffect(() => {
     if (!data || isPlaceholderData) return;
@@ -404,7 +291,6 @@ const SuperArchived = () => {
     setCurrentPage(1);
     setActiveTab(nextTab);
     setSearch("");
-    setFeeTypeSearch("");
     setFishNameSearch("");
     setVehicleTypeSearch("");
     setActionModal({ open: false, item: null });
@@ -492,9 +378,14 @@ const SuperArchived = () => {
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["archives-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["registered-boats-data"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["registered-boats-report"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["owner-info-report"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["boat-types"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["boat-owners"], refetchType: "active" }),
-        queryClient.invalidateQueries({ queryKey: ["fees-data"], refetchType: "active" }),
+        activeTab === "boats" ? queryClient.invalidateQueries({ queryKey: ["docking-lookups"], refetchType: "active" }) : Promise.resolve(),
+        activeTab === "boats" ? queryClient.invalidateQueries({ queryKey: ["dockings-data"], refetchType: "active" }) : Promise.resolve(),
+        activeTab === "boats" ? queryClient.invalidateQueries({ queryKey: ["dockings-calendar"], refetchType: "active" }) : Promise.resolve(),
+        activeTab === "boats" ? queryClient.invalidateQueries({ queryKey: ["banyera-data"], refetchType: "active" }) : Promise.resolve(),
         activeTab === "fishClassifications" ? queryClient.invalidateQueries({ queryKey: ["banyera-data", "fish-classifications"], refetchType: "active" }) : Promise.resolve(),
         activeTab === "vehicleTypes" ? queryClient.invalidateQueries({ queryKey: ["vehicle-tickets-data", "vehicle-types"], refetchType: "active" }) : Promise.resolve(),
         activeTab === "vehicleTypes" ? queryClient.invalidateQueries({ queryKey: ["vehicle-tickets-lookups"], refetchType: "active" }) : Promise.resolve(),
@@ -549,7 +440,6 @@ const SuperArchived = () => {
         ],
         boatTypes: ["text-lg", "pill", "text-md", "date", "time", "action"],
         fishClassifications: ["text-lg", "pill", "text-md", "date", "time", "action"],
-        fees: ["text-md", "text-lg", "date", "amount", "date", "time", "action"],
         vehicleTypes: ["text-lg", "pill", "text-md", "date", "time", "action"],
         boatOwners: ["text-lg", "text-xl", "text-md", "pill", "text-md", "date", "time", "action"],
       };
@@ -584,7 +474,6 @@ const SuperArchived = () => {
     if (paginatedItems.length === 0) {
       const colSpan =
         activeTab === "boats" ? 9 :
-        activeTab === "fees" ? 8 :
         activeTab === "fishClassifications" ? 7 :
         activeTab === "vehicleTypes" ? 7 : 7;
 
@@ -684,32 +573,6 @@ const SuperArchived = () => {
       ));
     }
 
-    if (activeTab === "fees") {
-      return paginatedItems.map((fee, index) => (
-        <tr key={fee.fee_id} className="transition-colors" style={{ borderBottom: "1px solid #f1f5f9", backgroundColor: index % 2 === 0 ? "#ffffff" : "#ededed" }}>
-          <td className="px-4 py-3 text-[13px] font-semibold" style={{ color: "#1a1f36" }}>
-            {fee.fee_type_name || "-"}
-          </td>
-          <td className="px-4 py-3 text-[13px]" style={{ color: "#1a1f36" }}>
-            {getFeeApplicableLabel(fee)}
-          </td>
-          <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>
-            {formatEffectivityRange(fee)}
-          </td>
-          <td className="px-4 py-3 text-[13px] whitespace-nowrap text-right" style={{ color: "#1a1f36", fontVariantNumeric: "tabular-nums" }}>
-            {formatMoneyValue(fee.amount)}
-          </td>
-          <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatDateOnly(getArchivedAt(fee))}</td>
-          <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatTimeOnly(getArchivedAt(fee))}</td>
-          <td className="px-4 py-3">
-            <div className="flex items-center gap-2">
-              {renderRestoreAction(fee)}
-            </div>
-          </td>
-        </tr>
-      ));
-    }
-
     if (activeTab === "vehicleTypes") {
       return paginatedItems.map((vehicleType, index) => (
         <tr key={vehicleType.vehicle_type_id} className="transition-colors" style={{ borderBottom: "1px solid #f1f5f9", backgroundColor: index % 2 === 0 ? "#ffffff" : "#ededed" }}>
@@ -790,20 +653,6 @@ const SuperArchived = () => {
           <TH>Fish Name</TH>
           <TH>Usage Count</TH>
           <TH>Archived By</TH>
-          <TH>Archived At</TH>
-          <TH>Time</TH>
-          <TH>Action</TH>
-        </tr>
-      );
-    }
-
-    if (activeTab === "fees") {
-      return (
-        <tr>
-          <TH>Fee Type</TH>
-          <TH>Boat / Vehicle Type</TH>
-          <TH>Effectivity</TH>
-          <TH><div className="pr-4 text-right">Amount (P)</div></TH>
           <TH>Archived At</TH>
           <TH>Time</TH>
           <TH>Action</TH>
@@ -926,18 +775,14 @@ const SuperArchived = () => {
                                   ? "Search for fish name"
                                   : activeTab === "vehicleTypes"
                                     ? "Search for Vehicle Type"
-                                    : activeTab === "fees"
-                                      ? "Search for fee type"
-                                      : "Search..."
+                                    : "Search..."
                         }
                         value={
                           activeTab === "fishClassifications"
                             ? fishNameSearch
                             : activeTab === "vehicleTypes"
                               ? vehicleTypeSearch
-                              : activeTab === "fees"
-                                ? feeTypeSearch
-                                : search
+                              : search
                         }
                         onChange={(event) => {
                           const nextValue = event.target.value;
@@ -946,8 +791,6 @@ const SuperArchived = () => {
                             setFishNameSearch(nextValue);
                           } else if (activeTab === "vehicleTypes") {
                             setVehicleTypeSearch(nextValue);
-                          } else if (activeTab === "fees") {
-                            setFeeTypeSearch(nextValue);
                           } else {
                             setSearch(nextValue);
                           }
@@ -981,10 +824,17 @@ const SuperArchived = () => {
             </div>
           </main>
         </div>
-        <ArchiveActionModal
+        <RestoreModal
           open={actionModal.open}
-          tab={activeTab}
-          item={actionModal.item}
+          title={
+            activeTab === "boats" ? "Restore Boat" :
+            activeTab === "boatTypes" ? "Restore Boat Type" :
+            activeTab === "boatOwners" ? "Restore Boat Owner" :
+            activeTab === "fishClassifications" ? "Restore Fish Classification" :
+            activeTab === "vehicleTypes" ? "Restore Vehicle Type" :
+            "Restore Record"
+          }
+          itemName={actionModal.item ? getArchiveItemName(activeTab, actionModal.item) : ""}
           onClose={() => setActionModal({ open: false, item: null })}
           onConfirm={async () => {
             if (!actionModal.item) return;

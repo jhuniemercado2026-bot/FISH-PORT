@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\FeeTypeName;
+use App\Jobs\SendFeeChangeInspectorNotifications;
 use App\Models\Fee;
 use App\Services\ActivityLogService;
 use Carbon\Carbon;
@@ -15,11 +16,6 @@ class FeeController extends Controller
     private function getFeeTypeLabel(Fee $fee): string
     {
         return $fee->fee_name ?? ($fee->fee_type_name?->value ?? 'Unknown Fee');
-    }
-
-    private function getFeeAmountLabel(Fee $fee): string
-    {
-        return number_format((float) $fee->amount, 2);
     }
 
     private function formatFeeApplicableLabel(Fee $fee): string
@@ -160,12 +156,6 @@ class FeeController extends Controller
         }
     }
 
-    private function isExpired(Fee $fee): bool
-    {
-        return $fee->effective_to !== null
-            && $fee->effective_to->toDateString() < now()->toDateString();
-    }
-
     private function feeSelectionColumns(): array
     {
         return [
@@ -208,6 +198,15 @@ class FeeController extends Controller
             'effective_to' => $fee->effective_to?->toDateString(),
             'created_at' => $fee->created_at?->toISOString(),
         ];
+    }
+
+    private function queueInspectorFeeNotifications(Fee $fee, string $action): void
+    {
+        SendFeeChangeInspectorNotifications::dispatch(
+            (int) $fee->fee_id,
+            $action,
+            Auth::id(),
+        )->afterResponse();
     }
 
     private function highlightedPage($query, ?string $highlightId, int $requestedPage, int $perPage): int
@@ -358,6 +357,8 @@ class FeeController extends Controller
             user: Auth::user()
         );
 
+        $this->queueInspectorFeeNotifications($fee, 'created');
+
         return response()->json($this->prepareFeeForResponse($fee), 201);
     }
 
@@ -400,7 +401,7 @@ class FeeController extends Controller
             'boat_type_id' => ($validated['vehicle_type_id'] ?? null) ? null : ($validated['boat_type_id'] ?? null),
             'vehicle_type_id' => $validated['vehicle_type_id'] ?? null,
         ]);
-        $fee->loadMissing(['boatType', 'vehicleType']);
+        $fee->load(['boatType', 'vehicleType']);
 
         $afterState = [
             'fee_type_name' => $this->getFeeTypeLabel($fee),
@@ -429,59 +430,9 @@ class FeeController extends Controller
             user: Auth::user()
         );
 
+        $this->queueInspectorFeeNotifications($fee, 'updated');
+
         return response()->json($this->prepareFeeForResponse($fee));
     }
 
-    public function destroy($id)
-    {
-        $fee = Fee::withTrashed()->find($id);
-
-        if (!$fee) {
-            return response()->json([
-                'message' => 'This fee record no longer exists.',
-            ], 404);
-        }
-
-        if ($fee->trashed()) {
-            return response()->json([
-                'message' => 'This fee record is already archived.',
-            ], 409);
-        }
-
-        if (!$this->isExpired($fee)) {
-            return response()->json([
-                'message' => 'Only expired fee records can be archived.',
-            ], 422);
-        }
-
-        $fee->delete();
-
-        app(ActivityLogService::class)->log(
-            action: 'ARCHIVE',
-            module: 'Archives',
-            details: 'Archived fee record "' . $this->getFeeAmountLabel($fee) . '" in "' . $this->formatFeeApplicableLabel($fee) . '" for "' . $this->getFeeTypeLabel($fee) . '".',
-            user: Auth::user()
-        );
-
-        return response()->json([
-            'message' => 'Fee record archived successfully.',
-        ]);
-    }
-
-    public function restore($id)
-    {
-        $fee = Fee::withTrashed()->findOrFail($id);
-        $fee->restore();
-
-        app(ActivityLogService::class)->log(
-            action: 'RESTORE',
-            module: 'Archives',
-            details: 'Restored fee record "' . $this->getFeeAmountLabel($fee) . '" in "' . $this->formatFeeApplicableLabel($fee) . '" for "' . $this->getFeeTypeLabel($fee) . '".',
-            user: Auth::user()
-        );
-
-        return response()->json([
-            'message' => 'Fee record restored successfully.',
-        ]);
-    }
 }

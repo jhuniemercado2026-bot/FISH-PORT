@@ -10,6 +10,7 @@ import {
   IoChevronDownOutline, IoCalendarOutline,
   IoDocumentTextOutline, IoCheckmarkCircleOutline,
   IoTrashOutline,
+  IoArchiveOutline,
   IoCreateOutline,
   IoListOutline, IoPersonOutline,
   IoWarningOutline, IoCashOutline,
@@ -24,6 +25,8 @@ import OverviewCard from "../../components/Overview";
 import DatePicker from "../../components/DatePicker";
 import TimePicker from "../../components/TimePicker";
 import FilterSelect from "../../components/FilterSelect";
+import FilterButton from "../../components/FilterButton";
+import IncreaseDecreaseInput from "../../components/IncreaseDecreaseInput";
 import Modal from "../../components/Modal";
 import TableCard from "../../components/TableCard";
 import Tabs from "../../components/Tabs";
@@ -33,6 +36,7 @@ import DetailDrawer, { DrawerInfoCard, DrawerSection } from "../../components/Dr
 import NoDataFound from "../../components/NoDataFound";
 import Spinner from "../../components/Spinner";
 import Legend from "../../components/Legend";
+import ArchiveModal from "../../components/ArchiveModal";
 import { useSidebar } from "../../store/sidebarStore";
 import { showAddedToast, showBottomToast, showNoChangesToast, showUpdatedToast } from "../../store/bottomToastStore";
 import api from "../../api/axios";
@@ -345,6 +349,37 @@ const getDatePartsFromValue = (value) => {
   if (!value) return null;
 
   const raw = String(value).trim();
+  const timezoneMatch = raw.match(/[zZ]$|[+-]\d{2}:?\d{2}$/);
+
+  if (timezoneMatch) {
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })
+      .formatToParts(date)
+      .reduce((acc, part) => {
+        if (part.type !== "literal") acc[part.type] = part.value;
+        return acc;
+      }, {});
+
+    return {
+      year: Number(parts.year),
+      month: Number(parts.month),
+      day: Number(parts.day),
+      hour: Number(parts.hour === "24" ? "0" : parts.hour),
+      minute: Number(parts.minute),
+      second: Number(parts.second),
+    };
+  }
+
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
   if (match) {
     const [, year, month, day, hour = "00", minute = "00", second = "00"] = match;
@@ -512,7 +547,7 @@ const filterByPeriod = (txs, period) => {
 // Spinner
 // TailDropdown
 const TailDropdown = ({ value, onChange, options, height = 38 }) => (
-  <FilterSelect value={value} onChange={onChange} options={options} height={height} width={160} />
+  <FilterButton value={value} onChange={onChange} options={options} height={height} width={160} />
 );
 
 // RowMenu
@@ -553,9 +588,9 @@ const RowMenu = ({ onView }) => {
 };
 
 // Field
-const Field = ({ label, required, children, error, hint }) => (
+const Field = ({ label, required, children, error, hint, labelClassName = "" }) => (
   <div>
-    <label className="mb-1.5 block text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>
+    <label className={`mb-1.5 block text-[11px] font-semibold uppercase ${labelClassName}`.trim()} style={{ color: "#6F6F82", fontFamily: FONT }}>
       {label}
       {required && <span className="ml-0.5 text-red-500">*</span>}
     </label>
@@ -572,16 +607,17 @@ const Field = ({ label, required, children, error, hint }) => (
   </div>
 );
 
-const ModalInput = ({ label, required, error, icon: Icon, inputStyle, wrapperClassName = "", ...props }) => {
+const ModalInput = ({ label, required, error, icon: Icon, inputStyle, wrapperClassName = "", labelClassName = "", ...props }) => {
   const visibleError = error;
   const inputBorderClass = visibleError ? "border-red-300" : "border-slate-200";
+  const isMuted = props.readOnly || props.disabled;
 
   return (
-  <Field label={label} required={required} error={visibleError}>
-    <div className={`modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border ${inputBorderClass} bg-white px-4 transition-all focus-within:border-[#4096ff] ${wrapperClassName}`}>
+  <Field label={label} required={required} error={visibleError} labelClassName={labelClassName}>
+    <div className={`modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border ${inputBorderClass} px-4 transition-all ${isMuted ? "bg-slate-50" : "bg-white focus-within:border-[#4096ff]"} ${wrapperClassName}`}>
       <input
         {...props}
-        className="w-full border-none bg-transparent text-[14px] font-medium text-[#0d1117] outline-none placeholder:font-normal placeholder:text-slate-400"
+        className={`w-full border-none bg-transparent text-[14px] font-medium outline-none placeholder:font-normal placeholder:text-slate-400 ${isMuted ? "cursor-not-allowed text-slate-500" : "text-[#0d1117]"}`}
         style={{ fontFamily: FONT, ...(inputStyle || {}) }}
       />
     </div>
@@ -642,7 +678,8 @@ const VoidBanyeraModal = ({
           value={getBoatName(tx)}
           readOnly
           disabled
-          inputStyle={{ color: "#64748b" }}
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
         />
         <ModalInput
           label="Date"
@@ -650,7 +687,8 @@ const VoidBanyeraModal = ({
           value={formatDate(tx.transaction_date)}
           readOnly
           disabled
-          inputStyle={{ color: "#64748b" }}
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
         />
         <ModalInput
           label="Time"
@@ -658,7 +696,8 @@ const VoidBanyeraModal = ({
           value={formatTime(tx.transaction_date)}
           readOnly
           disabled
-          inputStyle={{ color: "#64748b" }}
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
         />
         <ModalInput
           label="Total"
@@ -666,7 +705,8 @@ const VoidBanyeraModal = ({
           value={`${PESO}${formatAmount(getTransactionTotalFee(tx))}`}
           readOnly
           disabled
-          inputStyle={{ color: "#64748b" }}
+          wrapperClassName="!bg-slate-100"
+          inputStyle={{ color: "#475569" }}
         />
         <Field label="Reason" required error={selectedReason === "others" ? "" : error}>
           <FilterSelect
@@ -737,12 +777,13 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
   const selectedBoat        = activeBoats.find((b) => String(b.boat_id) === String(form.boat_id));
   const safeFees = Array.isArray(fees) ? fees : [];
 
-  const banyeraFees         = safeFees.filter((fee) => {
+  const selectedBoatTypeId = selectedBoat ? getBoatTypeId(selectedBoat) : "";
+  const banyeraFees = useMemo(() => safeFees.filter((fee) => {
     if (!isBanyeraFee(fee)) return false;
     if (!isFeeActive(fee)) return false;
     if (!selectedBoat) return false;
-    return String(fee.boat_type_id || "") === getBoatTypeId(selectedBoat);
-  });
+    return String(fee.boat_type_id || "") === selectedBoatTypeId;
+  }), [safeFees, selectedBoat, selectedBoatTypeId]);
   const selectedApplicableFee = banyeraFees.find((fee) => String(fee.fee_id) === String(form.fee_id));
   const safeClassifications = Array.isArray(classifications) ? classifications : [];
 
@@ -754,8 +795,12 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
   }, [open, buildInitialFormState]);
 
   useEffect(() => {
-    if (!selectedBoat) return;
-    if (form.fee_id && banyeraFees.some((fee) => String(fee.fee_id) === String(form.fee_id))) return;
+    if (!selectedBoat) {
+      if (!form.fee_id) return;
+      setForm((current) => ({ ...current, fee_id: "" }));
+      return;
+    }
+
     if (banyeraFees.length === 0) {
       if (!form.fee_id) return;
       setForm((current) => ({ ...current, fee_id: "" }));
@@ -763,9 +808,12 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
     }
 
     const matchingFee = banyeraFees[0];
+    const nextFeeId = String(matchingFee.fee_id);
+    if (String(form.fee_id || "") === nextFeeId) return;
+
     setForm((current) => ({
       ...current,
-      fee_id: String(matchingFee.fee_id),
+      fee_id: nextFeeId,
     }));
   }, [selectedBoat, banyeraFees, form.fee_id]);
 
@@ -803,6 +851,12 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
     }
     if (items.some((it) => !it.classification_id || !it.quantity || parseInt(it.quantity, 10) < 1)) {
       e.fish_items = "Please select a fish and put 1 or more quantity";
+    } else {
+      const selectedClassificationIds = items.map((it) => String(it.classification_id || ""));
+      const uniqueClassificationIds = new Set(selectedClassificationIds);
+      if (uniqueClassificationIds.size !== selectedClassificationIds.length) {
+        e.fish_items = "Fish classification cannot be duplicated";
+      }
     }
     return e;
   };
@@ -839,7 +893,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
 
   return (
     <Modal
-      title="Add Banyera Record"
+      title="Add Banyera"
       onClose={onClose}
       onSave={handleSave}
       saving={saving}
@@ -879,6 +933,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
             readOnly
             value={selectedBoat?.boat_type?.type_name || selectedBoat?.boatType?.type_name || ""}
             placeholder="-"
+            wrapperClassName="!bg-slate-100"
           />
         </div>
 
@@ -889,6 +944,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
             readOnly
             value={selectedBoat?.owner?.full_name || selectedBoat?.owner_name || ""}
             placeholder="-"
+            wrapperClassName="!bg-slate-100"
           />
 
           <ModalInput
@@ -899,6 +955,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
             value={selectedApplicableFee ? formatMoney(getFeeAmount(selectedApplicableFee)) : ""}
             placeholder={selectedBoat ? "No matching banyera fee" : "₱0.00"}
             error={errors.fee_id}
+            wrapperClassName="!bg-slate-100"
             inputStyle={{ color: selectedApplicableFee ? "#0d1117" : "#94a3b8" }}
           />
         </div>
@@ -953,26 +1010,41 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
               <div
-                className="mb-2 grid gap-2 px-1"
-                style={{ gridTemplateColumns: "minmax(0,2.4fr) minmax(86px,0.8fr) minmax(120px,1fr) minmax(120px,1fr) 40px" }}
+                className="mb-2 grid gap-1 px-1"
+                style={{ gridTemplateColumns: "minmax(0,2.4fr) minmax(100px,0.75fr) minmax(116px,1fr) minmax(116px,1fr) 40px" }}
               >
-                <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Fish Classification</p>
-                <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Qty</p>
-                <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Subtotal</p>
-                <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Daug</p>
+                <p className="m-0 text-center text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Fish Classification</p>
+                <p className="m-0 text-center text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Qty</p>
+                <p className="m-0 text-center text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Subtotal</p>
+                <p className="m-0 text-center text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Daug</p>
                 <p className="m-0" />
               </div>
 
             {items.map((it, i) => {
               const qty = parseInt(it.quantity) || 0;
               const sub = selectedApplicableFee ? getFeeAmount(selectedApplicableFee) * qty : 0;
+              const selectedClassificationIds = new Set(
+                items
+                  .filter((_, idx) => idx !== i)
+                  .map((item) => String(item.classification_id || ""))
+                  .filter(Boolean)
+              );
+              const availableClassifications = safeClassifications.filter(
+                (classification) => !selectedClassificationIds.has(String(classification.classification_id))
+              );
               return (
                 <div
                   key={i}
-                  className="mb-2 grid gap-2 items-start last:mb-0"
-                  style={{ gridTemplateColumns: "minmax(0,2.4fr) minmax(86px,0.8fr) minmax(120px,1fr) minmax(120px,1fr) 40px" }}
+                  className="mb-3 last:mb-0"
                 >
-                  <div>
+                  <p className="mb-1 mt-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500" style={{ fontFamily: FONT }}>
+                    Item {i + 1}
+                  </p>
+                  <div
+                    className="grid gap-1 items-center"
+                    style={{ gridTemplateColumns: "minmax(0,2.4fr) minmax(100px,0.75fr) minmax(116px,1fr) minmax(116px,1fr) 40px" }}
+                  >
+                    <div>
                     <FilterSelect
                       width="100%"
                       height={46}
@@ -987,41 +1059,37 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
                         setItem(i, "classification_id", value ?? "");
                         setErrors((current) => ({ ...current, fish_items: "" }));
                       }}
-                      options={safeClassifications.map((c) => ({
+                      options={availableClassifications.map((c) => ({
                         value: String(c.classification_id),
                         label: c.classification_name,
                       }))}
                     />
-                  </div>
+                    </div>
 
-                  <div>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={it.quantity}
-                      onChange={(e) => {
-                        setItem(i, "quantity", e.target.value.replace(/\D/g, ""));
-                        setErrors((current) => ({ ...current, fish_items: "" }));
-                      }}
-                      placeholder="0"
-                      className="w-full h-[46px] rounded-[10px] border border-slate-200 bg-white px-3 text-[12px] outline-none text-center focus:border-[#4096ff]"
-                      style={{ fontFamily: FONT }}
-                    />
-                  </div>
+                    <div>
+                      <IncreaseDecreaseInput
+                        value={it.quantity}
+                        onChange={(value) => {
+                          setItem(i, "quantity", value);
+                          setErrors((current) => ({ ...current, fish_items: "" }));
+                        }}
+                        placeholder="0"
+                        ariaLabel={`Quantity for item ${i + 1}`}
+                      />
+                    </div>
 
-                  <div>
+                    <div>
                     <input
                       type="text"
                       readOnly
                       value={sub > 0 ? `${PESO}${Number(sub).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""}
                       placeholder={`${PESO}0.00`}
-                      className="w-full h-[46px] rounded-[10px] border border-slate-200 bg-white px-3 text-[12px] font-medium outline-none"
+                      className="w-full h-[46px] rounded-[10px] border border-slate-200 bg-slate-100 px-3 text-[12px] font-medium outline-none"
                       style={{ color: sub > 0 ? "#0d1117" : "#94a3b8", fontFamily: FONT }}
                     />
-                  </div>
+                    </div>
 
-                  <div>
+                    <div>
                     <input
                       type="text"
                       inputMode="decimal"
@@ -1034,9 +1102,9 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
                       className="w-full h-[46px] rounded-[10px] border border-slate-200 bg-white px-3 text-[12px] outline-none focus:border-[#4096ff]"
                       style={{ fontFamily: FONT }}
                     />
-                  </div>
+                    </div>
 
-                  <div className="flex h-[46px] items-center justify-center self-center">
+                    <div className="flex h-[46px] items-center justify-center">
                     <button
                       type="button"
                       onClick={() => removeItem(i)}
@@ -1045,6 +1113,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
                     >
                       <IoTrashOutline className="text-[22px]" />
                     </button>
+                    </div>
                   </div>
 
                 </div>
@@ -1067,6 +1136,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
           readOnly
           value={formatMoney(totalFee)}
           placeholder={`${PESO}0.00`}
+          wrapperClassName="!bg-slate-100"
           inputStyle={{ color: totalFee > 0 ? "#0d1117" : "#94a3b8" }}
         />
       </div>
@@ -1098,64 +1168,6 @@ const AddFishModal = ({ open, onClose, onSave, saving, value, onChange, error, i
         error={error}
       />
     </Modal>
-  );
-};
-
-const DeleteFishClassificationModal = ({ open, fish, deleting, onClose, onConfirm }) => {
-  if (!open || !fish) return null;
-
-  return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center px-4"
-      style={{ backgroundColor: "rgba(10,13,28,0.55)", backdropFilter: "blur(6px)" }}
-    >
-      <div
-        className="bg-white w-full overflow-hidden"
-        style={{
-          maxWidth: 400,
-          borderRadius: 20,
-          boxShadow: "0 24px 64px rgba(0,0,0,0.2)",
-          fontFamily: FONT,
-          animation: "modalPop 0.22s cubic-bezier(0.34,1.56,0.64,1)",
-        }}
-      >
-        <style>{`@keyframes modalPop{from{opacity:0;transform:scale(0.92) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}`}</style>
-        <div className="px-6 pt-8 pb-5 flex flex-col items-center text-center">
-          <div className="mb-5 flex items-center justify-center" style={{ width: 68, height: 68, borderRadius: 18, backgroundColor: "#fef2f2" }}>
-            <IoWarningOutline style={{ fontSize: 36, color: "#ef4444" }} />
-          </div>
-          <p className="m-0 text-[18px] font-bold mb-2" style={{ color: "#0d1117" }}>Archive Fish Classification</p>
-          <p className="m-0 text-[15px] leading-relaxed" style={{ color: "#64748b" }}>
-            Are you sure you want to archive{" "}
-            <span className="font-bold" style={{ color: "#1a1f36" }}>"{fish.classification_name || "this record"}"</span>?
-          </p>
-        </div>
-        <div className="px-6 pb-6 flex gap-3">
-          <button
-            onClick={onClose}
-            disabled={deleting}
-            className="flex-1 py-2.5 rounded-xl border border-gray-200 bg-white text-[13px] font-semibold cursor-pointer hover:bg-gray-50 transition-colors"
-            style={{ fontFamily: FONT, color: "#1a1f36" }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={deleting}
-            className="flex-1 py-2.5 rounded-xl text-white text-[13px] font-semibold cursor-pointer transition-colors flex items-center justify-center"
-            style={{ fontFamily: FONT, backgroundColor: deleting ? "#fca5a5" : "#ef4444", border: "none" }}
-            onMouseEnter={(e) => { if (!deleting) e.currentTarget.style.backgroundColor = "#dc2626"; }}
-            onMouseLeave={(e) => { if (!deleting) e.currentTarget.style.backgroundColor = "#ef4444"; }}
-          >
-            {deleting ? (
-              <Spinner size={4} className="text-white" />
-            ) : (
-              "Archive"
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 };
 
@@ -1495,6 +1507,9 @@ const SuperBanyera = () => {
       setShowAddModal(false);
       showAddedToast("Banyera Transaction", "banyera transaction");
       void queryClient.invalidateQueries({ queryKey: ["banyera-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["banyera-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["bfar-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
     },
     onError: (error) => {
       showBottomToast("error", "Save Failed", error.response?.data?.message ?? "Unable to save the transaction.");
@@ -1542,6 +1557,9 @@ const SuperBanyera = () => {
       upsertBanyeraTransactionInDataCache(queryClient, savedTransaction ?? { ...editingTx, ...payload }, { insertIfMissing: true });
 
       void queryClient.invalidateQueries({ queryKey: ["banyera-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["banyera-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["bfar-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
       setEditingTx(null);
       showUpdatedToast("Banyera Transaction", "banyera transaction");
     } catch (error) {
@@ -1585,6 +1603,9 @@ const SuperBanyera = () => {
         updateBanyeraStatsInCache(queryClient, nextTransaction, "void");
       }
       void queryClient.invalidateQueries({ queryKey: ["banyera-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["banyera-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["bfar-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
       setPendingVoidTx(null);
       setVoidReasonOption("");
       setVoidReasonCustom("");
@@ -1613,6 +1634,9 @@ const SuperBanyera = () => {
         updateBanyeraStatsInCache(queryClient, nextTransaction, "restore");
       }
       void queryClient.invalidateQueries({ queryKey: ["banyera-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["banyera-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["bfar-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
       showBottomToast("success", "Transaction Restored", response?.message ?? "The banyera transaction was restored successfully.");
     },
     onError: (error) => {
@@ -1630,6 +1654,7 @@ const SuperBanyera = () => {
       setFishNameError("");
       showAddedToast("Fish Classification", "fish classification");
       void queryClient.invalidateQueries({ queryKey: ["banyera-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["bfar-report"], refetchType: "active" });
     },
     onError: (error) => {
       setFishNameError(
@@ -1650,6 +1675,7 @@ const SuperBanyera = () => {
       setFishNameError("");
       showUpdatedToast("Fish Classification", "fish classification");
       void queryClient.invalidateQueries({ queryKey: ["banyera-data"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["bfar-report"], refetchType: "active" });
     },
     onError: (error) => {
       setFishNameError(
@@ -1669,6 +1695,7 @@ const SuperBanyera = () => {
       showBottomToast("success", "Fish Deleted", "The fish classification was archived successfully.");
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["banyera-data"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["bfar-report"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["archives-data"], refetchType: "active" }),
       ]);
     },
@@ -2431,22 +2458,22 @@ const SuperBanyera = () => {
                                         <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
                                       </button>
                                   </Tooltip>
-                                  <Tooltip title={isTransactionLocked ? transactionLockMessage : (cls.fish_using_count ?? 0) > 0 ? "Cannot archive fish classifications with usage count" : "Archive"}>
+                                  <Tooltip title={isTransactionLocked ? transactionLockMessage : "Archive"}>
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        if (isTransactionLocked || (cls.fish_using_count ?? 0) > 0) return;
+                                        if (isTransactionLocked) return;
                                         setDeletingFish(cls);
                                       }}
-                                      disabled={isTransactionLocked || deletingFishId === cls.classification_id || (cls.fish_using_count ?? 0) > 0}
+                                      disabled={isTransactionLocked || deletingFishId === cls.classification_id}
                                       className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
-                                        isTransactionLocked || deletingFishId === cls.classification_id || (cls.fish_using_count ?? 0) > 0
+                                        isTransactionLocked || deletingFishId === cls.classification_id
                                           ? "cursor-not-allowed border-slate-200"
                                           : "cursor-pointer hover:bg-red-50"
                                       }`}
-                                      style={{ borderColor: isTransactionLocked || deletingFishId === cls.classification_id || (cls.fish_using_count ?? 0) > 0 ? undefined : "#ef4444" }}
+                                      style={{ borderColor: isTransactionLocked || deletingFishId === cls.classification_id ? undefined : "#ef4444" }}
                                     >
-                                      <IoTrashOutline style={{ fontSize: "15px", color: (isTransactionLocked || (cls.fish_using_count ?? 0) > 0) ? "#94a3b8" : "#ef4444" }} />
+                                      <IoArchiveOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#ef4444" }} />
                                     </button>
                                   </Tooltip>
                                 </div>
@@ -2572,10 +2599,11 @@ const SuperBanyera = () => {
           });
         }}
       />
-      <DeleteFishClassificationModal
+      <ArchiveModal
         open={!!deletingFish}
-        fish={deletingFish}
-        deleting={deletingFishId === deletingFish?.classification_id}
+        title="Archive Fish Classification"
+        itemName={deletingFish?.classification_name || "this record"}
+        saving={deletingFishId === deletingFish?.classification_id}
         onClose={() => {
           if (deletingFishId) return;
           setDeletingFish(null);
@@ -2726,74 +2754,81 @@ const EditBanyeraDrawer = ({ tx, open, boats, fees, classifications, onClose, on
       showSavingSpinner
     >
       <div className="space-y-5">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <ModalInput label="Boat Name" readOnly value={getBoatName(tx)} placeholder="-" inputStyle={{ color: "#475569" }} />
-        </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
           <div className="space-y-4">
-            <ModalInput label="Boat Type" icon={IoLayersOutline} readOnly value={selectedBoat?.boat_type?.type_name || selectedBoat?.boatType?.type_name || ""} placeholder="-" inputStyle={{ color: "#475569" }} />
-            <ModalInput label="Boat Owner" icon={IoPersonOutline} readOnly value={selectedBoat?.owner?.full_name || selectedBoat?.owner_name || ""} placeholder="-" inputStyle={{ color: "#475569" }} />
-            <ModalInput label="Applicable Fee" icon={IoCashOutline} readOnly value={formatMoney(getFeeAmount(selectedApplicableFee))} placeholder="-" inputStyle={{ color: "#475569" }} />
+            <ModalInput label="Boat Name" readOnly value={getBoatName(tx)} placeholder="-" wrapperClassName="!bg-slate-100" inputStyle={{ color: "#475569" }} />
+            <ModalInput label="Banyera Date" icon={IoCalendarOutline} readOnly value={formatDate(tx?.transaction_date)} placeholder="-" wrapperClassName="!bg-slate-100" inputStyle={{ color: "#475569" }} />
+            <ModalInput label="Banyera Time" icon={IoCalendarOutline} readOnly value={formatTime(tx?.transaction_date)} placeholder="-" wrapperClassName="!bg-slate-100" inputStyle={{ color: "#475569" }} />
           </div>
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="space-y-4">
-            <ModalInput label="Banyera Date" icon={IoCalendarOutline} readOnly value={formatDate(tx?.transaction_date)} placeholder="-" inputStyle={{ color: "#475569" }} />
-            <ModalInput label="Banyera Time" icon={IoCalendarOutline} readOnly value={formatTime(tx?.transaction_date)} placeholder="-" inputStyle={{ color: "#475569" }} />
-          </div>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="space-y-3">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+          <div>
+            <div
+              className="mb-2 grid gap-1 px-1"
+              style={{ gridTemplateColumns: "minmax(0,2.4fr) minmax(100px,0.75fr) minmax(116px,1fr) minmax(116px,1fr)" }}
+            >
+              <p className="m-0 text-center text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>FISH CLASSIFICATION</p>
+              <p className="m-0 text-center text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>QTY</p>
+              <p className="m-0 text-center text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>SUBTOTAL</p>
+              <p className="m-0 text-center text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>DAUG</p>
+            </div>
             {(items ?? []).map((item, index) => {
               const subtotal = (parseInt(item.quantity, 10) || 0) * getFeeAmount(selectedApplicableFee);
               return (
-                <div
-                  key={index}
-                  className="grid gap-3"
-                  style={{ gridTemplateColumns: "minmax(0,2.5fr) minmax(84px,0.65fr) minmax(120px,1fr) minmax(120px,1fr)" }}
-                >
-                  <ModalInput
-                    label={index === 0 ? "FISH CLASSIFICATION" : ""}
-                    readOnly
-                    value={classifications.find((classification) => String(classification.classification_id) === String(item.classification_id))?.classification_name || ""}
-                    placeholder="-"
-                    inputStyle={{ color: "#475569" }}
-                  />
-                  <ModalInput
-                    label={index === 0 ? "QTY" : ""}
-                    readOnly
-                    value={item.quantity || ""}
-                    placeholder="0"
-                    inputStyle={{ color: "#475569", textAlign: "center" }}
-                  />
-                  <ModalInput
-                    label={index === 0 ? "SUBTOTAL" : ""}
-                    readOnly
-                    value={subtotal > 0 ? `${PESO}${formatAmount(subtotal)}` : ""}
-                    placeholder={`${PESO}0.00`}
-                    inputStyle={{ color: "#475569" }}
-                  />
-                  <ModalInput
-                    label={index === 0 ? "DAUG" : ""}
-                    value={item.daug ? `${PESO}${item.daug}` : ""}
-                    onChange={(e) => {
-                      const value = e.target.value.replace(/[^0-9.]/g, "");
-                      setItems((current) =>
-                        current.map((entry, entryIndex) =>
-                          entryIndex === index ? { ...entry, daug: value } : entry
-                        )
-                      );
-                    }}
-                    placeholder={`${PESO}0.00`}
-                    inputStyle={{ color: "#475569" }}
-                    wrapperClassName="!border-[#4096ff] bg-blue-50/40 shadow-[0_0_0_1px_rgba(64,150,255,0.18)]"
-                  />
+                <div key={index} className="mb-3 last:mb-0">
+                  <p className="mb-1 mt-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500" style={{ fontFamily: FONT }}>
+                    Item {index + 1}
+                  </p>
+                  <div
+                    className="grid gap-1 items-center"
+                    style={{ gridTemplateColumns: "minmax(0,2.4fr) minmax(100px,0.75fr) minmax(116px,1fr) minmax(116px,1fr)" }}
+                  >
+                    <input
+                      type="text"
+                      readOnly
+                      value={classifications.find((classification) => String(classification.classification_id) === String(item.classification_id))?.classification_name || ""}
+                      placeholder="-"
+                      className="w-full h-[46px] rounded-[10px] border border-slate-200 bg-slate-100 px-3 text-[12px] font-medium outline-none"
+                      style={{ color: "#475569", fontFamily: FONT }}
+                    />
+                    <input
+                      type="text"
+                      readOnly
+                      value={item.quantity || ""}
+                      placeholder="0"
+                      className="w-full h-[46px] rounded-[10px] border border-slate-200 bg-slate-100 px-3 text-center text-[12px] font-medium outline-none"
+                      style={{ color: "#475569", fontFamily: FONT }}
+                    />
+                    <input
+                      type="text"
+                      readOnly
+                      value={subtotal > 0 ? `${PESO}${formatAmount(subtotal)}` : ""}
+                      placeholder={`${PESO}0.00`}
+                      className="w-full h-[46px] rounded-[10px] border border-slate-200 bg-slate-100 px-3 text-[12px] font-medium outline-none"
+                      style={{ color: "#475569", fontFamily: FONT }}
+                    />
+                    <input
+                      type="text"
+                      value={item.daug ? `${PESO}${item.daug}` : ""}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(/[^0-9.]/g, "");
+                        setItems((current) =>
+                          current.map((entry, entryIndex) =>
+                            entryIndex === index ? { ...entry, daug: value } : entry
+                          )
+                        );
+                      }}
+                      placeholder={`${PESO}0.00`}
+                      className="w-full h-[46px] rounded-[10px] border border-slate-200 bg-white px-3 text-[12px] outline-none focus:border-[#4096ff] focus:shadow-[0_0_0_1px_rgba(64,150,255,0.18)]"
+                      style={{ color: "#475569", fontFamily: FONT }}
+                    />
+                  </div>
                 </div>
               );
             })}
           </div>
           <div className="mt-4">
-            <ModalInput label="Total Fee" icon={IoCashOutline} readOnly value={`${PESO}${formatAmount(totalFee)}`} placeholder={`${PESO}0.00`} inputStyle={{ color: "#475569" }} />
+            <ModalInput label="Total Fee" icon={IoCashOutline} readOnly value={`${PESO}${formatAmount(totalFee)}`} placeholder={`${PESO}0.00`} wrapperClassName="!bg-slate-100" inputStyle={{ color: "#475569" }} />
           </div>
         </div>
       </div>

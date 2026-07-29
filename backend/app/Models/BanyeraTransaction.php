@@ -30,7 +30,7 @@ class BanyeraTransaction extends Model
 
     public function boat()
     {
-        return $this->belongsTo(Boat::class, 'boat_id', 'boat_id');
+        return $this->belongsTo(Boat::class, 'boat_id', 'boat_id')->withTrashed();
     }
 
     public function items()

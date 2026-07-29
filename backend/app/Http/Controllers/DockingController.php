@@ -4,13 +4,20 @@ namespace App\Http\Controllers;
 
 use App\Models\Docking;
 use App\Models\BillItem;
+use App\Models\Boat;
 use App\Services\ActivityLogService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
 
 class DockingController extends Controller
 {
+    private function manilaNow(): Carbon
+    {
+        return Carbon::now('Asia/Manila');
+    }
+
     private function formatDockingDateTimeValue($value): ?string
     {
         if (!$value) {
@@ -362,7 +369,7 @@ class DockingController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'boat_id' => 'required|exists:boats,boat_id',
+            'boat_id' => ['required', 'integer', Rule::exists('boats', 'boat_id')->whereNull('deleted_at')],
             'fee_id' => 'required|exists:fees,fee_id',
             'docking_date' => 'required|date',
             'docking_fee' => 'required|numeric|min:0',
@@ -451,6 +458,15 @@ class DockingController extends Controller
         if ($boatIdChanged || $dateChanged) {
             $checkBoatId = $boatIdChanged ? $validated['boat_id'] : $docking->boat_id;
             $checkDate = $dateChanged ? $validated['docking_date'] : $docking->docking_date;
+
+            if ($boatIdChanged && !Boat::active()->where('boat_id', $checkBoatId)->exists()) {
+                return response()->json([
+                    'message' => 'The selected boat is archived and cannot be used for new docking records.',
+                    'errors' => [
+                        'boat_id' => ['The selected boat is archived and cannot be used for new docking records.'],
+                    ],
+                ], 422);
+            }
             
             if ($this->dockingExistsForBoatOnDate($checkBoatId, $checkDate, $id)) {
                 return response()->json([
@@ -527,7 +543,7 @@ class DockingController extends Controller
 
         $docking->update([
             'void_reason' => $reason,
-            'voided_at' => now(),
+            'voided_at' => $this->manilaNow(),
             'voided_by' => Auth::id(),
         ]);
 

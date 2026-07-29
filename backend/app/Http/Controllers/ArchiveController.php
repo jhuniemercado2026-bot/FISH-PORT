@@ -8,7 +8,6 @@ use App\Models\BoatOwner;
 use App\Models\BoatType;
 use App\Models\BanyeraTransaction;
 use App\Models\Docking;
-use App\Models\Fee;
 use App\Models\FishClassification;
 use App\Models\VehicleType;
 use App\Models\VehicleTicket;
@@ -131,41 +130,6 @@ class ArchiveController extends Controller
             $boatType->setAttribute('archived_by', $boatTypeArchivedBy[(string) $boatType->type_name] ?? null);
         });
 
-        $fees = Fee::with(['boatType', 'vehicleType', 'createdBy'])
-            ->archived()
-            ->latest('deleted_at')
-            ->get();
-
-        $feeArchiveLogs = ActivityLog::query()
-            ->where('module', 'Archives')
-            ->where('action', 'ARCHIVE')
-            ->where('details', 'like', 'Archived fee record #%')
-            ->latest('created_at')
-            ->get();
-
-        $feeArchivedBy = [];
-        foreach ($feeArchiveLogs as $log) {
-            if (!preg_match('/Archived fee record #(\d+) for "([^"]*)"\./', (string) $log->details, $matches)) {
-                continue;
-            }
-
-            $feeId = (int) $matches[1];
-            if ($feeId <= 0 || isset($feeArchivedBy[$feeId])) {
-                continue;
-            }
-
-            $feeArchivedBy[$feeId] = [
-                'user_id' => $log->user_id,
-                'full_name' => $log->user_name,
-                'role' => $log->user_role,
-            ];
-        }
-
-        $fees->each(function ($fee) use ($feeArchivedBy) {
-            $fee->createdBy?->append('full_name');
-            $fee->setAttribute('archived_by', $feeArchivedBy[(int) $fee->fee_id] ?? null);
-        });
-
         $dockings = collect();
         $banyeraTransactions = collect();
 
@@ -253,7 +217,6 @@ class ArchiveController extends Controller
             'boats' => $boats,
             'boatOwners' => $boatOwners,
             'boatTypes' => $boatTypes,
-            'fees' => $fees,
             'dockings' => $dockings,
             'banyeraTransactions' => $banyeraTransactions,
             'fishClassifications' => $fishClassifications,
@@ -314,7 +277,6 @@ class ArchiveController extends Controller
                 'owner_lastname' => $item->owner_lastname,
                 'address' => $item->address,
                 'contact_number' => $item->contact_number,
-                'boats_count' => $item->boats_count ?? 0,
                 'created_at' => $item->created_at,
                 'deleted_at' => $deletedAt,
                 'created_by' => $createdBy,
@@ -323,21 +285,6 @@ class ArchiveController extends Controller
             'boatTypes' => [
                 'boat_type_id' => $item->boat_type_id,
                 'type_name' => $item->type_name,
-                'boats_count' => $item->boats_count ?? 0,
-                'created_at' => $item->created_at,
-                'deleted_at' => $deletedAt,
-                'created_by' => $createdBy,
-                'archived_by' => $archivedBy,
-            ],
-            'fees' => [
-                'fee_id' => $item->fee_id,
-                'fee_type_name' => $item->fee_type_name,
-                'fee_name' => $item->fee_name,
-                'boat_type' => $this->getRelatedTypeData($item->boatType ?? $item->boat_type),
-                'vehicle_type' => $this->getRelatedTypeData($item->vehicleType ?? $item->vehicle_type),
-                'effective_from' => $item->effective_from,
-                'effective_to' => $item->effective_to,
-                'amount' => $item->amount,
                 'created_at' => $item->created_at,
                 'deleted_at' => $deletedAt,
                 'created_by' => $createdBy,
@@ -346,7 +293,6 @@ class ArchiveController extends Controller
             'fishClassifications' => [
                 'classification_id' => $item->classification_id,
                 'classification_name' => $item->classification_name,
-                'fish_using_count' => $item->fish_using_count ?? 0,
                 'created_at' => $item->created_at,
                 'deleted_at' => $deletedAt,
                 'created_by' => $createdBy,
@@ -355,7 +301,6 @@ class ArchiveController extends Controller
             'vehicleTypes' => [
                 'vehicle_type_id' => $item->vehicle_type_id,
                 'type_name' => $item->type_name,
-                'tickets_count' => $item->tickets_count ?? 0,
                 'created_at' => $item->created_at,
                 'deleted_at' => $deletedAt,
                 'created_by' => $createdBy,
@@ -426,18 +371,12 @@ class ArchiveController extends Controller
     {
         return match ($type) {
             'boatOwners' => BoatOwner::with(['createdBy'])
-                ->withCount('activeBoats as boats_count')
                 ->archived(),
             'boatTypes' => BoatType::with(['createdBy'])
-                ->withCount('activeBoats as boats_count')
-                ->archived(),
-            'fees' => Fee::with(['boatType', 'vehicleType', 'createdBy'])
                 ->archived(),
             'fishClassifications' => FishClassification::with(['createdBy'])
-                ->withCount('activeBanyeraItems as fish_using_count')
                 ->onlyTrashed(),
             'vehicleTypes' => VehicleType::with(['createdBy'])
-                ->withCount('activeVehicleTickets as tickets_count')
                 ->onlyTrashed(),
             default => Boat::with(['owner', 'boatType', 'createdBy'])
                 ->archived(),
@@ -471,9 +410,6 @@ class ArchiveController extends Controller
                     });
             }),
             'boatTypes' => $query->where('type_name', 'like', "{$search}%"),
-            'fees' => $query->where(function ($inner) use ($search) {
-                $inner->where('fee_type_name', 'like', "%{$search}%");
-            }),
             'fishClassifications' => $query->where('classification_name', 'like', "%{$search}%"),
             'vehicleTypes' => $query->where('type_name', 'like', "%{$search}%"),
             default => $query->where('boat_name', 'like', "{$search}%"),
@@ -536,7 +472,6 @@ class ArchiveController extends Controller
             'boats' => Boat::archived()->count(),
             'boatOwners' => BoatOwner::archived()->count(),
             'boatTypes' => BoatType::archived()->count(),
-            'fees' => Fee::archived()->count(),
             'fishClassifications' => FishClassification::onlyTrashed()->count(),
             'vehicleTypes' => VehicleType::onlyTrashed()->count(),
         ];
@@ -550,7 +485,6 @@ class ArchiveController extends Controller
                 Boat::archived()->whereDate('deleted_at', $today)->count()
                 + BoatOwner::archived()->whereDate('deleted_at', $today)->count()
                 + BoatType::archived()->whereDate('deleted_at', $today)->count()
-                + Fee::archived()->whereDate('deleted_at', $today)->count()
                 + FishClassification::onlyTrashed()->whereDate('deleted_at', $today)->count()
                 + VehicleType::onlyTrashed()->whereDate('deleted_at', $today)->count(),
         ];

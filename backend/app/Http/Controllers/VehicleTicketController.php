@@ -108,6 +108,7 @@ class VehicleTicketController extends Controller
         return [
             'annual_tickets' => (clone $activeQuery)->where('ticket_type', 'annual')->count(),
             'daily_tickets' => (clone $activeQuery)->where('ticket_type', 'daily')->count(),
+            'annual_tickets_today' => (clone $activeQuery)->where('ticket_type', 'annual')->whereDate('ticket_date', $statsDate)->count(),
             'daily_tickets_today' => (clone $activeQuery)->where('ticket_type', 'daily')->whereDate('ticket_date', $statsDate)->count(),
             'daily_collections_today' => $dailyCollectionsToday,
             'annual_collections_today' => $annualCollectionsToday,
@@ -276,13 +277,14 @@ class VehicleTicketController extends Controller
 
         $this->loadTicketRelations($ticket);
         $this->prepareTicketForResponse($ticket);
+        $vehicleTypeName = trim((string) ($ticket->vehicleType?->type_name ?? 'vehicle type'));
 
         app(ActivityLogService::class)->log(
             action: 'INSERT',
             module: 'Vehicle Tickets',
-            details: 'Created ' . $ticket->ticket_type . ' vehicle ticket' .
-                ($ticket->control_number ? ' "' . $ticket->control_number . '"' : '') .
-                ' for plate "' . $ticket->plate_number . '".',
+            details: 'Created ' . strtolower((string) $ticket->ticket_type) .
+                ' vehicle ticket for vehicle type "' . $vehicleTypeName . '" with the amount of ' .
+                "\u{20B1}" . number_format((float) $ticket->ticket_fee, 2) . '.',
             user: Auth::user()
         );
 

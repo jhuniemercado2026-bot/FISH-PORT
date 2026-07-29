@@ -74,14 +74,15 @@ class VehicleTypeController extends Controller
         }
 
         $summaryQuery = (clone $query);
-        $summaryTotal = $summaryQuery->count();
+        $summaryActiveTotal = (clone $summaryQuery)->count();
+        $summaryTotal = VehicleType::withTrashed()->count();
         $summaryUsed = (clone $summaryQuery)
             ->whereHas('vehicleTickets', function ($query) use ($request) {
                 $query->whereNull('voided_at');
                 $this->applyFiscalYear($query, $request, 'vehicle_tickets.ticket_date');
             })
             ->count();
-        $summaryUnused = max(0, $summaryTotal - $summaryUsed);
+        $summaryUnused = max(0, $summaryActiveTotal - $summaryUsed);
 
         $query->orderByDesc('created_at')->orderByDesc('vehicle_type_id');
 
@@ -245,13 +246,7 @@ class VehicleTypeController extends Controller
 
     public function destroy($id)
     {
-        $vehicleType = VehicleType::withCount('vehicleTickets as tickets_count')->findOrFail($id);
-
-        if (($vehicleType->tickets_count ?? 0) > 0) {
-            return response()->json([
-                'message' => 'This vehicle type has usage count and cannot be archived.',
-            ], 422);
-        }
+        $vehicleType = VehicleType::findOrFail($id);
 
         $vehicleType->delete();
 

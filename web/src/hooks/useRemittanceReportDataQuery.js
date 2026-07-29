@@ -5,19 +5,30 @@ const extractRemittanceReport = (payload) => {
   if (!payload) {
     return {
       rows: [],
+      collectionSources: [],
       totalRemittances: 0,
       totalTodaysCashReceived: 0,
       totalSurplus: 0,
       totalDeficit: 0,
+      totalCollectionSources: 0,
     };
   }
 
+  const rows = Array.isArray(payload.rows)
+    ? payload.rows.map((row) => ({
+        ...row,
+        amountToRemit: Number(row.amountToRemit ?? row.confirmedCash ?? 0),
+      }))
+    : [];
+
   return {
-    rows: Array.isArray(payload.rows) ? payload.rows : [],
+    rows,
+    collectionSources: Array.isArray(payload.collectionSources) ? payload.collectionSources : [],
     totalRemittances: Number(payload.totalRemittances || 0),
     totalTodaysCashReceived: Number(payload.totalTodaysCashReceived || 0),
     totalSurplus: Number(payload.totalSurplus || 0),
     totalDeficit: Number(payload.totalDeficit || 0),
+    totalCollectionSources: Number(payload.totalCollectionSources || 0),
   };
 };
 

@@ -17,6 +17,7 @@ import {
   clearStoredAuth,
   getDefaultRouteForUser,
   getStoredUser,
+  hasAllowedWebRole,
   isAuthenticated,
 } from "./pages/login/auth";
 import RbacDashboard from "./pages/rbac/dashboard";
@@ -25,10 +26,9 @@ import SuperDocking from "./pages/rbac/docking";
 import SuperBanyera from "./pages/rbac/banyera";
 import SuperVehicleTickets from "./pages/rbac/vehicle-tickets";
 import SuperBilling from "./pages/rbac/billing";
-import SuperPayments from "./pages/rbac/payments";
+import SuperCollections from "./pages/rbac/collection";
 import SuperStatementOfAccount from "./pages/rbac/statement-of-account";
 import SuperReports from "./pages/rbac/reports";
-import SuperRemittance from "./pages/rbac/remittance";
 import NotificationsPage from "./pages/rbac/notifications";
 import SuperSettings from "./pages/rbac/settings";
 import SuperArchived from "./pages/rbac/archived";
@@ -38,16 +38,22 @@ import SuperSetFees from "./pages/rbac/set-fees";
 
 const RequireAuth = ({ children, allowedRoles }) => {
   const user = getStoredUser();
+  const role = user?.role;
 
   if (!isAuthenticated()) {
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles?.length && !allowedRoles.includes(user?.role)) {
+  if (allowedRoles?.length && !allowedRoles.includes(role)) {
     return <Navigate to={getDefaultRouteForUser(user)} replace />;
   }
 
   return children;
+};
+
+const RedirectWithSearch = ({ to }) => {
+  const location = useLocation();
+  return <Navigate to={`${to}${location.search}`} replace />;
 };
 
 const AuthenticatedHistoryGuard = ({ children }) => {
@@ -74,9 +80,11 @@ const AuthenticatedHistoryGuard = ({ children }) => {
       "/annual-vehicle-tickets",
       "/vehicle-types",
       "/billing",
-      "/create-billing",
+      "/billing-payments",
+      "/collections",
       "/payments",
-      "/record-payment",
+      "/owner-statement",
+      "/boat-statement",
       "/statement-of-account",
       "/reports",
       "/remittance",
@@ -100,9 +108,11 @@ const AuthenticatedHistoryGuard = ({ children }) => {
       "/admin/annual-vehicle-tickets",
       "/admin/vehicle-types",
       "/admin/billing",
-      "/admin/create-billing",
+      "/admin/billing-payments",
       "/admin/payments",
       "/admin/record-payment",
+      "/admin/owner-statement",
+      "/admin/boat-statement",
       "/admin/statement-of-account",
       "/admin/reports",
       "/admin/remittance",
@@ -121,9 +131,11 @@ const AuthenticatedHistoryGuard = ({ children }) => {
       "/super-annual-vehicle-tickets",
       "/super-vehicle-types",
       "/super-billing",
-      "/super-create-billing",
+      "/super-billing-payments",
       "/super-payments",
       "/super-record-payment",
+      "/super-owner-statement",
+      "/super-boat-statement",
       "/super-statement-of-account",
       "/super-reports",
       "/super-remittance",
@@ -186,7 +198,7 @@ const PublicOnlyRoute = ({ children }) => {
     return children;
   }
 
-  if (user && !["head", "coordinator"].includes(user.role)) {
+  if (user && !hasAllowedWebRole(user)) {
     clearStoredAuth();
     return children;
   }
@@ -386,7 +398,7 @@ const App = () => {
           }
         />
         <Route
-          path="/create-billing"
+          path="/billing-payments"
           element={
             <AuthenticatedHistoryGuard>
               <RequireAuth allowedRoles={["head", "coordinator"]}>
@@ -396,35 +408,38 @@ const App = () => {
           }
         />
         <Route
-          path="/payments"
+          path="/create-billing"
+          element={<Navigate to="/billing" replace />}
+        />
+        <Route
+          path="/collections"
           element={
             <AuthenticatedHistoryGuard>
               <RequireAuth allowedRoles={["head", "coordinator"]}>
-                <SuperPayments />
+                <SuperCollections />
               </RequireAuth>
             </AuthenticatedHistoryGuard>
           }
         />
+        <Route path="/payments" element={<Navigate to="/collections" replace />} />
         <Route
           path="/record-payment"
-          element={
-            <AuthenticatedHistoryGuard>
-              <RequireAuth allowedRoles={["head", "coordinator"]}>
-                <SuperPayments />
-              </RequireAuth>
-            </AuthenticatedHistoryGuard>
-          }
+          element={<RedirectWithSearch to="/billing-payments" />}
         />
-        <Route
-          path="/statement-of-account"
-          element={
-            <AuthenticatedHistoryGuard>
-              <RequireAuth allowedRoles={["head", "coordinator"]}>
-                <SuperStatementOfAccount />
-              </RequireAuth>
-            </AuthenticatedHistoryGuard>
-          }
-        />
+        {["/owner-statement", "/boat-statement"].map((path) => (
+          <Route
+            key={path}
+            path={path}
+            element={
+              <AuthenticatedHistoryGuard>
+                <RequireAuth allowedRoles={["head", "coordinator"]}>
+                  <SuperStatementOfAccount />
+                </RequireAuth>
+              </AuthenticatedHistoryGuard>
+            }
+          />
+        ))}
+        <Route path="/statement-of-account" element={<Navigate to="/owner-statement" replace />} />
         <Route
           path="/reports"
           element={
@@ -440,7 +455,7 @@ const App = () => {
           element={
             <AuthenticatedHistoryGuard>
               <RequireAuth allowedRoles={["head", "coordinator"]}>
-                <SuperRemittance />
+                <SuperCollections initialTab="remittance" />
               </RequireAuth>
             </AuthenticatedHistoryGuard>
           }
@@ -528,18 +543,23 @@ const App = () => {
         <Route path="/admin/billing" element={<Navigate to="/billing" replace />} />
         <Route path="/admin-billing" element={<Navigate to="/billing" replace />} />
         <Route path="/admin_billing" element={<Navigate to="/billing" replace />} />
-        <Route path="/admin/create-billing" element={<Navigate to="/create-billing" replace />} />
-        <Route path="/admin-create-billing" element={<Navigate to="/create-billing" replace />} />
-        <Route path="/admin_create_billing" element={<Navigate to="/create-billing" replace />} />
-        <Route path="/admin/payments" element={<Navigate to="/payments" replace />} />
-        <Route path="/admin-payments" element={<Navigate to="/payments" replace />} />
-        <Route path="/admin_payments" element={<Navigate to="/payments" replace />} />
-        <Route path="/admin/record-payment" element={<Navigate to="/record-payment" replace />} />
-        <Route path="/admin-record-payment" element={<Navigate to="/record-payment" replace />} />
-        <Route path="/admin_record_payment" element={<Navigate to="/record-payment" replace />} />
-        <Route path="/admin/statement-of-account" element={<Navigate to="/statement-of-account" replace />} />
-        <Route path="/admin-statement-of-account" element={<Navigate to="/statement-of-account" replace />} />
-        <Route path="/admin_statement_of_account" element={<Navigate to="/statement-of-account" replace />} />
+        <Route path="/admin/billing-payments" element={<Navigate to="/billing-payments" replace />} />
+        <Route path="/admin-billing-payments" element={<Navigate to="/billing-payments" replace />} />
+        <Route path="/admin_billing_payments" element={<Navigate to="/billing-payments" replace />} />
+        <Route path="/admin/create-billing" element={<Navigate to="/billing" replace />} />
+        <Route path="/admin-create-billing" element={<Navigate to="/billing" replace />} />
+        <Route path="/admin_create_billing" element={<Navigate to="/billing" replace />} />
+        <Route path="/admin/payments" element={<Navigate to="/collections" replace />} />
+        <Route path="/admin-payments" element={<Navigate to="/collections" replace />} />
+        <Route path="/admin_payments" element={<Navigate to="/collections" replace />} />
+        <Route path="/admin/record-payment" element={<RedirectWithSearch to="/billing-payments" />} />
+        <Route path="/admin-record-payment" element={<RedirectWithSearch to="/billing-payments" />} />
+        <Route path="/admin_record_payment" element={<RedirectWithSearch to="/billing-payments" />} />
+        <Route path="/admin/owner-statement" element={<Navigate to="/owner-statement" replace />} />
+        <Route path="/admin/boat-statement" element={<Navigate to="/boat-statement" replace />} />
+        <Route path="/admin/statement-of-account" element={<Navigate to="/owner-statement" replace />} />
+        <Route path="/admin-statement-of-account" element={<Navigate to="/owner-statement" replace />} />
+        <Route path="/admin_statement_of_account" element={<Navigate to="/owner-statement" replace />} />
         <Route path="/admin/reports" element={<Navigate to="/reports" replace />} />
         <Route path="/admin-reports" element={<Navigate to="/reports" replace />} />
         <Route path="/admin_reports" element={<Navigate to="/reports" replace />} />
@@ -579,14 +599,18 @@ const App = () => {
         <Route path="/super_vehicle_types" element={<Navigate to="/vehicle-types" replace />} />
         <Route path="/super-billing" element={<Navigate to="/billing" replace />} />
         <Route path="/super_billing" element={<Navigate to="/billing" replace />} />
-        <Route path="/super-create-billing" element={<Navigate to="/create-billing" replace />} />
-        <Route path="/super_create_billing" element={<Navigate to="/create-billing" replace />} />
-        <Route path="/super-payments" element={<Navigate to="/payments" replace />} />
-        <Route path="/super_payments" element={<Navigate to="/payments" replace />} />
-        <Route path="/super-record-payment" element={<Navigate to="/record-payment" replace />} />
-        <Route path="/super_record_payment" element={<Navigate to="/record-payment" replace />} />
-        <Route path="/super-statement-of-account" element={<Navigate to="/statement-of-account" replace />} />
-        <Route path="/super_statement_of_account" element={<Navigate to="/statement-of-account" replace />} />
+        <Route path="/super-billing-payments" element={<Navigate to="/billing-payments" replace />} />
+        <Route path="/super_billing_payments" element={<Navigate to="/billing-payments" replace />} />
+        <Route path="/super-create-billing" element={<Navigate to="/billing" replace />} />
+        <Route path="/super_create_billing" element={<Navigate to="/billing" replace />} />
+        <Route path="/super-payments" element={<Navigate to="/collections" replace />} />
+        <Route path="/super_payments" element={<Navigate to="/collections" replace />} />
+        <Route path="/super-record-payment" element={<RedirectWithSearch to="/billing-payments" />} />
+        <Route path="/super_record_payment" element={<RedirectWithSearch to="/billing-payments" />} />
+        <Route path="/super-owner-statement" element={<Navigate to="/owner-statement" replace />} />
+        <Route path="/super-boat-statement" element={<Navigate to="/boat-statement" replace />} />
+        <Route path="/super-statement-of-account" element={<Navigate to="/owner-statement" replace />} />
+        <Route path="/super_statement_of_account" element={<Navigate to="/owner-statement" replace />} />
         <Route path="/super-reports" element={<Navigate to="/reports" replace />} />
         <Route path="/super_reports" element={<Navigate to="/reports" replace />} />
         <Route path="/super-remittance" element={<Navigate to="/remittance" replace />} />

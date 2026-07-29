@@ -1,7 +1,20 @@
 const getManilaDateString = () =>
   new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
 
-const getTicketDate = (ticket) => String(ticket?.ticket_date ?? ticket?.rawTicketDate ?? "").slice(0, 10);
+const normalizeDateString = (value) => {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+  }
+
+  return raw.slice(0, 10);
+};
+
+const getTicketDate = (ticket) => normalizeDateString(ticket?.ticket_date ?? ticket?.rawTicketDate);
 
 const getTicketFee = (ticket) => Number(ticket?.ticket_fee ?? ticket?.ticketFee ?? 0);
 
@@ -46,7 +59,13 @@ const updateTicketStats = (stats = {}, ticket, action) => {
   }
 
   if (isTodaysTicket(ticket)) {
-    nextStats.daily_tickets_today = adjustStatValue(nextStats.daily_tickets_today, isAnnual ? 0 : delta);
+    if (isAnnual) {
+      nextStats.annual_tickets_today = adjustStatValue(nextStats.annual_tickets_today, delta);
+      nextStats.annual_collections_today = adjustStatValue(nextStats.annual_collections_today, delta * ticketFee);
+    } else {
+      nextStats.daily_tickets_today = adjustStatValue(nextStats.daily_tickets_today, delta);
+      nextStats.daily_collections_today = adjustStatValue(nextStats.daily_collections_today, delta * ticketFee);
+    }
     nextStats.today_collections = adjustStatValue(nextStats.today_collections, delta * ticketFee);
   }
 

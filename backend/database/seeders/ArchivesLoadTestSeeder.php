@@ -2,12 +2,10 @@
 
 namespace Database\Seeders;
 
-use App\Enums\FeeTypeName;
 use App\Models\ActivityLog;
 use App\Models\Boat;
 use App\Models\BoatOwner;
 use App\Models\BoatType;
-use App\Models\Fee;
 use App\Models\FishClassification;
 use App\Models\User;
 use App\Models\VehicleType;
@@ -46,7 +44,6 @@ class ArchivesLoadTestSeeder extends Seeder
             ->where('owner_firstname', 'Archives')
             ->where('owner_lastname', 'like', 'Load Test%')
             ->forceDelete();
-        Fee::withTrashed()->where('created_by', $user->user_id)->forceDelete();
         BoatType::withTrashed()->where('type_name', 'like', 'Archives Load Test Vessel %')->forceDelete();
         VehicleType::withTrashed()->where('type_name', 'like', 'Archives Load Test Vehicle %')->forceDelete();
         FishClassification::withTrashed()->where('classification_name', 'like', 'Archives Load Test Fish %')->forceDelete();
@@ -155,42 +152,5 @@ class ArchivesLoadTestSeeder extends Seeder
             ]);
         });
 
-        $feeTypes = [
-            FeeTypeName::Docking->value,
-            FeeTypeName::VehicleTicketDaily->value,
-            FeeTypeName::VehicleTicketAnnual->value,
-        ];
-
-        foreach (range(1, self::ARCHIVE_COUNT) as $index) {
-            $feeType = $feeTypes[$index % count($feeTypes)];
-            $boatTypeId = $feeType === FeeTypeName::Docking->value ? $boatTypes[($index - 1) % $boatTypes->count()]->boat_type_id : null;
-            $vehicleTypeId = $feeType !== FeeTypeName::Docking->value ? $vehicleTypes[($index - 1) % $vehicleTypes->count()]->vehicle_type_id : null;
-            $effectiveFrom = $startDate->addDays(intdiv($index - 1, 10))->toDateString();
-            $effectiveTo = $feeType === FeeTypeName::Docking->value ? $startDate->addDays(intdiv($index - 1, 10) + 30)->toDateString() : null;
-
-            $fee = Fee::create([
-                'fee_type_name' => $feeType,
-                'boat_type_id' => $boatTypeId,
-                'vehicle_type_id' => $vehicleTypeId,
-                'amount' => 100 + (($index % 20) * 5),
-                'effective_from' => $effectiveFrom,
-                'effective_to' => $effectiveTo,
-                'created_by' => $user->user_id,
-            ]);
-
-            $archiveDate = $startDate->addDays(25 + $index)->setTime(13, 0);
-            $fee->deleted_at = $archiveDate;
-            $fee->save();
-
-            ActivityLog::create([
-                'user_id' => $user->user_id,
-                'user_name' => sprintf('%s %s', $user->first_name, $user->last_name),
-                'user_role' => $user->role,
-                'action' => 'ARCHIVE',
-                'module' => 'Archives',
-                'details' => sprintf('Archived fee record #%d for "%s".', $fee->fee_id, $feeType),
-                'severity' => 'warning',
-            ]);
-        }
     }
 }

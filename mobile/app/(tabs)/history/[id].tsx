@@ -19,6 +19,13 @@ type Params = {
 
 type TransactionRecord = Record<string, any>;
 
+type TransactionLockState = {
+  is_locked?: boolean | null;
+  message?: string | null;
+  unlock_at?: string | null;
+  remittance_reference_no?: string | null;
+};
+
 const endpointForType = (type: TransactionType) => {
   switch (type) {
     case "docking":
@@ -114,6 +121,9 @@ const isSamePhilippineDate = (value?: string | null) => {
   return parsed.year === today.year && parsed.month === today.month && parsed.day === today.day;
 };
 
+const isRecordBilled = (record: TransactionRecord | null | undefined) =>
+  Boolean(record?.is_billed || record?.billed_at || record?.billing_id || record?.bill_id);
+
 export default function HistoryDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<Params>();
@@ -130,6 +140,7 @@ export default function HistoryDetailScreen() {
   const [isSavingVoidAction, setIsSavingVoidAction] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [transactionLock, setTransactionLock] = useState<TransactionLockState | null>(null);
 
   useEffect(() => {
     const id = params.id;
@@ -140,6 +151,29 @@ export default function HistoryDetailScreen() {
         : undefined;
 
     setType(parsedType);
+
+    async function loadTransactionLockState() {
+      if (!authToken) {
+        setTransactionLock(null);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/transaction-lock`, {
+          headers: buildApiHeaders(authToken),
+        });
+        const json = await response.json().catch(() => null);
+        const lock = json?.transaction_lock;
+
+        if (lock && (lock.is_locked || lock.message)) {
+          setTransactionLock(lock);
+        } else {
+          setTransactionLock(null);
+        }
+      } catch {
+        setTransactionLock(null);
+      }
+    }
 
     async function loadDetail() {
       const authSession = getAuthSession();
@@ -215,9 +249,11 @@ export default function HistoryDetailScreen() {
     }
 
     loadDetail();
+    loadTransactionLockState();
   }, [authToken, params.id, params.type, showToast]);
 
   const openVoidModal = () => {
+    if (transactionLock?.is_locked || isRecordBilled(detail)) return;
     setVoidReasonOption("");
     setVoidReasonCustom("");
     setVoidReasonError("");
@@ -238,7 +274,7 @@ export default function HistoryDetailScreen() {
   };
 
   const handleSaveBanyeraEdit = async (updatedItems: Record<string, any>[]) => {
-    if (!detail) return;
+    if (!detail || transactionLock?.is_locked) return;
     const transactionId = detail.banyera_id ?? detail.banyeraId ?? detail.id;
     if (!transactionId) return;
 
@@ -299,7 +335,7 @@ export default function HistoryDetailScreen() {
   };
 
   const handleVoidConfirm = async () => {
-    if (!detail || !type) return;
+    if (!detail || !type || transactionLock?.is_locked) return;
     const transactionId = detail[idFieldForType(type)];
     if (!transactionId) return;
     if (!voidReasonOption) {
@@ -353,7 +389,7 @@ export default function HistoryDetailScreen() {
   };
 
   const handleRestore = async () => {
-    if (!detail || !type) return;
+    if (!detail || !type || transactionLock?.is_locked || isRecordBilled(detail)) return;
     const transactionId = detail[idFieldForType(type)];
     if (!transactionId) return;
     setIsSavingVoidAction(true);
@@ -383,7 +419,7 @@ export default function HistoryDetailScreen() {
   };
 
   const handleEditBanyera = () => {
-    if (!detail) return;
+    if (!detail || transactionLock?.is_locked || isRecordBilled(detail)) return;
     setEditModalVisible(true);
   };
 
@@ -418,7 +454,10 @@ export default function HistoryDetailScreen() {
     const statusButtonClass = `bg-white border ${isVoided ? "border-[#22C55E]" : "border-[#F59E0B]"}`;
     const statusButtonTextClass = isVoided ? "text-[#22C55E]" : "text-[#F59E0B]";
     const statusButtonIconColor = isVoided ? "#22C55E" : "#F59E0B";
-    const isStatusActionDisabled = isSavingVoidAction || !isTodayRecord;
+    const isTransactionLocked = Boolean(transactionLock?.is_locked);
+    const isBilled = isRecordBilled(detail);
+    const transactionLockMessage = transactionLock?.message || "Transactions are view-only at the moment.";
+    const isStatusActionDisabled = isSavingVoidAction || !isTodayRecord || isTransactionLocked || isBilled;
     const totalBanyeraQuantity = Array.isArray(detail.items)
       ? detail.items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
       : 0;
@@ -1003,6 +1042,32 @@ export default function HistoryDetailScreen() {
             </>
           )}
 
+          {isBilled ? (
+            <View className="mb-4 -mx-5 rounded-[10px] border border-[#FDE68A] bg-[#FEFCE8] px-4 py-3">
+              <View className="flex-row items-center">
+                <Ionicons name="cash-outline" size={16} color="#B45309" />
+                <View className="ml-2 flex-1">
+                  <Text className="text-[12px] leading-4 text-[#92400E]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    This transaction has been billed and can no longer be edited, voided, or restored.
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ) : null}
+
+          {isTransactionLocked ? (
+            <View className="mb-4 -mx-5 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3">
+              <View className="flex-row items-center">
+                <Ionicons name="lock-closed-outline" size={16} color="#DC2626" />
+                <View className="ml-2 flex-1">
+                  <Text className="text-[12px] leading-4 text-[#991B1B]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    {transactionLockMessage}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ) : null}
+
           {type === "docking" || type === "tickets" ? (
             <Pressable
               onPress={isVoided ? handleRestore : openVoidModal}
@@ -1027,7 +1092,8 @@ export default function HistoryDetailScreen() {
             <View className="mt-0 mb-4 -mx-5 flex-row items-center gap-3">
               <Pressable
                 onPress={handleEditBanyera}
-                className="flex-1 flex-row items-center justify-center rounded-[10px] border border-[#E8E1E6] bg-white px-5 py-3"
+                disabled={isTransactionLocked || isBilled}
+                className={`flex-1 flex-row items-center justify-center rounded-[10px] border border-[#E8E1E6] px-5 py-3 ${isTransactionLocked || isBilled ? "bg-[#F8F8FA] opacity-60" : "bg-white"}`}
               >
                 <Ionicons name="create-outline" size={16} color="#1A1F36" />
                 <Text

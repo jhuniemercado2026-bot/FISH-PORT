@@ -1,14 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "../api/axios";
+import { useFiscalYearStore } from "../store/fiscalYearStore";
 
 const UNIVERSAL_SEARCH_MIN_LENGTH = 1;
 
-export const useUniversalSearchQuery = ({ search = "", limit = 30 } = {}, queryOptions = {}) =>
-  useQuery({
-    queryKey: ["universal-search", { search, limit }],
+export const useUniversalSearchQuery = ({ search = "", limit = 30, fiscalYear } = {}, queryOptions = {}) => {
+  const storedFiscalYear = useFiscalYearStore((state) => state.fiscalYear);
+  const resolvedFiscalYear = fiscalYear ?? storedFiscalYear;
+
+  return useQuery({
+    queryKey: ["universal-search", { search, limit, fiscalYear: resolvedFiscalYear }],
     queryFn: async ({ signal }) => {
       const response = await api.get("/universal-search", {
-        params: { q: search, limit },
+        params: { q: search, limit, fiscal_year: resolvedFiscalYear || undefined },
         signal,
       });
 
@@ -22,3 +26,4 @@ export const useUniversalSearchQuery = ({ search = "", limit = 30 } = {}, queryO
     refetchOnWindowFocus: false,
     ...queryOptions,
   });
+};

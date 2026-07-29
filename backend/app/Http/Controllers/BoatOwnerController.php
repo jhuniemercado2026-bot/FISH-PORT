@@ -46,7 +46,7 @@ class BoatOwnerController extends Controller
                 'to' => $owners->lastItem(),
             ],
             'stats' => [
-                'total_owners' => BoatOwner::active()->count(),
+                'total_owners' => BoatOwner::withTrashed()->count(),
                 'boat_owners_in_use' => BoatOwner::active()->has('activeBoats')->count(),
                 'boat_owners_not_in_use' => BoatOwner::active()->doesntHave('activeBoats')->count(),
             ],
@@ -129,13 +129,7 @@ class BoatOwnerController extends Controller
 
     public function destroy($id)
     {
-        $owner = BoatOwner::withCount('activeBoats as boats_count')->findOrFail($id);
-
-        if (($owner->boats_count ?? 0) > 0) {
-            return response()->json([
-                'message' => 'This boat owner has usage count and cannot be archived.',
-            ], 422);
-        }
+        $owner = BoatOwner::findOrFail($id);
 
         $owner->delete();
 

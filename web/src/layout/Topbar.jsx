@@ -10,7 +10,6 @@ import {
   IoLogOutOutline,
   IoMenuOutline,
   IoPersonCircleOutline,
-  IoSettingsOutline,
 } from "react-icons/io5";
 import { logoutUser } from "../pages/login/logout";
 import { useNotificationsDataQuery } from "../hooks/useNotificationsDataQuery";
@@ -67,15 +66,6 @@ const getBillReference = (bill, payment, fallback = "") =>
       fallback
   ).trim();
 
-const getVehicleTicketReference = (ticket, fallback = "vehicle ticket") =>
-  String(
-    ticket?.control_number ||
-      ticket?.ticket_reference ||
-      ticket?.ticket_reference_no ||
-      ticket?.official_receipt_no ||
-      fallback
-  ).trim();
-
 const getVehicleTypeName = (ticket) =>
   String(ticket?.vehicle_type?.type_name || ticket?.vehicleType?.type_name || ticket?.vehicle_type_name || "").trim();
 
@@ -126,6 +116,10 @@ const formatActivityDetails = (details, context = {}) => {
 
   const vehicleTicketMatch = normalized.match(/\bCreated\s+(daily|annual)\s+vehicle ticket for vehicle type\s+"([^"]+)"\.?/i);
   if (vehicleTicketMatch) {
+    if (/\bwith the amount of\b/i.test(normalized)) {
+      return normalized;
+    }
+
     const [, ticketType, vehicleTypeName] = vehicleTicketMatch;
     const ticket = findVehicleTicketForLog({
       ticketType,
@@ -133,12 +127,10 @@ const formatActivityDetails = (details, context = {}) => {
       tickets: context.vehicleTickets,
       logTimestamp: context.logTimestamp,
     });
-    const ticketReference = getVehicleTicketReference(ticket);
-    const amount = formatMoney(ticket?.ticket_fee);
+    const amount = ticket ? formatMoney(ticket?.ticket_fee) : "";
 
     return [
-      `Created ${ticketType.toLowerCase()} vehicle ticket "${ticketReference}"`,
-      `for vehicle type "${vehicleTypeName}"`,
+      `Created ${ticketType.toLowerCase()} vehicle ticket for vehicle type "${vehicleTypeName}"`,
       amount ? `with the amount of ${amount}.` : "",
     ].filter(Boolean).join(" ");
   }
@@ -152,9 +144,17 @@ const formatActivityDetails = (details, context = {}) => {
       tickets: context.vehicleTickets,
       logTimestamp: context.logTimestamp,
     });
-    const vehicleTypeName = getVehicleTypeName(ticket) || "vehicle type";
+    if (!ticket) {
+      return normalized;
+    }
 
-    return `Created ${ticketType.toLowerCase()} vehicle ticket for vehicle type "${vehicleTypeName}".`;
+    const vehicleTypeName = getVehicleTypeName(ticket) || "vehicle type";
+    const amount = formatMoney(ticket?.ticket_fee);
+
+    return [
+      `Created ${ticketType.toLowerCase()} vehicle ticket for vehicle type "${vehicleTypeName}"`,
+      amount ? `with the amount of ${amount}.` : "",
+    ].filter(Boolean).join(" ");
   }
 
   return normalized
@@ -243,7 +243,7 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
   const searchDataEnabled = debouncedSearchValue.length >= UNIVERSAL_SEARCH_MIN_LENGTH;
   const isSearchWaitingForDebounce = normalizedSearchValue !== debouncedSearchValue;
 
-  const notificationsQuery = useNotificationsDataQuery({ perPage: 8, paginated: true });
+  const notificationsQuery = useNotificationsDataQuery({ perPage: 10, paginated: true });
   const universalSearchQuery = useUniversalSearchQuery(
     { search: debouncedSearchValue, limit: 30 },
     { enabled: searchDataEnabled }
@@ -256,7 +256,7 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
   const initials = `${rawFirstName.charAt(0)}${rawLastName.charAt(0)}`.toUpperCase();
   const displayName = firstName;
   const notifications = notificationsQuery.data?.notifications ?? [];
-  const visibleNotifications = notifications;
+  const visibleNotifications = notifications.slice(0, 10);
   const isNotificationsLoading = notificationsQuery.isLoading || (notificationsQuery.isFetching && visibleNotifications.length === 0);
   const unreadNotifications = notifications.filter((row) => !Boolean(row?.is_read));
   const unreadNotificationCount = Number(notificationsQuery.data?.unreadCount ?? unreadNotifications.length);
@@ -294,22 +294,44 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
     },
   });
 
-  const getNotificationTargetPath = (notification) => {
+  const getNotificationNavigationTarget = (notification) => {
     const relatedType = String(notification?.related_type || "").trim().toLowerCase();
+    const relatedId = notification?.related_id;
 
-    if (relatedType === "remittance") {
-      return "/remittance";
+    if (relatedType === "remittance" && relatedId) {
+      const highlightId = `remittance-${relatedId}`;
+
+      return {
+        pathname: "/remittance",
+        search: `?highlight=${highlightId}`,
+        state: {
+          universalSearchResult: {
+            id: highlightId,
+            group: "Remittance",
+            path: `/remittance?highlight=${highlightId}`,
+            title: notification?.title || "Remittance",
+            subtitle: notification?.message || "",
+          },
+        },
+      };
     }
 
-    return "/notification";
+    return {
+      pathname: "/notification",
+      search: "",
+      state: null,
+    };
   };
 
   const handleNotificationClick = async (notification) => {
-    const targetPath = getNotificationTargetPath(notification);
+    const target = getNotificationNavigationTarget(notification);
 
     if (!notification?.notification_id) {
       setShowNotifications(false);
-      navigate(targetPath);
+      navigate(
+        { pathname: target.pathname, search: target.search },
+        { state: target.state }
+      );
       return;
     }
 
@@ -322,7 +344,10 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
     }
 
     setShowNotifications(false);
-    navigate(targetPath);
+    navigate(
+      { pathname: target.pathname, search: target.search },
+      { state: target.state }
+    );
   };
 
   const closeSearchResults = () => {
@@ -768,21 +793,21 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
                   onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#f8f9fc"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; }}
                 >
-                  <IoSettingsOutline style={{ fontSize: "16px", color: "#1a1f36" }} />
-                  Settings
+                  <IoPersonCircleOutline style={{ fontSize: "16px", color: "#1a1f36" }} />
+                  Edit Profile
                 </button>
 
                 <div style={{ height: "1px", backgroundColor: "#f3f4f6", margin: "4px 0" }} />
 
                 <button
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] font-semibold border-none bg-transparent cursor-pointer"
-                  style={{ color: "#ef4444", fontFamily: "'Montserrat', sans-serif" }}
+                  style={{ color: "#1a1f36", fontFamily: "'Montserrat', sans-serif" }}
                   onClick={() => {
                     setShowDropdown(false);
                     setShowLogoutModal(true);
                   }}
                 >
-                  <IoLogOutOutline style={{ fontSize: "16px", color: "#ef4444" }} />
+                  <IoLogOutOutline style={{ fontSize: "16px", color: "#1a1f36" }} />
                   Sign out
                 </button>
               </div>

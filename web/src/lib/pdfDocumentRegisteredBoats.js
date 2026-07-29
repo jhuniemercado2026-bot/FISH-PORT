@@ -364,10 +364,10 @@ export const buildRegisteredBoatsPdf = async ({
 
   const columns = [
     { key: "boat_name", label: "Boat Name", width: 105 },
-    { key: "type", label: "Type", width: 177 },
+    { key: "type", label: "Type", width: 160 },
     { key: "owner", label: "Owner", width: 106 },
     { key: "date_registered", label: "Date Registered", width: 75 },
-    { key: "boat_status", label: "Status", width: 48 },
+    { key: "boat_status", label: "Status", width: 65 },
   ];
 
   drawTableHeader(composer, columns);
@@ -379,7 +379,7 @@ export const buildRegisteredBoatsPdf = async ({
           type: getBoatTypeName(boat),
           owner: getOwnerName(boat.owner),
           date_registered: formatPdfDate(boat.created_at),
-          boat_status: formatStatusLabel(boat.status),
+          boat_status: boat.deleted_at ? "Archived" : formatStatusLabel(boat.status),
         }))
       : [
           {

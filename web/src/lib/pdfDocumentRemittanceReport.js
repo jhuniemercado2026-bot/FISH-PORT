@@ -176,6 +176,38 @@ const drawRightAlignedText = (composer, value, x, columnWidth, y, options = {}) 
   });
 };
 
+const drawFittedText = (composer, value, x, y, columnWidth, options = {}) => {
+  const fontSize = options.fontSize ?? 8;
+  const bold = options.bold ?? false;
+  const font = bold ? composer.boldFont : composer.regularFont;
+  const maxWidth = Math.max(columnWidth - 12, 12);
+  const sourceText = sanitizeText(value) || "-";
+  let text = sourceText;
+
+  if (font.widthOfTextAtSize(text, fontSize) > maxWidth) {
+    const ellipsis = "...";
+    const ellipsisWidth = font.widthOfTextAtSize(ellipsis, fontSize);
+
+    if (ellipsisWidth >= maxWidth) {
+      text = ".";
+    } else {
+      let end = sourceText.length;
+
+      while (end > 0 && font.widthOfTextAtSize(`${sourceText.slice(0, end)}${ellipsis}`, fontSize) > maxWidth) {
+        end -= 1;
+      }
+
+      text = end > 0 ? `${sourceText.slice(0, end)}${ellipsis}` : ellipsis;
+    }
+  }
+
+  composer.drawText(text, x + 6, y, {
+    fontSize,
+    bold,
+    color: options.color ?? COLORS.black,
+  });
+};
+
 const drawTableHeader = (composer, columns) => {
   const headerHeight = 30;
   const headerBottom = composer.cursorY - headerHeight;
@@ -266,9 +298,12 @@ export const buildRemittanceReportPdf = async ({
   yearlyDate,
   preparedBy = "Admin",
   reportData = {},
+  includeCollectionSources = true,
 }) => {
   const composer = await createPdfComposer();
   const reportRows = Array.isArray(reportData.rows) ? reportData.rows : [];
+  const collectionSources = Array.isArray(reportData.collectionSources) ? reportData.collectionSources : [];
+  const remittanceReference = String(reportRows[0]?.remittanceReferenceNo ?? "").trim();
   const totalRemittances = Number(reportData.totalRemittances || 0);
   const totalTodaysCashReceived = Number(reportData.totalTodaysCashReceived || 0);
   const totalSurplus = Number(reportData.totalSurplus || 0);
@@ -286,6 +321,11 @@ export const buildRemittanceReportPdf = async ({
     monthlyYear,
     yearlyDate,
   });
+
+  if (remittanceReference && remittanceReference !== "-") {
+    composer.pdfDoc.setTitle(remittanceReference);
+    composer.pdfDoc.setSubject(`Remittance Report ${remittanceReference}`);
+  }
 
   const headerCardTop = composer.cursorY;
   const headerCardHeight = 82;
@@ -355,12 +395,18 @@ export const buildRemittanceReportPdf = async ({
   const firstRowItems = [
     ["Report Type", reportTypeLabel],
     ["Coverage", reportDateLabel],
-    ["Day", reportDayLabel],
+    ...(filterType === "daily" ? [["Day", reportDayLabel]] : []),
     ["Prepared By", preparedBy],
   ];
   const secondRowItems = [
     ["Municipality", "Opol"],
     ["Region", "X"],
+    ...(["monthly", "yearly"].includes(String(filterType || "").toLowerCase())
+      ? [
+          ["Total Surplus", formatMoney(totalSurplus)],
+          ["Total Deficit", formatMoney(totalDeficit)],
+        ]
+      : []),
     ["Cash Received", formatMoney(totalTodaysCashReceived)],
     ["Total Remittances", formatMoney(totalRemittances)],
   ];
@@ -437,7 +483,7 @@ export const buildRemittanceReportPdf = async ({
         { key: "date", label: "Date", width: 72 },
         { key: "remittanceReferenceNo", label: "Ref. No.", width: 40 },
         { key: "todaysCashReceived", label: ["Today's Cash", "(PHP)"], width: 76 },
-        { key: "confirmedCash", label: ["Confirmed Cash", "(PHP)"], width: 76 },
+        { key: "amountToRemit", label: ["Amount to", "Remit (PHP)"], width: 76 },
         { key: "surplus", label: ["Surplus", "(PHP)"], width: 56 },
         { key: "deficit", label: ["Deficit", "(PHP)"], width: 56 },
         { key: "status", label: "Status", width: 48 },
@@ -446,7 +492,7 @@ export const buildRemittanceReportPdf = async ({
     : [
         { key: "remittanceReferenceNo", label: "Ref. No.", width: 92 },
         { key: "todaysCashReceived", label: ["Today's Cash", "(PHP)"], width: 76 },
-        { key: "confirmedCash", label: ["Confirmed Cash", "(PHP)"], width: 76 },
+        { key: "amountToRemit", label: ["Amount to", "Remit (PHP)"], width: 76 },
         { key: "surplus", label: ["Surplus", "(PHP)"], width: 60 },
         { key: "deficit", label: ["Deficit", "(PHP)"], width: 60 },
         { key: "status", label: "Status", width: 50 },
@@ -464,7 +510,7 @@ export const buildRemittanceReportPdf = async ({
             date: "-",
             remittanceReferenceNo: "-",
             todaysCashReceived: 0,
-            confirmedCash: 0,
+            amountToRemit: 0,
             surplus: 0,
             deficit: 0,
             remarks: "",
@@ -495,8 +541,9 @@ export const buildRemittanceReportPdf = async ({
         });
       }
 
-      if (["todaysCashReceived", "confirmedCash", "surplus", "deficit"].includes(column.key)) {
-        drawRightAlignedText(composer, formatMoneyValue(row[column.key]), x, column.width, composer.cursorY - 15);
+      if (["todaysCashReceived", "amountToRemit", "surplus", "deficit"].includes(column.key)) {
+        const amountValue = column.key === "amountToRemit" ? row.amountToRemit ?? row.confirmedCash : row[column.key];
+        drawRightAlignedText(composer, formatMoneyValue(amountValue), x, column.width, composer.cursorY - 15);
       } else if (column.key === "date") {
         const dateVal = formatPdfDate(row.date);
         composer.drawText(dateVal, x + 6, composer.cursorY - 15, {
@@ -516,7 +563,90 @@ export const buildRemittanceReportPdf = async ({
     composer.cursorY -= detailRowHeight;
   });
 
+  if (includeCollectionSources) {
+    const collectionSourcesHeadingGap = 18;
+    composer.cursorY -= collectionSourcesHeadingGap + 8;
+
+    const sourceRows =
+      collectionSources.length > 0
+        ? collectionSources
+        : [
+            {
+              rowKey: "empty-source",
+              date: "-",
+              transaction: "-",
+              typeName: "-",
+              officialReceiptNo: "-",
+              cashReceived: 0,
+            },
+          ];
+
+    const sourceColumns = [
+      { key: "transaction", label: "Transaction", width: 150 },
+      { key: "typeName", label: ["Boat/Vehicle", "Type"], width: 128 },
+      { key: "officialReceiptNo", label: ["Official", "Receipt No."], width: 126 },
+      { key: "cashReceived", label: ["Cash Received", "(PHP)"], width: CONTENT_WIDTH - 150 - 128 - 126 },
+    ];
+
+    if (composer.cursorY < MARGIN_Y + 110) {
+      composer.addPage();
+    }
+
+    composer.drawText("Collection Sources", MARGIN_X, composer.cursorY, {
+      fontSize: 11,
+      bold: true,
+      color: COLORS.black,
+    });
+    composer.cursorY -= collectionSourcesHeadingGap;
+
+    drawTableHeader(composer, sourceColumns);
+
+    sourceRows.forEach((row) => {
+      if (composer.cursorY - detailRowHeight < MARGIN_Y + 36) {
+        composer.addPage();
+        drawTableHeader(composer, sourceColumns);
+      }
+
+      const rowBottom = composer.cursorY - detailRowHeight;
+      composer.drawRect(MARGIN_X, rowBottom, CONTENT_WIDTH, detailRowHeight, {
+        borderColor: COLORS.black,
+        borderWidth: BORDER_WIDTH,
+      });
+
+      let x = MARGIN_X;
+      sourceColumns.forEach((column, index) => {
+        if (index > 0) {
+          composer.drawRect(x, rowBottom, 1, detailRowHeight, {
+            borderColor: COLORS.black,
+            fillColor: COLORS.black,
+            borderWidth: 0,
+          });
+        }
+
+        if (column.key === "cashReceived") {
+          drawRightAlignedText(composer, formatMoneyValue(row.cashReceived), x, column.width, composer.cursorY - 15);
+        } else if (column.key === "date") {
+          drawFittedText(composer, formatPdfDate(row.date), x, composer.cursorY - 15, column.width);
+        } else if (column.key === "typeName") {
+          drawFittedText(composer, row.typeName, x, composer.cursorY - 15, column.width);
+        } else if (column.key === "officialReceiptNo") {
+          drawFittedText(composer, row.officialReceiptNo, x, composer.cursorY - 15, column.width);
+        } else {
+          drawFittedText(composer, row[column.key], x, composer.cursorY - 15, column.width);
+        }
+
+        x += column.width;
+      });
+
+      composer.cursorY -= detailRowHeight;
+    });
+  }
+
   composer.cursorY -= 12;
+
+  if (composer.cursorY - 24 < MARGIN_Y) {
+    composer.addPage();
+  }
 
   composer.drawRect(MARGIN_X, composer.cursorY - 24, CONTENT_WIDTH, 24, {
     borderColor: COLORS.black,

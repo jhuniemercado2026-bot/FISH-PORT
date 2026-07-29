@@ -16,6 +16,7 @@ use App\Http\Controllers\VehicleTypeController;
 use App\Http\Controllers\VehicleTicketController;
 use App\Http\Controllers\BillController;
 use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\CollectionController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\RemittanceController;
 use App\Http\Controllers\ArchiveController;
@@ -23,12 +24,14 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\UniversalSearchController;
 use App\Http\Controllers\RevenueReportController;
 use App\Http\Controllers\RemittanceReportController;
+use App\Http\Controllers\BillingReportController;
 use App\Http\Controllers\BanyeraReportController;
 use App\Http\Controllers\BfarReportController;
 use App\Http\Controllers\VehicleTicketReportController;
 use App\Http\Controllers\RegisteredBoatsReportController;
 use App\Http\Controllers\OwnerInfoReportController;
 use App\Http\Controllers\DockingReportController;
+use App\Http\Controllers\BackupRecoveryController;
 
 /*
 |--------------------------------------------------------------------------
@@ -51,6 +54,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('me/password/send-code', [UserController::class, 'sendAuthenticatedPasswordChangeCode']);
     Route::post('me/password/verify-code', [UserController::class, 'verifyAuthenticatedPasswordChangeCode']);
     Route::get('dashboard-data', [DashboardController::class, 'index']);
+    Route::put('dashboard-monthly-target', [DashboardController::class, 'saveMonthlyTarget']);
+    Route::put('dashboard-yearly-target', [DashboardController::class, 'saveYearlyTarget']);
     Route::get('universal-search', [UniversalSearchController::class, 'index']);
     Route::get('boat-management', [BoatManagementController::class, 'index']);
 
@@ -64,6 +69,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('transaction-lock', [\App\Http\Controllers\TransactionLockController::class, 'index']);
     Route::patch('notifications/{id}/read', [NotificationController::class, 'markRead']);
         Route::get('notifications/summary', [NotificationController::class, 'summary']);
+
+    Route::prefix('database')->group(function () {
+        Route::get('backup', [BackupRecoveryController::class, 'download']);
+        Route::post('recover', [BackupRecoveryController::class, 'recover']);
+    });
 
     /*
     |----------------------------------------------------------------------
@@ -124,8 +134,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/',             [FeeController::class, 'store']);
         Route::get('{id}',           [FeeController::class, 'show']);
         Route::put('{id}',           [FeeController::class, 'update']);
-        Route::patch('{id}/archive', [FeeController::class, 'destroy']);
-        Route::patch('{id}/restore', [FeeController::class, 'restore']);
     });
 
     Route::prefix('vehicle-tickets')->group(function () {
@@ -153,7 +161,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('{id}', [BillController::class, 'update'])->middleware('transactions.unlocked');
         Route::patch('{id}/archive', [BillController::class, 'destroy'])->middleware('transactions.unlocked');
     });
-    Route::get('statement-of-account', [BillController::class, 'statementOfAccount']);
+    Route::get('boat-statement', [BillController::class, 'boatStatement']);
+    Route::get('owner-statement', [BillController::class, 'ownerStatement']);
 
     Route::prefix('payments')->group(function () {
         Route::get('/', [PaymentController::class, 'index']);
@@ -161,6 +170,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('{id}', [PaymentController::class, 'show']);
         Route::put('{id}', [PaymentController::class, 'update'])->middleware('transactions.unlocked');
     });
+    Route::get('collections', [CollectionController::class, 'index']);
 
     Route::prefix('remittances')->group(function () {
         Route::get('today-system-cash-received', [RemittanceController::class, 'todaySystemCashReceived']);
@@ -185,6 +195,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('daily', [RemittanceReportController::class, 'daily']);
         Route::get('monthly', [RemittanceReportController::class, 'monthly']);
         Route::get('yearly', [RemittanceReportController::class, 'yearly']);
+    });
+    Route::prefix('billing-reports')->group(function () {
+        Route::get('daily', [BillingReportController::class, 'daily']);
+        Route::get('monthly', [BillingReportController::class, 'monthly']);
+        Route::get('yearly', [BillingReportController::class, 'yearly']);
     });
     Route::prefix('banyera-reports')->group(function () {
         Route::get('daily', [BanyeraReportController::class, 'daily']);

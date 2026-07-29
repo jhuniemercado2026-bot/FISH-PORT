@@ -81,6 +81,7 @@ export default function DatePicker({
   mode = "single",
   dateFormat = "YYYY-MM-DD",
   disabled = false,
+  readOnly = false,
   options,
   containerClassName = "w-full max-w-md",
   labelClassName = "mb-2.5 block text-sm font-medium text-gray-700 dark:text-white",
@@ -168,6 +169,7 @@ export default function DatePicker({
   const commonProps = {
     id: inputId,
     disabled,
+    inputReadOnly: readOnly,
     size: "middle",
     className: mergedClassName,
     popupClassName,
@@ -182,23 +184,30 @@ export default function DatePicker({
 
   const currentYearStart = dayjs().startOf("year");
   const currentYearEnd = dayjs().endOf("year");
+  const shouldClampToCurrentYear = options?.disableCurrentYearClamp !== true;
 
   const minDate = options?.minDate
     ? dayjs(String(options.minDate), dateFormat)
-    : currentYearStart;
+    : shouldClampToCurrentYear
+      ? currentYearStart
+      : null;
   const maxDate = options?.maxDate === "today"
     ? dayjs()
     : options?.maxDate
       ? dayjs(String(options.maxDate), dateFormat)
-      : currentYearEnd;
+      : shouldClampToCurrentYear
+        ? currentYearEnd
+        : null;
 
-  const effectiveMinDate = minDate.isBefore(currentYearStart) ? currentYearStart : minDate;
-  const effectiveMaxDate = maxDate.isAfter(currentYearEnd) ? currentYearEnd : maxDate;
+  const effectiveMinDate =
+    shouldClampToCurrentYear && minDate?.isBefore(currentYearStart) ? currentYearStart : minDate;
+  const effectiveMaxDate =
+    shouldClampToCurrentYear && maxDate?.isAfter(currentYearEnd) ? currentYearEnd : maxDate;
 
   const disabledDate = (current) => {
     if (!current) return false;
-    if (effectiveMinDate && current.isBefore(effectiveMinDate, "day")) return true;
-    if (effectiveMaxDate && current.isAfter(effectiveMaxDate, "day")) return true;
+    if (effectiveMinDate?.isValid?.() && current.isBefore(effectiveMinDate, "day")) return true;
+    if (effectiveMaxDate?.isValid?.() && current.isAfter(effectiveMaxDate, "day")) return true;
     return false;
   };
 

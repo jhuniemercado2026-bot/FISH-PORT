@@ -227,6 +227,13 @@ type TicketFeeItem = {
   row_type: "daily" | "banyera";
 };
 
+type TransactionLockState = {
+  is_locked?: boolean | null;
+  message?: string | null;
+  unlock_at?: string | null;
+  remittance_reference_no?: string | null;
+};
+
 function getFeeName(fee?: FeeOption | null) {
   return String(
     fee?.feeType?.fee_name ??
@@ -534,6 +541,7 @@ export default function AddTransactionScreen() {
   >({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [transactionLock, setTransactionLock] = useState<TransactionLockState | null>(null);
   const ticketDateValue = buildDateObjectFromParts(
     ticketYear,
     ticketMonth,
@@ -544,6 +552,39 @@ export default function AddTransactionScreen() {
     banyeraMonth,
     banyeraDay
   );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadTransactionLockState() {
+      if (!authToken) {
+        setTransactionLock(null);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/transaction-lock`, {
+          headers: buildApiHeaders(authToken),
+        });
+        const json = await response.json().catch(() => null);
+        const lock = json?.transaction_lock;
+
+        if (lock && (lock.is_locked || lock.message)) {
+          setTransactionLock(lock);
+        } else {
+          setTransactionLock(null);
+        }
+      } catch {
+        setTransactionLock(null);
+      }
+    }
+
+    loadTransactionLockState();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authToken]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1120,6 +1161,12 @@ export default function AddTransactionScreen() {
   }
 
   async function handleSave() {
+    if (transactionLock?.is_locked) {
+      setFormError(transactionLock.message || "Transactions are view-only at the moment.");
+      showToast("error", transactionLock.message || "Transactions are view-only at the moment.");
+      return;
+    }
+
     setFormError("");
 
     setIsSubmitting(true);
@@ -2298,11 +2345,22 @@ export default function AddTransactionScreen() {
               </>
             ) : null}
 
+            {transactionLock?.is_locked ? (
+              <View className="mt-4 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3">
+                <View className="flex-row items-center">
+                  <Ionicons name="lock-closed-outline" size={16} color="#DC2626" />
+                  <Text className="ml-2 flex-1 text-[12px] leading-4 text-[#991B1B]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    {transactionLock.message || "Transactions are view-only at the moment."}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
             <Pressable
               className={`mt-6 h-14 items-center justify-center rounded-[10px] ${
-                isSubmitting ? "bg-[#46506E]" : "bg-[#1A1F36]"
+                isSubmitting || transactionLock?.is_locked ? "bg-[#46506E]" : "bg-[#1A1F36]"
               }`}
-              disabled={isSubmitting}
+              disabled={isSubmitting || Boolean(transactionLock?.is_locked)}
               onPress={handleSave}
             >
               {isSubmitting ? (

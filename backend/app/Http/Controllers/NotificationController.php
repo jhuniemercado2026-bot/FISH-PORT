@@ -100,7 +100,7 @@ class NotificationController extends Controller
             }
         }
 
-        $query->latest('created_at');
+        $query->orderByDesc('created_at')->orderByDesc('notification_id');
 
         if ($request->boolean('all')) {
             $notifications = $query->get();

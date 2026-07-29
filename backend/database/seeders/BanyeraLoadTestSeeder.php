@@ -90,10 +90,18 @@ class BanyeraLoadTestSeeder extends Seeder
             'Bangus',
             'Galunggong',
             'Bisugo',
-        ])->map(fn (string $name) => FishClassification::firstOrCreate(
-            ['classification_name' => $name],
-            ['created_by' => $user->user_id]
-        ))->values();
+        ])->map(function (string $name) use ($user) {
+            $classification = FishClassification::withTrashed()->firstOrCreate(
+                ['classification_name' => $name],
+                ['created_by' => $user->user_id]
+            );
+
+            if ($classification->trashed()) {
+                $classification->restore();
+            }
+
+            return $classification;
+        })->values();
 
         $this->call(BoatLoadTestSeeder::class);
 

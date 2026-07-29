@@ -22,6 +22,11 @@ class BanyeraTransactionController extends Controller
 {
     private ?bool $banyeraItemsHasDaugColumn = null;
 
+    private function manilaNow(): Carbon
+    {
+        return Carbon::now('Asia/Manila');
+    }
+
     private function banyeraItemsHasDaugColumn(): bool
     {
         if ($this->banyeraItemsHasDaugColumn === null) {
@@ -50,7 +55,7 @@ class BanyeraTransactionController extends Controller
 
     private function normalizeBanyeraItemPayload(array $items): array
     {
-        $feeAmounts = Fee::withTrashed()
+        $feeAmounts = Fee::query()
             ->whereIn('fee_id', collect($items)->pluck('fee_id')->filter()->unique()->values())
             ->pluck('amount', 'fee_id');
 
@@ -410,7 +415,8 @@ class BanyeraTransactionController extends Controller
         $status = (string) $request->query('status', 'all');
 
         $summaryQuery = (clone $query);
-        $summaryTotal = $summaryQuery->count();
+        $summaryActiveTotal = (clone $summaryQuery)->count();
+        $summaryTotal = FishClassification::withTrashed()->count();
         $summaryUsed = (clone $summaryQuery)
             ->whereHas('banyeraItems', function ($qi) use ($fiscalYear) {
                 $qi->whereHas('transaction', function ($t) use ($fiscalYear) {
@@ -421,7 +427,7 @@ class BanyeraTransactionController extends Controller
                 });
             })
             ->count();
-        $summaryUnused = max(0, $summaryTotal - $summaryUsed);
+        $summaryUnused = max(0, $summaryActiveTotal - $summaryUsed);
 
         if ($search !== '') {
             $query->where('classification_name', 'like', "{$search}%");
@@ -552,15 +558,7 @@ class BanyeraTransactionController extends Controller
 
     public function destroyClassification($id)
     {
-        $classification = FishClassification::query()
-            ->withCount('activeBanyeraItems as fish_using_count')
-            ->findOrFail($id);
-
-        if (($classification->fish_using_count ?? 0) > 0) {
-            return response()->json([
-                'message' => 'This fish classification has usage count and cannot be archived.',
-            ], 422);
-        }
+        $classification = FishClassification::query()->findOrFail($id);
 
         $classificationName = $classification->classification_name;
         $classification->delete();
@@ -624,7 +622,11 @@ class BanyeraTransactionController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'boat_id' => 'required|integer|exists:boats,boat_id',
+            'boat_id' => [
+                'required',
+                'integer',
+                Rule::exists('boats', 'boat_id')->whereNull('deleted_at'),
+            ],
             'transaction_date' => 'nullable|date',
             'items' => 'nullable|array',
             'items.*.classification_id' => 'required|integer|exists:fish_classifications,classification_id',
@@ -634,7 +636,9 @@ class BanyeraTransactionController extends Controller
             'items.*.daug' => 'nullable|numeric|min:0',
         ]);
 
-        if ($this->banyeraDateIsInFuture($validated['transaction_date'] ?? now())) {
+        $transactionDate = $validated['transaction_date'] ?? $this->manilaNow()->format('Y-m-d H:i:s');
+
+        if ($this->banyeraDateIsInFuture($transactionDate)) {
             return response()->json([
                 'message' => 'Banyera date cannot be in the future.',
                 'errors' => [
@@ -652,19 +656,19 @@ class BanyeraTransactionController extends Controller
             ], 422);
         }
 
-        if ($this->banyeraExistsForBoatOnDate($validated['boat_id'], $validated['transaction_date'] ?? now())) {
+        if ($this->banyeraExistsForBoatOnDate($validated['boat_id'], $transactionDate)) {
             return response()->json([
                 'message' => 'A banyera record already exists for this boat on this date.',
             ], 422);
         }
 
-        $transaction = DB::transaction(function () use ($validated) {
+        $transaction = DB::transaction(function () use ($validated, $transactionDate) {
             $itemPayload = $this->normalizeBanyeraItemPayload($validated['items'] ?? []);
             $totalFee = $this->calculateBanyeraItemsTotal($itemPayload);
 
             $transaction = BanyeraTransaction::create([
                 'boat_id' => $validated['boat_id'],
-                'transaction_date' => $validated['transaction_date'] ?? now(),
+                'transaction_date' => $transactionDate,
                 'total_fee' => $totalFee,
                 'created_by' => Auth::id(),
             ]);
@@ -772,7 +776,9 @@ class BanyeraTransactionController extends Controller
             ], 422);
         }
 
-        if (!$this->resolveActiveBoatForBanyera((int) $validated['boat_id'])) {
+        $boatIdChanged = $transaction->boat_id != $validated['boat_id'];
+
+        if ($boatIdChanged && !$this->resolveActiveBoatForBanyera((int) $validated['boat_id'])) {
             return response()->json([
                 'message' => 'Only active boats can be used for Banyera transactions.',
                 'errors' => [
@@ -781,7 +787,6 @@ class BanyeraTransactionController extends Controller
             ], 422);
         }
 
-        $boatIdChanged = $transaction->boat_id != $validated['boat_id'];
         $dateChanged = Carbon::parse($transaction->transaction_date)->toDateString() !== Carbon::parse($validated['transaction_date'] ?? $transaction->transaction_date)->toDateString();
 
         if (
@@ -882,7 +887,7 @@ class BanyeraTransactionController extends Controller
 
         $transaction->update([
             'void_reason' => trim($validated['void_reason']),
-            'voided_at' => now(),
+            'voided_at' => $this->manilaNow(),
             'voided_by' => Auth::id(),
         ]);
 

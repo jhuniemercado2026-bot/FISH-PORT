@@ -7,10 +7,11 @@ import {
   IoCalendarOutline,
   IoCashOutline,
   IoCarSharp,
+  IoChevronBackOutline,
   IoChevronDownOutline,
+  IoChevronForwardOutline,
   IoChevronUpOutline,
   IoDocumentTextOutline,
-  IoEllipsisHorizontalOutline,
   IoFishSharp,
 } from "react-icons/io5";
 import ReactApexChart from "react-apexcharts";
@@ -18,6 +19,7 @@ import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
 import Modal, { ModalTextInput } from "../../components/Modal";
 import TitlePage from "../../components/TitlePage";
+import api from "../../api/axios";
 import { useSidebar } from "../../store/sidebarStore";
 import { useDashboardDataQuery } from "../../hooks/useDashboardDataQuery";
 import { useFiscalYearStore, getFiscalYearOptions } from "../../store/fiscalYearStore";
@@ -97,6 +99,14 @@ const BILL_STATUS_CONFIG = [
   { key: "partial", name: "Partial", color: "#5b7ff5" },
   { key: "unpaid", name: "Unpaid", color: "#c5d3fc" },
 ];
+
+const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
+  index,
+  long: new Date(2000, index, 1).toLocaleString("en-PH", { month: "long" }),
+  short: new Date(2000, index, 1).toLocaleString("en-PH", { month: "short" }),
+}));
+
+const getMonthlyTargetKey = (year, monthIndex) => `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
 
 const getFishItemsLabel = (record) => {
   const seen = new Set();
@@ -329,16 +339,18 @@ const Dashboard = () => {
   const showInitialSkeleton = !data && isLoading;
 
   // Monthly Target state
-  const [monthlyTarget, setMonthlyTarget] = useState(() => {
-    if (typeof window === "undefined") return 0;
-    const savedTarget = window.localStorage.getItem("dashboardMonthlyTarget");
-    const parsedTarget = Number(savedTarget);
-    return Number.isFinite(parsedTarget) && parsedTarget >= 0 ? parsedTarget : 0;
-  });
+  const [monthlyTargets, setMonthlyTargets] = useState({});
+  const [yearlyTargets, setYearlyTargets] = useState({});
   const [targetModalOpen, setTargetModalOpen] = useState(false);
   const [targetDropdownOpen, setTargetDropdownOpen] = useState(false);
   const [targetInput, setTargetInput] = useState("");
   const [targetError, setTargetError] = useState("");
+  const [yearlyTargetModalOpen, setYearlyTargetModalOpen] = useState(false);
+  const [yearlyTargetDropdownOpen, setYearlyTargetDropdownOpen] = useState(false);
+  const [yearlyTargetInput, setYearlyTargetInput] = useState("");
+  const [yearlyTargetError, setYearlyTargetError] = useState("");
+  const [selectedTargetMonthIndex, setSelectedTargetMonthIndex] = useState(() => new Date().getMonth());
+  const [selectedYearlyTargetYear, setSelectedYearlyTargetYear] = useState(fiscalYear);
   const [activeCashMonthIndex, setActiveCashMonthIndex] = useState(null);
   const [activeReceivableMonthIndex, setActiveReceivableMonthIndex] = useState(null);
 
@@ -369,19 +381,39 @@ const Dashboard = () => {
   }, [targetDropdownOpen]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("dashboardMonthlyTarget", String(monthlyTarget));
-  }, [monthlyTarget]);
+    setMonthlyTargets(data?.monthlyTargets ?? {});
+    setYearlyTargets(data?.yearlyTargets ?? {});
+  }, [data?.monthlyTargets, data?.yearlyTargets]);
+
+  useEffect(() => {
+    if (!yearlyTargetDropdownOpen) return;
+    const handler = (e) => {
+      if (!e.target.closest("[data-yearly-target-dropdown]")) setYearlyTargetDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [yearlyTargetDropdownOpen]);
 
   useEffect(() => {
     setSelectedYear(fiscalYear);
+    setSelectedYearlyTargetYear(fiscalYear);
   }, [fiscalYear]);
+
+  useEffect(() => {
+    setSelectedYearlyTargetYear(selectedYear);
+  }, [selectedYear]);
 
   useEffect(() => {
     if (!targetModalOpen) {
       setTargetError("");
     }
   }, [targetModalOpen]);
+
+  useEffect(() => {
+    if (!yearlyTargetModalOpen) {
+      setYearlyTargetError("");
+    }
+  }, [yearlyTargetModalOpen]);
 
   useEffect(() => {
     setActiveCashMonthIndex(null);
@@ -637,21 +669,6 @@ const Dashboard = () => {
 
     let totalRevenue = 0;
     let previousYearRevenue = 0;
-    let currentMonthRevenue = 0;
-    let todayRevenue = 0;
-    const now = new Date();
-    const currentMonthIndex = now.getMonth();
-    const currentDate = now.getDate();
-    const currentYear = now.getFullYear();
-    const getRawDateParts = (value) => {
-      const raw = String(value || "").slice(0, 10);
-      const [year, month, day] = raw.split("-");
-      const parsedYear = Number(year);
-      const parsedMonth = Number(month);
-      const parsedDay = Number(day);
-      if (!parsedYear || !parsedMonth || !parsedDay) return null;
-      return { year: parsedYear, monthIndex: parsedMonth - 1, day: parsedDay };
-    };
 
     // Add payments (bills-based) to revenue
     payments.forEach((payment) => {
@@ -662,16 +679,6 @@ const Dashboard = () => {
       if (parsedDate.getFullYear() === selectedYearNumber) {
         baseMonths[parsedDate.getMonth()].revenue += amount;
         totalRevenue += amount;
-        if (parsedDate.getMonth() === currentMonthIndex) {
-          currentMonthRevenue += amount;
-        }
-        if (
-          selectedYearNumber === currentYear &&
-          parsedDate.getMonth() === currentMonthIndex &&
-          parsedDate.getDate() === currentDate
-        ) {
-          todayRevenue += amount;
-        }
       } else if (parsedDate.getFullYear() === previousYearNumber) {
         previousYearRevenue += amount;
       }
@@ -685,16 +692,6 @@ const Dashboard = () => {
       if (parsedDate.getFullYear() === selectedYearNumber) {
         baseMonths[parsedDate.getMonth()].revenue += amount;
         totalRevenue += amount;
-        if (parsedDate.getMonth() === currentMonthIndex) {
-          currentMonthRevenue += amount;
-        }
-        if (
-          selectedYearNumber === currentYear &&
-          parsedDate.getMonth() === currentMonthIndex &&
-          parsedDate.getDate() === currentDate
-        ) {
-          todayRevenue += amount;
-        }
       } else if (parsedDate.getFullYear() === previousYearNumber) {
         previousYearRevenue += amount;
       }
@@ -715,51 +712,6 @@ const Dashboard = () => {
         0,
       );
     };
-
-    currentMonthRevenue = 0;
-    todayRevenue = 0;
-
-    dockings.forEach((docking) => {
-      const dateParts = getRawDateParts(docking?.docking_date || docking?.created_at);
-      if (!dateParts || dateParts.year !== selectedYearNumber) return;
-      const amount = Number(docking?.docking_fee ?? 0);
-      if (dateParts.monthIndex === currentMonthIndex) currentMonthRevenue += amount;
-      if (
-        selectedYearNumber === currentYear &&
-        dateParts.monthIndex === currentMonthIndex &&
-        dateParts.day === currentDate
-      ) {
-        todayRevenue += amount;
-      }
-    });
-
-    banyeraTransactions.forEach((transaction) => {
-      const dateParts = getRawDateParts(transaction?.transaction_date || transaction?.created_at);
-      if (!dateParts || dateParts.year !== selectedYearNumber) return;
-      const amount = getBanyeraTransactionTotal(transaction);
-      if (dateParts.monthIndex === currentMonthIndex) currentMonthRevenue += amount;
-      if (
-        selectedYearNumber === currentYear &&
-        dateParts.monthIndex === currentMonthIndex &&
-        dateParts.day === currentDate
-      ) {
-        todayRevenue += amount;
-      }
-    });
-
-    vehicleTickets.forEach((ticket) => {
-      const dateParts = getRawDateParts(ticket?.ticket_date || ticket?.issued_at || ticket?.created_at);
-      if (!dateParts || dateParts.year !== selectedYearNumber) return;
-      const amount = Number(ticket?.ticket_fee || 0);
-      if (dateParts.monthIndex === currentMonthIndex) currentMonthRevenue += amount;
-      if (
-        selectedYearNumber === currentYear &&
-        dateParts.monthIndex === currentMonthIndex &&
-        dateParts.day === currentDate
-      ) {
-        todayRevenue += amount;
-      }
-    });
 
     // Calculate outstanding per month
     const bills = data?.bills ?? [];
@@ -837,19 +789,169 @@ const Dashboard = () => {
       chart: baseMonths,
       totalRevenue,
       totalOutstanding: totalReceivables,
-      currentMonthRevenue,
-      todayRevenue,
       percentChange,
       hasPreviousYear: previousYearRevenue > 0,
     };
   }, [data, selectedYear]);
 
+  const monthlyTargetRevenueData = useMemo(() => {
+    const selectedYearNumber = Number(selectedYear);
+    const now = new Date();
+    const currentDate = now.getDate();
+    const currentYear = now.getFullYear();
+    let selectedMonthRevenue = 0;
+    let todayRevenue = 0;
+
+    const getRawDateParts = (value) => {
+      const raw = String(value || "").slice(0, 10);
+      const [year, month, day] = raw.split("-");
+      const parsedYear = Number(year);
+      const parsedMonth = Number(month);
+      const parsedDay = Number(day);
+      if (!parsedYear || !parsedMonth || !parsedDay) return null;
+      return { year: parsedYear, monthIndex: parsedMonth - 1, day: parsedDay };
+    };
+
+    const getBanyeraTransactionTotal = (transaction) => {
+      const storedTotal = Number(transaction?.total_fee ?? 0);
+      if (storedTotal > 0) return storedTotal;
+      return (transaction?.items ?? []).reduce(
+        (sum, item) => sum + Number(item?.subtotal ?? 0),
+        0,
+      );
+    };
+
+    const addTargetRevenue = (dateValue, amount) => {
+      const dateParts = getRawDateParts(dateValue);
+      if (!dateParts || dateParts.year !== selectedYearNumber) return;
+      if (dateParts.monthIndex !== selectedTargetMonthIndex) return;
+      selectedMonthRevenue += amount;
+      if (selectedYearNumber === currentYear && dateParts.day === currentDate) {
+        todayRevenue += amount;
+      }
+    };
+
+    (data?.dockings ?? []).forEach((docking) => {
+      addTargetRevenue(
+        docking?.docking_date || docking?.created_at,
+        Number(docking?.docking_fee ?? 0),
+      );
+    });
+
+    (data?.banyeraTransactions ?? []).forEach((transaction) => {
+      addTargetRevenue(
+        transaction?.transaction_date || transaction?.created_at,
+        getBanyeraTransactionTotal(transaction),
+      );
+    });
+
+    (data?.vehicleTickets ?? [])
+      .filter(
+        (ticket) =>
+          !Boolean(ticket?.is_voided || ticket?.voided_at) &&
+          String(ticket?.status || "").toLowerCase() !== "voided",
+      )
+      .forEach((ticket) => {
+        addTargetRevenue(
+          ticket?.ticket_date || ticket?.issued_at || ticket?.created_at,
+          Number(ticket?.ticket_fee || 0),
+        );
+      });
+
+    return { selectedMonthRevenue, todayRevenue };
+  }, [data, selectedTargetMonthIndex, selectedYear]);
+
   // Monthly target gauge — revenue now includes tickets
-  const monthlyRevenue = cashflowData.currentMonthRevenue;
-  const todayRevenue = cashflowData.todayRevenue;
+  const selectedTargetMonth = MONTH_OPTIONS[selectedTargetMonthIndex] ?? MONTH_OPTIONS[0];
+  const selectedTargetKey = getMonthlyTargetKey(selectedYear, selectedTargetMonthIndex);
+  const monthlyTarget = Number(monthlyTargets[selectedTargetKey] ?? 0);
+  const monthlyRevenue = monthlyTargetRevenueData.selectedMonthRevenue;
+  const todayRevenue = monthlyTargetRevenueData.todayRevenue;
   const monthlyTargetProgress =
     monthlyTarget > 0 ? (monthlyRevenue / monthlyTarget) * 100 : 0;
   const monthlyTargetFill = Math.min(Math.max(monthlyTargetProgress, 0), 100);
+  const yearlyTarget = Number(yearlyTargets[String(selectedYearlyTargetYear)] ?? 0);
+  const yearlyRevenue = useMemo(() => {
+    const selectedYearNumber = Number(selectedYearlyTargetYear);
+    const dockings = data?.dockings ?? [];
+    const banyeraTransactions = data?.banyeraTransactions ?? [];
+    const vehicleTickets = (data?.vehicleTickets ?? []).filter(
+      (ticket) =>
+        !Boolean(ticket?.is_voided || ticket?.voided_at) &&
+        String(ticket?.status || "").toLowerCase() !== "voided",
+    );
+
+    const getYear = (value) => {
+      const parsedDate = new Date(value || 0);
+      return Number.isNaN(parsedDate.getTime()) ? null : parsedDate.getFullYear();
+    };
+
+    const getBanyeraTransactionTotal = (transaction) => {
+      const storedTotal = Number(transaction?.total_fee ?? 0);
+      if (storedTotal > 0) return storedTotal;
+      return (transaction?.items ?? []).reduce(
+        (sum, item) => sum + Number(item?.subtotal ?? 0),
+        0,
+      );
+    };
+
+    const dockingRevenue = dockings.reduce((sum, docking) => {
+      const year = getYear(docking?.docking_date || docking?.created_at);
+      return year === selectedYearNumber ? sum + Number(docking?.docking_fee ?? 0) : sum;
+    }, 0);
+
+    const banyeraRevenue = banyeraTransactions.reduce((sum, transaction) => {
+      const year = getYear(transaction?.transaction_date || transaction?.created_at);
+      return year === selectedYearNumber ? sum + getBanyeraTransactionTotal(transaction) : sum;
+    }, 0);
+
+    const ticketRevenue = vehicleTickets.reduce((sum, ticket) => {
+      const year = getYear(ticket?.ticket_date || ticket?.issued_at || ticket?.created_at);
+      return year === selectedYearNumber ? sum + Number(ticket?.ticket_fee || 0) : sum;
+    }, 0);
+
+    return dockingRevenue + banyeraRevenue + ticketRevenue;
+  }, [data, selectedYearlyTargetYear]);
+  const yearlyTargetProgress = yearlyTarget > 0 ? (yearlyRevenue / yearlyTarget) * 100 : 0;
+  const yearlyTargetFill = Math.min(Math.max(yearlyTargetProgress, 0), 100);
+  const isFirstTargetMonth = selectedTargetMonthIndex <= 0;
+  const isLastTargetMonth = selectedTargetMonthIndex >= MONTH_OPTIONS.length - 1;
+  const selectedYearlyTargetYearIndex = yearOptions.findIndex(
+    (year) => Number(year) === Number(selectedYearlyTargetYear),
+  );
+  const isFirstYearlyTargetYear = selectedYearlyTargetYearIndex <= 0;
+  const isLastYearlyTargetYear =
+    selectedYearlyTargetYearIndex < 0 || selectedYearlyTargetYearIndex >= yearOptions.length - 1;
+
+  const cashReceivedSeries = useMemo(
+    () => [
+      {
+        name: "Cash Received",
+        data: cashflowData.chart.map((item) => item.revenue),
+      },
+    ],
+    [cashflowData.chart],
+  );
+
+  const receivablesSeries = useMemo(
+    () => [
+      {
+        name: "Receivables",
+        data: cashflowData.chart.map((item) => item.outstanding),
+      },
+    ],
+    [cashflowData.chart],
+  );
+
+  const monthlyFishCatchSeries = useMemo(
+    () => [
+      {
+        name: "Fish Catches",
+        data: monthlyFishCatches.map((item) => item.catches),
+      },
+    ],
+    [monthlyFishCatches],
+  );
 
   const monthlyTargetChartOptions = useMemo(
     () => ({
@@ -1445,6 +1547,16 @@ const Dashboard = () => {
     }));
   }, [data]);
 
+  const yearlyRevenueSeries = useMemo(
+    () => [
+      {
+        name: "Revenue",
+        data: yearlyRevenueData.map((item) => item.revenue),
+      },
+    ],
+    [yearlyRevenueData],
+  );
+
   const yearlyRevenueChartOptions = useMemo(
     () => ({
       chart: {
@@ -1538,6 +1650,55 @@ const Dashboard = () => {
     [yearlyRevenueData],
   );
 
+  const openTargetModalForMonth = (monthIndex) => {
+    const nextMonthIndex = Math.min(Math.max(Number(monthIndex) || 0, 0), 11);
+    const targetKey = getMonthlyTargetKey(selectedYear, nextMonthIndex);
+    const savedTarget = monthlyTargets[targetKey];
+    setSelectedTargetMonthIndex(nextMonthIndex);
+    setTargetInput(savedTarget === undefined || savedTarget === null ? "" : String(Number(savedTarget)));
+    setTargetError("");
+    setTargetModalOpen(true);
+    setTargetDropdownOpen(false);
+  };
+
+  const showPreviousTargetMonth = () => {
+    setSelectedTargetMonthIndex((current) => (current <= 0 ? current : current - 1));
+    setTargetDropdownOpen(false);
+  };
+
+  const showNextTargetMonth = () => {
+    setSelectedTargetMonthIndex((current) => (current >= MONTH_OPTIONS.length - 1 ? current : current + 1));
+    setTargetDropdownOpen(false);
+  };
+
+  const openYearlyTargetModalForYear = (year) => {
+    const nextYear = Number(year) || new Date().getFullYear();
+    const savedTarget = yearlyTargets[String(nextYear)];
+    setSelectedYearlyTargetYear(nextYear);
+    setYearlyTargetInput(savedTarget === undefined || savedTarget === null ? "" : String(Number(savedTarget)));
+    setYearlyTargetError("");
+    setYearlyTargetModalOpen(true);
+    setYearlyTargetDropdownOpen(false);
+  };
+
+  const showPreviousTargetYear = () => {
+    setSelectedYearlyTargetYear((current) => {
+      const currentIndex = yearOptions.findIndex((year) => Number(year) === Number(current));
+      if (currentIndex <= 0) return current;
+      return yearOptions[currentIndex - 1];
+    });
+    setYearlyTargetDropdownOpen(false);
+  };
+
+  const showNextTargetYear = () => {
+    setSelectedYearlyTargetYear((current) => {
+      const currentIndex = yearOptions.findIndex((year) => Number(year) === Number(current));
+      if (currentIndex < 0 || currentIndex >= yearOptions.length - 1) return current;
+      return yearOptions[currentIndex + 1];
+    });
+    setYearlyTargetDropdownOpen(false);
+  };
+
   const handleSaveMonthlyTarget = async () => {
     const trimmedValue = String(targetInput ?? "").trim();
     if (!trimmedValue) {
@@ -1549,10 +1710,46 @@ const Dashboard = () => {
       setTargetError("Enter a valid target amount of 0 or higher.");
       return;
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 2000));
-    setMonthlyTarget(numericValue);
+    const response = await api.put("/dashboard-monthly-target", {
+      year: Number(selectedYear),
+      month: selectedTargetMonthIndex + 1,
+      amount: numericValue,
+    });
+    const savedTarget = response.data?.target;
+    const targetKey = savedTarget?.key || selectedTargetKey;
+    const targetAmount = Number(savedTarget?.amount ?? numericValue);
+    setMonthlyTargets((current) => ({
+      ...current,
+      [targetKey]: targetAmount,
+    }));
     setTargetError("");
     setTargetModalOpen(false);
+  };
+
+  const handleSaveYearlyTarget = async () => {
+    const trimmedValue = String(yearlyTargetInput ?? "").trim();
+    if (!trimmedValue) {
+      setYearlyTargetError("Yearly target amount is required.");
+      return;
+    }
+    const numericValue = Number(trimmedValue);
+    if (!Number.isFinite(numericValue) || numericValue < 0) {
+      setYearlyTargetError("Enter a valid target amount of 0 or higher.");
+      return;
+    }
+    const response = await api.put("/dashboard-yearly-target", {
+      year: Number(selectedYearlyTargetYear),
+      amount: numericValue,
+    });
+    const savedTarget = response.data?.target;
+    const targetKey = savedTarget?.key || String(selectedYearlyTargetYear);
+    const targetAmount = Number(savedTarget?.amount ?? numericValue);
+    setYearlyTargets((current) => ({
+      ...current,
+      [targetKey]: targetAmount,
+    }));
+    setYearlyTargetError("");
+    setYearlyTargetModalOpen(false);
   };
 
   return (
@@ -1639,8 +1836,12 @@ const Dashboard = () => {
             <div className="mb-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {STATS.map((card) => (
                 <StatCard
-                  key={card.label}
-                  {...card}
+                  key={card.key}
+                  label={card.label}
+                  icon={card.icon}
+                  iconBg={card.iconBg}
+                  iconColor={card.iconColor}
+                  valuePrefix={card.valuePrefix}
                   value={
                     card.key === "boats"
                       ? boatsRegistered
@@ -1665,14 +1866,29 @@ const Dashboard = () => {
             {/* Revenue + Bill Status + Monthly Target */}
             <div className="mb-6 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.5fr)_390px]">
               <div className="order-2">
-                <section className="ml-auto w-full max-w-[390px] rounded-[10px] border border-slate-200 bg-white px-4 py-3">
+                <section className="ml-auto w-full max-w-[390px] rounded-[10px] border border-slate-200 bg-white px-4 pb-3 pt-3">
                   {showInitialSkeleton ? (
-                    <div className="pb-5">
-                      <SkeletonBlock className="mx-auto mt-2 h-[16px] w-32" />
-                      <div className="mx-auto mt-6 h-[132px] w-[264px] animate-pulse rounded-t-full bg-slate-200" />
-                      <div className="mt-4 overflow-hidden rounded-[10px] border border-slate-200">
-                        {Array.from({ length: 3 }).map((_, index) => (
-                          <div key={`monthly-target-skeleton-${index}`} className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          <SkeletonBlock className="h-8 w-8 rounded-lg border border-slate-200" />
+                          <SkeletonBlock className="h-8 w-8 rounded-lg border border-slate-200" />
+                        </div>
+                        <div className="min-w-0 flex-1 pt-0.5">
+                          <SkeletonBlock className="mx-auto h-[14px] w-24" />
+                          <SkeletonBlock className="mx-auto mt-0.5 h-[10px] w-10" />
+                        </div>
+                        <SkeletonBlock className="h-8 w-[78px] flex-shrink-0 rounded-lg border border-slate-200" />
+                      </div>
+                      <div className="mt-1 flex flex-col items-center">
+                        <div className="relative h-[132px] w-full overflow-hidden">
+                          <div className="absolute left-1/2 top-[-2px] h-[118px] w-[236px] -translate-x-1/2 rounded-t-full bg-slate-200" />
+                          <SkeletonBlock className="absolute bottom-[16px] left-1/2 h-[22px] w-20 -translate-x-1/2" />
+                        </div>
+                      </div>
+                      <div className="overflow-hidden rounded-[10px] border border-slate-200">
+                        {Array.from({ length: 2 }).map((_, index) => (
+                          <div key={`monthly-target-skeleton-${index}`} className="flex items-center justify-between px-4 py-2.5">
                             <SkeletonBlock className="h-[16px] w-20" />
                             <SkeletonBlock className="h-5 w-28" />
                           </div>
@@ -1681,44 +1897,76 @@ const Dashboard = () => {
                     </div>
                   ) : (
                     <>
-                      <div className="relative flex items-start justify-center">
-                        <p
-                          className="mt-2 text-[13px] text-slate-600 font-medium text-center"
-                          style={{ fontFamily: FONT }}
-                        >
-                          Monthly Target
-                        </p>
-                        <div className="absolute right-0 top-0" data-target-dropdown>
+                      <div className="relative flex items-start justify-between gap-3">
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={showPreviousTargetMonth}
+                            disabled={isFirstTargetMonth}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+                            aria-label="Previous month target"
+                          >
+                            <IoChevronBackOutline className="text-[16px]" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={showNextTargetMonth}
+                            disabled={isLastTargetMonth}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+                            aria-label="Next month target"
+                          >
+                            <IoChevronForwardOutline className="text-[16px]" />
+                          </button>
+                        </div>
+                        <div className="min-w-0 flex-1 text-center">
+                          <p
+                            className="m-0 text-[13px] font-medium text-slate-500"
+                            style={{ fontFamily: FONT }}
+                          >
+                            {selectedTargetMonth.long} Target
+                          </p>
+                          <p
+                            className="m-0 text-[11px] font-medium leading-none text-slate-400"
+                            style={{ fontFamily: FONT }}
+                          >
+                            {selectedYear}
+                          </p>
+                        </div>
+                        <div className="relative flex-shrink-0" data-target-dropdown>
                           <button
                             type="button"
                             onClick={() => setTargetDropdownOpen((v) => !v)}
-                            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"
+                            className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                            style={{ fontFamily: FONT }}
                           >
-                            <IoEllipsisHorizontalOutline className="text-[18px]" />
+                            <IoCalendarOutline className="text-[14px]" />
+                            Months
                           </button>
                           {targetDropdownOpen && (
-                            <div className="absolute right-0 top-[calc(100%+6px)] z-20 rounded-2xl border border-slate-200 bg-white py-1 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setTargetInput(String(monthlyTarget));
-                                  setTargetError("");
-                                  setTargetModalOpen(true);
-                                  setTargetDropdownOpen(false);
-                                }}
-                                className="block whitespace-nowrap border-none bg-transparent px-3 py-2 text-left text-[13px] font-medium text-slate-700"
-                                style={{ fontFamily: FONT }}
-                              >
-                                Edit
-                              </button>
+                            <div className="absolute right-0 top-[calc(100%+6px)] z-20 grid w-[150px] grid-cols-2 overflow-hidden rounded-[10px] border border-slate-200 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+                              {MONTH_OPTIONS.map((month) => (
+                                <button
+                                  key={month.index}
+                                  type="button"
+                                  onClick={() => openTargetModalForMonth(month.index)}
+                                  className="rounded-lg border-none px-2 py-2 text-center text-[12px] font-medium hover:bg-slate-50"
+                                  style={{
+                                    backgroundColor: month.index === selectedTargetMonthIndex ? "#1a1f36" : "transparent",
+                                    color: month.index === selectedTargetMonthIndex ? "#ffffff" : "#334155",
+                                    fontFamily: FONT,
+                                  }}
+                                >
+                                  {month.short}
+                                </button>
+                              ))}
                             </div>
                           )}
                         </div>
                       </div>
 
                       <div className="mt-1 flex flex-col items-center">
-                        <div className="relative mb-1 h-[152px] w-full overflow-hidden">
-                          <div className="absolute left-1/2 top-[-32px] -translate-x-1/2">
+                        <div className="relative h-[132px] w-full overflow-hidden">
+                          <div className="absolute left-1/2 top-[-44px] -translate-x-1/2">
                             <ReactApexChart
                               type="radialBar"
                               series={[monthlyTargetFill]}
@@ -1727,27 +1975,26 @@ const Dashboard = () => {
                               height={220}
                             />
                           </div>
-                          <div className="pointer-events-none absolute left-1/2 bottom-[24px] -translate-x-1/2">
+                          <div className="pointer-events-none absolute left-1/2 bottom-[16px] -translate-x-1/2">
                             <p
                               className="m-0 text-[22px] font-extrabold leading-none text-slate-900"
                               style={{ fontFamily: FONT }}
                             >
-                              {monthlyTargetProgress.toFixed(2)}%
+                              {monthlyTargetFill.toFixed(2)}%
                             </p>
                           </div>
                         </div>
                       </div>
 
-                      <div className="mt-1 mb-5 overflow-hidden rounded-[10px] border border-slate-200 bg-white">
+                      <div className="mt-0 overflow-hidden rounded-[10px] border border-slate-200 bg-white">
                         <div className="grid grid-cols-1 divide-y divide-slate-200">
                           {[
                             { label: "Target", value: `\u20B1${fmt(monthlyTarget)}` },
                             { label: "Revenue", value: `\u20B1${fmt(monthlyRevenue)}` },
-                            { label: "Today", value: `\u20B1${fmt(todayRevenue)}` },
                           ].map(({ label, value }) => (
                             <div
                               key={label}
-                              className="flex items-center justify-between gap-4 px-4 py-3"
+                              className="flex items-center justify-between gap-4 px-4 py-2.5"
                             >
                               <p
                                 className="text-[13px] font-medium text-slate-500"
@@ -1769,7 +2016,154 @@ const Dashboard = () => {
                   )}
                 </section>
 
-                <section className="mt-5 h-[180px] ml-auto w-full max-w-[390px] rounded-[10px] border border-slate-200 bg-white px-4 py-3">
+                <section className="mt-5 ml-auto w-full max-w-[390px] rounded-[10px] border border-slate-200 bg-white px-4 py-3">
+                  {showInitialSkeleton ? (
+                    <div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          <SkeletonBlock className="h-8 w-8 rounded-lg border border-slate-200" />
+                          <SkeletonBlock className="h-8 w-8 rounded-lg border border-slate-200" />
+                        </div>
+                        <div className="min-w-0 flex-1 pt-0.5">
+                          <SkeletonBlock className="mx-auto h-[14px] w-24" />
+                          <SkeletonBlock className="mx-auto mt-0.5 h-[10px] w-10" />
+                        </div>
+                        <SkeletonBlock className="h-8 w-[72px] flex-shrink-0 rounded-lg border border-slate-200" />
+                      </div>
+                      <div className="mt-1 flex flex-col items-center">
+                        <div className="relative h-[132px] w-full overflow-hidden">
+                          <div className="absolute left-1/2 top-[-2px] h-[118px] w-[236px] -translate-x-1/2 rounded-t-full bg-slate-200" />
+                          <SkeletonBlock className="absolute bottom-[16px] left-1/2 h-[22px] w-20 -translate-x-1/2" />
+                        </div>
+                      </div>
+                      <div className="overflow-hidden rounded-[10px] border border-slate-200">
+                        {Array.from({ length: 2 }).map((_, index) => (
+                          <div key={`yearly-target-skeleton-${index}`} className="flex items-center justify-between px-4 py-2.5">
+                            <SkeletonBlock className="h-[16px] w-20" />
+                            <SkeletonBlock className="h-5 w-28" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="relative flex items-start justify-between gap-3">
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={showPreviousTargetYear}
+                            disabled={isFirstYearlyTargetYear}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+                            aria-label="Previous year target"
+                          >
+                            <IoChevronBackOutline className="text-[16px]" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={showNextTargetYear}
+                            disabled={isLastYearlyTargetYear}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+                            aria-label="Next year target"
+                          >
+                            <IoChevronForwardOutline className="text-[16px]" />
+                          </button>
+                        </div>
+                        <div className="min-w-0 flex-1 text-center">
+                          <p
+                            className="m-0 text-[13px] font-medium text-slate-500"
+                            style={{ fontFamily: FONT }}
+                          >
+                            Yearly Target
+                          </p>
+                          <p
+                            className="m-0 text-[11px] font-medium leading-none text-slate-400"
+                            style={{ fontFamily: FONT }}
+                          >
+                            {selectedYearlyTargetYear}
+                          </p>
+                        </div>
+                        <div className="relative flex-shrink-0" data-yearly-target-dropdown>
+                          <button
+                            type="button"
+                            onClick={() => setYearlyTargetDropdownOpen((v) => !v)}
+                            className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                            style={{ fontFamily: FONT }}
+                          >
+                            <IoCalendarOutline className="text-[14px]" />
+                            Years
+                          </button>
+                          {yearlyTargetDropdownOpen && (
+                            <div className="absolute right-0 top-[calc(100%+6px)] z-20 grid w-[136px] grid-cols-2 overflow-hidden rounded-[10px] border border-slate-200 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+                              {yearOptions.map((year) => (
+                                <button
+                                  key={`yearly-target-${year}`}
+                                  type="button"
+                                  onClick={() => openYearlyTargetModalForYear(year)}
+                                  className="rounded-lg border-none px-2 py-2 text-center text-[12px] font-medium hover:bg-slate-50"
+                                  style={{
+                                    backgroundColor: Number(year) === Number(selectedYearlyTargetYear) ? "#1a1f36" : "transparent",
+                                    color: Number(year) === Number(selectedYearlyTargetYear) ? "#ffffff" : "#334155",
+                                    fontFamily: FONT,
+                                  }}
+                                >
+                                  {year}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-1 flex flex-col items-center">
+                        <div className="relative h-[132px] w-full overflow-hidden">
+                          <div className="absolute left-1/2 top-[-44px] -translate-x-1/2">
+                            <ReactApexChart
+                              type="radialBar"
+                              series={[yearlyTargetFill]}
+                              options={monthlyTargetChartOptions}
+                              width={360}
+                              height={220}
+                            />
+                          </div>
+                          <div className="pointer-events-none absolute left-1/2 bottom-[16px] -translate-x-1/2">
+                            <p
+                              className="m-0 text-[22px] font-extrabold leading-none text-slate-900"
+                              style={{ fontFamily: FONT }}
+                            >
+                              {yearlyTargetFill.toFixed(2)}%
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-0 overflow-hidden rounded-[10px] border border-slate-200 bg-white">
+                        <div className="grid grid-cols-1 divide-y divide-slate-200">
+                          {[
+                            { label: "Target", value: `\u20B1${fmt(yearlyTarget)}` },
+                            { label: "Revenue", value: `\u20B1${fmt(yearlyRevenue)}` },
+                          ].map(({ label, value }) => (
+                            <div
+                              key={`yearly-${label}`}
+                              className="flex items-center justify-between gap-4 px-4 py-2.5"
+                            >
+                              <p
+                                className="text-[13px] font-medium text-slate-500"
+                                style={{ fontFamily: FONT }}
+                              >
+                                {label}
+                              </p>
+                              <p
+                                className="text-[18px] font-bold leading-none text-slate-900"
+                                style={{ fontFamily: FONT }}
+                              >
+                                {value}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </section>
               </div>
 
@@ -1890,12 +2284,7 @@ const Dashboard = () => {
                         ) : null}
                         <ReactApexChart
                           type="bar"
-                          series={[
-                          {
-                            name: "Cash Received",
-                            data: cashflowData.chart.map((item) => item.revenue),
-                          },
-                        ]}
+                          series={cashReceivedSeries}
                         options={cashReceivedChartOptions}
                         height={190}
                         />
@@ -2036,12 +2425,7 @@ const Dashboard = () => {
                         ) : null}
                         <ReactApexChart
                           type="bar"
-                          series={[
-                            {
-                              name: "Receivables",
-                              data: cashflowData.chart.map((item) => item.outstanding),
-                            },
-                          ]}
+                          series={receivablesSeries}
                           options={receivablesChartOptions}
                           height={190}
                         />
@@ -2087,12 +2471,7 @@ const Dashboard = () => {
 
                     <ReactApexChart
                       type="line"
-                      series={[
-                        {
-                          name: "Fish Catches",
-                          data: monthlyFishCatches.map((item) => item.catches),
-                        },
-                      ]}
+                      series={monthlyFishCatchSeries}
                       options={monthlyFishCatchChartOptions}
                       height={240}
                     />
@@ -2116,12 +2495,7 @@ const Dashboard = () => {
 
                     <ReactApexChart
                       type="bar"
-                      series={[
-                        {
-                          name: "Revenue",
-                          data: yearlyRevenueData.map((item) => item.revenue),
-                        },
-                      ]}
+                      series={yearlyRevenueSeries}
                       options={yearlyRevenueChartOptions}
                       height={240}
                     />
@@ -2313,7 +2687,7 @@ const Dashboard = () => {
       {/* Monthly Target Modal */}
       {targetModalOpen && (
         <Modal
-          title="Set Monthly Target"
+          title={`Set ${selectedTargetMonth.long} Target`}
           onClose={() => setTargetModalOpen(false)}
           onSave={handleSaveMonthlyTarget}
           saveLabel="Save"
@@ -2322,7 +2696,7 @@ const Dashboard = () => {
           <ModalTextInput
             label={
               <>
-                Monthly Target Amount <span className="text-red-500">*</span>
+                {selectedTargetMonth.long} Target Amount <span className="text-red-500">*</span>
               </>
             }
             autoFocus
@@ -2340,6 +2714,40 @@ const Dashboard = () => {
             placeholder="Enter target amount"
             icon={IoCashOutline}
             error={targetError}
+          />
+        </Modal>
+      )}
+
+      {/* Yearly Target Modal */}
+      {yearlyTargetModalOpen && (
+        <Modal
+          title={`Set ${selectedYearlyTargetYear} Target`}
+          onClose={() => setYearlyTargetModalOpen(false)}
+          onSave={handleSaveYearlyTarget}
+          saveLabel="Save"
+          closeOnBackdrop
+        >
+          <ModalTextInput
+            label={
+              <>
+                {selectedYearlyTargetYear} Target Amount <span className="text-red-500">*</span>
+              </>
+            }
+            autoFocus
+            type="text"
+            inputMode="decimal"
+            value={yearlyTargetInput}
+            onChange={(e) => {
+              const sanitizedValue = e.target.value.replace(/[^\d.]/g, "");
+              setYearlyTargetInput(sanitizedValue);
+              if (yearlyTargetError) setYearlyTargetError("");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSaveYearlyTarget();
+            }}
+            placeholder="Enter target amount"
+            icon={IoCashOutline}
+            error={yearlyTargetError}
           />
         </Modal>
       )}

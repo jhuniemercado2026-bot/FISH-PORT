@@ -55,10 +55,16 @@ class VehicleTicketLoadTestSeeder extends Seeder
         );
 
         $vehicleTypes = collect(range(1, self::VEHICLE_TYPE_COUNT))->map(function (int $number) use ($user) {
-            return VehicleType::firstOrCreate(
+            $vehicleType = VehicleType::withTrashed()->firstOrCreate(
                 ['type_name' => sprintf('Vehicle Ticket Load Type %02d', $number)],
                 ['created_by' => $user->user_id]
             );
+
+            if ($vehicleType->trashed()) {
+                $vehicleType->restore();
+            }
+
+            return $vehicleType;
         })->values();
 
         $feesByYearAndType = collect(array_keys(self::YEAR_TARGETS))->mapWithKeys(function (int $year) use ($vehicleTypes, $user) {

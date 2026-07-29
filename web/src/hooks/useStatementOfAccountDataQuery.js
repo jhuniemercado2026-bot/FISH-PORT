@@ -6,13 +6,16 @@ export const getStatementOfAccountDataQueryOptions = ({
   perPage = 10,
   search = "",
   status = "all",
+  statementType = "boats",
   boat = "",
   highlightBoatId = "",
+  highlightOwnerId = "",
   selectedOnly = false,
 } = {}) => ({
-  queryKey: ["statement-of-account-data", { page, perPage, search, status, boat, highlightBoatId, selectedOnly }],
+  queryKey: [statementType === "owners" ? "owner-statement-data" : "boat-statement-data", { page, perPage, search, status, boat, highlightBoatId, highlightOwnerId, selectedOnly }],
   queryFn: async ({ signal }) => {
-    const res = await api.get("/statement-of-account", {
+    const endpoint = statementType === "owners" ? "/owner-statement" : "/boat-statement";
+    const res = await api.get(endpoint, {
       params: {
         page,
         per_page: perPage,
@@ -20,15 +23,18 @@ export const getStatementOfAccountDataQueryOptions = ({
         status: status !== "all" ? status : undefined,
         boat: boat || undefined,
         highlight_boat_id: highlightBoatId || undefined,
+        highlight_owner_id: highlightOwnerId || undefined,
         selected_only: selectedOnly ? 1 : undefined,
       },
       signal,
     });
 
     const boatRecords = res.data?.data ?? [];
+    const ownerRecords = statementType === "owners" ? res.data?.data ?? [] : [];
 
     return {
       boatRecords,
+      ownerRecords,
       meta: res.data?.meta ?? {
         current_page: page,
         last_page: 1,
@@ -38,6 +44,11 @@ export const getStatementOfAccountDataQueryOptions = ({
         to: boatRecords.length,
       },
       stats: res.data?.stats ?? {
+        total_billed: 0,
+        total_collected: 0,
+        total_receivables: 0,
+      },
+      overviewStats: res.data?.overview_stats ?? res.data?.stats ?? {
         total_billed: 0,
         total_collected: 0,
         total_receivables: 0,
@@ -57,7 +68,7 @@ const looksLikeQueryOptions = (value) =>
   value &&
   typeof value === "object" &&
   Object.keys(value).some((key) => QUERY_OPTION_KEYS.has(key)) &&
-  !["page", "perPage", "search", "status", "boat", "highlightBoatId", "selectedOnly"].some((key) => Object.prototype.hasOwnProperty.call(value, key));
+  !["page", "perPage", "search", "status", "statementType", "boat", "highlightBoatId", "highlightOwnerId", "selectedOnly"].some((key) => Object.prototype.hasOwnProperty.call(value, key));
 
 export const useStatementOfAccountDataQuery = (filters = {}, queryOptions = {}) => {
   const resolvedFilters = looksLikeQueryOptions(filters) ? {} : filters;

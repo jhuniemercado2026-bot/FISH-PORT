@@ -19,7 +19,6 @@ return new class extends Migration
             $table->date('effective_to')->nullable();
             $table->integer('created_by');
             $table->timestamps();
-            $table->softDeletes();
 
         });
     }

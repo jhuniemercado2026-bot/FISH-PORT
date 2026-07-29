@@ -54,6 +54,12 @@ const formatPdfMoneyValue = (value) =>
     maximumFractionDigits: 2,
   });
 
+const formatBillingReference = (value) => {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.slice(-6).padStart(6, "0");
+};
+
 const loadPngBytes = async (path) => {
   try {
     const response = await fetch(path);
@@ -461,7 +467,13 @@ export const buildBillingStatementPdf = async ({
   const headerImage = headerImageBytes
     ? await composer.pdfDoc.embedPng(headerImageBytes)
     : null;
-  const billingReference = String(bill?.bill_reference_no ?? "").slice(-6) || "-";
+  const billingReference = formatBillingReference(bill?.bill_reference_no) || "-";
+
+  if (billingReference !== "-") {
+    composer.pdfDoc.setTitle(billingReference);
+    composer.pdfDoc.setSubject(`Billing Statement ${billingReference}`);
+  }
+
   const totalCharges = Number(bill?.total_amount || 0);
   const headerCardTop = composer.cursorY;
   const headerCardHeight = 82;

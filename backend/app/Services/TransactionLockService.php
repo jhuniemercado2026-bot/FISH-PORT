@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\TransactionLockUpdated;
 use App\Models\Remittance;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -12,33 +13,31 @@ class TransactionLockService
     {
         $cached = Cache::get('transaction_lock');
         if (is_array($cached) && ($cached['is_locked'] ?? false)) {
-            try {
-                $unlockAt = Carbon::parse($cached['unlock_at'])->setTimezone('Asia/Manila');
-                $now = Carbon::now('Asia/Manila');
+            if (($cached['lock_type'] ?? 'remittance') === 'remittance') {
+                try {
+                    $unlockAt = Carbon::parse($cached['unlock_at'])->setTimezone('Asia/Manila');
+                    if (Carbon::now('Asia/Manila')->lessThan($unlockAt)) {
+                        $remittanceId = (int) ($cached['remittance_id'] ?? 0);
+                        $isValidRemittance = $remittanceId > 0 && Remittance::query()
+                            ->where('remittance_id', $remittanceId)
+                            ->whereIn('status', ['pending', 'remitted'])
+                            ->exists();
 
-                if ($now->lessThan($unlockAt)) {
-                    $remittanceId = (int) ($cached['remittance_id'] ?? 0);
-
-                    $isValidRemittance = $remittanceId > 0 && Remittance::query()
-                        ->where('remittance_id', $remittanceId)
-                        ->whereIn('status', ['pending', 'remitted'])
-                        ->exists();
-
-                    if ($isValidRemittance) {
-                        return $cached;
+                        if ($isValidRemittance) {
+                            return $cached;
+                        }
                     }
-
-                    Cache::forget('transaction_lock');
-                } else {
-                    Cache::forget('transaction_lock');
+                } catch (\Throwable $exception) {
+                    // fall through and clear invalid lock
                 }
-            } catch (\Throwable $e) {
+
                 Cache::forget('transaction_lock');
             }
+
+            Cache::forget('transaction_lock');
         }
 
         $today = Carbon::now('Asia/Manila')->toDateString();
-
         $latestRemittance = Remittance::query()
             ->whereDate('date', $today)
             ->whereIn('status', ['pending', 'remitted'])
@@ -50,30 +49,10 @@ class TransactionLockService
             return null;
         }
 
-        $remittanceDate = Carbon::parse($latestRemittance->date, 'Asia/Manila')->toDateString();
-        $remittedAt = Carbon::parse($latestRemittance->updated_at, 'Asia/Manila');
-        $unlockAt = Carbon::createFromFormat('Y-m-d', $remittanceDate, 'Asia/Manila')->endOfDay();
-        $now = Carbon::now('Asia/Manila');
+        $payload = $this->buildLockPayload($latestRemittance);
 
-        if ($now->greaterThanOrEqualTo($unlockAt)) {
-            return null;
-        }
-
-        $payload = [
-            'is_locked' => true,
-            'remittance_id' => $latestRemittance->remittance_id,
-            'remittance_reference_no' => $latestRemittance->remittance_reference_no,
-            'date' => $remittanceDate,
-            'remitted_at' => $remittedAt->toIso8601String(),
-            'unlock_at' => $unlockAt->toIso8601String(),
-            'unlock_date' => $unlockAt->toDateString(),
-            'unlock_time' => $unlockAt->format('H:i:s'),
-            'message' => 'Transactions are view-only until ' . $unlockAt->format('F j, Y \a\t g:i A') . '.',
-        ];
-
-        $ttl = max(0, $unlockAt->diffInSeconds($now));
-        if ($ttl > 0) {
-            Cache::put('transaction_lock', $payload, $ttl);
+        if ($payload !== null) {
+            $this->cacheLockPayload($payload);
         }
 
         return $payload;
@@ -81,29 +60,54 @@ class TransactionLockService
 
     public function setLockForRemittance(Remittance $remittance): void
     {
-        $remittanceDate = Carbon::parse($remittance->date, 'Asia/Manila')->toDateString();
-        $remittedAt = Carbon::now('Asia/Manila');
-        $unlockAt = Carbon::createFromFormat('Y-m-d', $remittanceDate, 'Asia/Manila')->endOfDay();
+        $payload = $this->buildLockPayload($remittance);
 
-        if ($unlockAt->lessThanOrEqualTo($remittedAt)) {
+        if ($payload === null) {
             return;
         }
 
-        $payload = [
+        $this->cacheLockPayload($payload);
+
+        try {
+            broadcast(new TransactionLockUpdated($payload));
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
+    }
+
+    private function cacheLockPayload(array $payload): void
+    {
+        $ttl = max(
+            0,
+            Carbon::parse($payload['unlock_at'])->getTimestamp() - Carbon::parse($payload['locked_at'])->getTimestamp()
+        );
+        if ($ttl > 0) {
+            Cache::put('transaction_lock', $payload, $ttl);
+        }
+    }
+
+    private function buildLockPayload(Remittance $remittance): ?array
+    {
+        $remittanceDate = Carbon::parse($remittance->date, 'Asia/Manila')->toDateString();
+        $lockedAt = Carbon::now('Asia/Manila');
+        $unlockAt = Carbon::createFromFormat('Y-m-d', $remittanceDate, 'Asia/Manila')->endOfDay();
+
+        if ($unlockAt->lessThanOrEqualTo($lockedAt)) {
+            return null;
+        }
+
+        return [
             'is_locked' => true,
+            'lock_type' => 'remittance',
             'remittance_id' => $remittance->remittance_id,
             'remittance_reference_no' => $remittance->remittance_reference_no,
             'date' => $remittanceDate,
-            'remitted_at' => $remittedAt->toIso8601String(),
+            'locked_at' => $lockedAt->toIso8601String(),
+            'remitted_at' => $lockedAt->toIso8601String(),
             'unlock_at' => $unlockAt->toIso8601String(),
             'unlock_date' => $unlockAt->toDateString(),
             'unlock_time' => $unlockAt->format('H:i:s'),
             'message' => 'Transactions are view-only until ' . $unlockAt->format('F j, Y \a\t g:i A') . '.',
         ];
-
-        $ttl = max(0, $unlockAt->diffInSeconds($remittedAt));
-        if ($ttl > 0) {
-            Cache::put('transaction_lock', $payload, $ttl);
-        }
     }
 }

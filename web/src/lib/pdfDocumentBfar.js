@@ -212,7 +212,7 @@ const resolveCoverage = ({
     const reportDate = new Date(Number(monthlyYear), Number(monthlyMonth) - 1, 1);
 
     return {
-      reportTypeLabel: "BFAR Monthly",
+      reportTypeLabel: "Monthly Fisheries",
       coverageKey: `${monthlyYear}-${monthlyMonth}`,
       coverageLabel: reportDate.toLocaleDateString("en-PH", {
         month: "long",
@@ -223,7 +223,7 @@ const resolveCoverage = ({
 
   if (filterType === "yearly") {
     return {
-      reportTypeLabel: "Fisheries (BFAR) Yearly",
+      reportTypeLabel: "Yearly Fisheries",
       coverageKey: String(yearlyDate || year || ""),
       coverageLabel: String(yearlyDate || year || "-"),
     };
@@ -233,7 +233,7 @@ const resolveCoverage = ({
   const reportDate = new Date(Number(year), parsedMonthIndex, Number(day));
 
   return {
-    reportTypeLabel: "Fisheries (BFAR) Daily",
+    reportTypeLabel: "Daily Fisheries",
     coverageKey: `${year}-${String(parsedMonthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
     coverageLabel: reportDate.toLocaleDateString("en-PH", {
       month: "long",

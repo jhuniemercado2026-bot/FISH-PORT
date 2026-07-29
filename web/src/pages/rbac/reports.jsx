@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ConfigProvider } from "antd";
 import "typeface-montserrat";
 import Sidebar from "../../layout/Sidebar";
@@ -15,8 +15,10 @@ import { useRemittanceReportDataQuery } from "../../hooks/useRemittanceReportDat
 import { useRegisteredBoatsReportDataQuery, useOwnerInfoReportDataQuery } from "../../hooks/useBoatManagement";
 import { useDockingReportDataQuery } from "../../hooks/useDockingsDataQuery";
 import { useVehicleTicketReportDataQuery } from "../../hooks/useVehicleTicketReportDataQuery";
+import { useBillingReportDataQuery } from "../../hooks/useBillingReportDataQuery";
 import { buildRevenuePdf } from "../../lib/pdfDocumentRevenue";
 import { buildRemittanceReportPdf } from "../../lib/pdfDocumentRemittanceReport";
+import { buildBillingReportPdf } from "../../lib/pdfDocumentBillingReport";
 import { buildDockingPdf } from "../../lib/pdfDocumentDocking";
 import { buildVehicleDailyPdf } from "../../lib/pdfDocumentVehicleDaily";
 import { buildVehicleAnnualPdf } from "../../lib/pdfDocumentVehicleAnnual";
@@ -55,6 +57,7 @@ const REPORT_CONTENT = {
   "fisheries-bfar": { title: "Fisheries (BFAR)" },
   "daily-vehicle-ticket": { title: "Vehicle Ticket Report" },
   "vehicle-ticket": { title: "Vehicle Ticket Report" },
+  billing: { title: "Billing" },
   fees: { title: "Fees" },
 };
 
@@ -93,6 +96,35 @@ const getExportFileName = (reportKey, filters) => {
     : "report";
 
   return `${title.replace(/\s+/g, "_")}_${suffix}.xlsx`;
+};
+
+const getReportFileSuffix = (filters = {}) => {
+  if (filters?.filterType === "daily" && filters?.date) return filters.date;
+  if (filters?.filterType === "monthly" && filters?.month && filters?.year) {
+    return `${filters.year}-${Number(filters.month)}`;
+  }
+  if (filters?.filterType === "yearly" && filters?.year) return filters.year;
+  if (filters?.year) return filters.year;
+  if (filters?.date) return filters.date;
+  if (filters?.month && filters?.year) return `${filters.year}-${Number(filters.month)}`;
+  return "";
+};
+
+const getPdfFileName = (reportKey, filters) => {
+  const title = REPORT_CONTENT[reportKey]?.title || reportKey || "Report";
+  const staticReportNames = new Set(["registered-boats", "owner-info"]);
+
+  if (staticReportNames.has(reportKey)) {
+    return `${title}.pdf`;
+  }
+
+  const suffix = getReportFileSuffix(filters);
+  return suffix ? `${title}_${suffix}.pdf` : `${title}.pdf`;
+};
+
+const createBlobPdfPreviewUrl = (pdfBytes, fileName) => {
+  const pdfFile = new File([pdfBytes], fileName, { type: "application/pdf" });
+  return URL.createObjectURL(pdfFile);
 };
 
 const getExportReportHeader = ({ activeReport, filters }) => {
@@ -186,10 +218,10 @@ const getExportReportHeader = ({ activeReport, filters }) => {
         reportTitle: "Fisheries (BFAR) Report",
         reportTypeLabel:
           filterType === "monthly"
-            ? "BFAR Monthly"
+            ? "Monthly Fisheries"
             : filterType === "yearly"
-            ? "BFAR Yearly"
-            : "BFAR Daily",
+            ? "Yearly Fisheries"
+            : "Daily Fisheries",
         coverageLabel:
           filterType === "monthly"
             ? "Coverage Month"
@@ -232,6 +264,28 @@ const getExportReportHeader = ({ activeReport, filters }) => {
         coverageLabel: "Coverage Year",
         coverageValue: formattedYear,
       };
+    case "billing":
+      return {
+        reportTitle: "Billing Report",
+        reportTypeLabel:
+          filterType === "monthly"
+            ? "Billing Monthly"
+            : filterType === "yearly"
+            ? "Billing Yearly"
+            : "Billing Daily",
+        coverageLabel:
+          filterType === "monthly"
+            ? "Coverage Month"
+            : filterType === "yearly"
+            ? "Coverage Year"
+            : "Coverage Date",
+        coverageValue:
+          filterType === "monthly"
+            ? formattedMonth
+            : filterType === "yearly"
+            ? formattedYear
+            : formattedDate,
+      };
     case "fees":
       return {
         reportTitle: "Fees Report",
@@ -273,6 +327,7 @@ const getExportReportSummary = ({
   banyeraData,
   bfarData,
   vehicleTicketReportData,
+  billingReportData,
   feeReportData,
   registeredBoatsReportData,
   ownerInfoReportData,
@@ -302,6 +357,7 @@ const getExportReportSummary = ({
     case "remittance": {
       const remittanceTotal =
         Number(remittanceReportData?.totalRemittances || 0) ||
+        sumRows(remittanceReportData?.rows, "amountToRemit") ||
         sumRows(remittanceReportData?.rows, "confirmedCash") ||
         sumRows(remittanceReportData?.rows, "amount");
       return {
@@ -352,6 +408,20 @@ const getExportReportSummary = ({
         totalValue: formatCurrency(ticketFeeTotal),
       };
     }
+    case "billing": {
+      const billingRows = billingReportData?.rows ?? billingReportData?.bills ?? [];
+      const billingTotal =
+        Number(billingReportData?.totalBillings ?? billingReportData?.totalBilling ?? 0) ||
+        sumRows(billingRows, "totalAmount") ||
+        sumRows(billingRows, "total_amount") ||
+        sumRows(billingRows, "amount") ||
+        sumRows(billingRows, "total") ||
+        sumRows(billingRows, "grand_total");
+      return {
+        totalLabel: "Total Billings:",
+        totalValue: formatCurrency(billingTotal),
+      };
+    }
     case "fees": {
       const feeCount = Number(feeReportData?.totalRecords ?? (Array.isArray(feeReportData?.fees) ? feeReportData.fees.length : 0));
       return {
@@ -369,12 +439,10 @@ const getExportReportSummary = ({
       };
     }
     case "owner-info": {
-      const ownersCount = Array.isArray(ownerInfoReportData?.owners)
-        ? ownerInfoReportData.owners.length
-        : 0;
+      const ownersCount = Number(ownerInfoReportData?.totalOwners ?? (Array.isArray(ownerInfoReportData?.owners) ? ownerInfoReportData.owners.length : 0));
       return {
         totalLabel: "Total Owners:",
-        totalValue: String(ownersCount),
+        totalValue: String(Number.isFinite(ownersCount) ? ownersCount : 0),
       };
     }
     default:
@@ -429,6 +497,7 @@ const getReportRowsForExport = ({
   banyeraData,
   bfarData,
   vehicleTicketReportData,
+  billingReportData,
   feeReportData,
 }) => {
   if (activeReport === "revenue") return revenueReportData?.rows ?? [];
@@ -439,6 +508,7 @@ const getReportRowsForExport = ({
   if (activeReport === "banyera") return banyeraData?.rows ?? banyeraData?.banyeraTransactions ?? [];
   if (activeReport === "fisheries-bfar") return bfarData?.rows ?? [];
   if (activeReport === "daily-vehicle-ticket" || activeReport === "vehicle-ticket") return vehicleTicketReportData?.tickets ?? [];
+  if (activeReport === "billing") return billingReportData?.rows ?? billingReportData?.bills ?? [];
   if (activeReport === "fees") return feeReportData?.fees ?? [];
   return [];
 };
@@ -450,6 +520,7 @@ const getExportColumnsForReport = ({
   remittanceFilterType,
   dockingFilterType,
   banyeraFilterType,
+  billingFilterType,
   vehicleDailyFilterType,
 }) => {
   const filterType = generatedFilters?.filterType
@@ -457,6 +528,7 @@ const getExportColumnsForReport = ({
       : activeReport === "remittance" ? remittanceFilterType
       : activeReport === "docking" ? dockingFilterType
       : activeReport === "banyera" || activeReport === "fisheries-bfar" ? banyeraFilterType
+      : activeReport === "billing" ? billingFilterType
       : activeReport === "daily-vehicle-ticket" ? vehicleDailyFilterType
       : undefined);
 
@@ -502,7 +574,7 @@ const getExportColumnsForReport = ({
     return [
       { key: "remittanceReferenceNo", label: "Remittance Ref. No." },
       { key: "todaysCashReceived", label: "Today's Cash (PHP)" },
-      { key: "confirmedCash", label: "Confirmed Cash (PHP)" },
+      { key: "amountToRemit", label: "Amount to Remit (PHP)" },
       { key: "surplus", label: "Surplus (PHP)" },
       { key: "deficit", label: "Deficit (PHP)" },
       { key: "remarks", label: "Remarks" },
@@ -604,6 +676,16 @@ const getExportColumnsForReport = ({
       { key: "officialReceiptNo", label: "OR No.", width: 10 },
       { key: "controlNumber", label: "Control No.", width: 12 },
       { key: "ticketFee", label: "Ticket Fee (PHP)", width: 16 },
+    ];
+  }
+
+  if (activeReport === "billing") {
+    return [
+      { key: "billReferenceNo", label: "Billing Ref. No.", width: 18 },
+      { key: "boatName", label: "Boat Name", width: 22 },
+      { key: "date", label: "Date Issued", width: 16 },
+      { key: "status", label: "Status", width: 14 },
+      { key: "totalAmount", label: "Total Charges (PHP)", width: 20 },
     ];
   }
 
@@ -709,6 +791,21 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
     return String(value).replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
   };
 
+  const firstValue = (...values) =>
+    values.find((value) => value !== undefined && value !== null && value !== "");
+
+  const getBillingTotalAmount = (row) =>
+    Number(firstValue(row?.totalAmount, row?.total_amount, row?.amount, row?.total, row?.grand_total, row?.balance_due, 0) || 0);
+
+  const getBillingPaidAmount = (row) =>
+    Number(firstValue(row?.paidAmount, row?.paid_amount, row?.amount_paid, row?.total_paid, row?.payments_total, 0) || 0);
+
+  const getBillingBalanceDue = (row) =>
+    Number(firstValue(row?.balanceDue, row?.balance_due, row?.remaining_balance, getBillingTotalAmount(row) - getBillingPaidAmount(row), 0) || 0);
+
+  const getBillingStatus = (row) =>
+    firstValue(row?.status, row?.payment_status, getBillingBalanceDue(row) <= 0 ? "Paid" : "Unpaid");
+
   const normalizeVehicleTicketRow = (row) => {
     if (!row || typeof row !== "object") return row;
     const normalized = { ...row };
@@ -765,7 +862,9 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
         // backend may use created_at or date_registered
         val = formatExportDate(row?.date_registered ?? row?.created_at ?? row?.createdAt);
       } else if (column.key === "boat_status" || column.key === "status") {
-        val = formatStatus(row?.boat_status ?? row?.status ?? val);
+        val = activeReport === "billing"
+          ? getBillingStatus(row)
+          : formatStatus(row?.boat_status ?? row?.status ?? val);
       } else if (column.key === "dockingDate") {
         val = formatExportDate(row?.docking_date ?? row?.created_at ?? row?.dockingDate);
       } else if (column.key === "time") {
@@ -783,7 +882,7 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
       } else if (column.key === "total") {
         val = Number(row?.total_fee ?? row?.total ?? 0);
       } else if (column.key === "date") {
-        val = formatExportDate(row?.date ?? row?.transaction_date ?? row?.created_at ?? row?.transactionDate);
+        val = formatExportDate(row?.date ?? row?.billing_date ?? row?.bill_date ?? row?.date_billed ?? row?.transaction_date ?? row?.created_at ?? row?.transactionDate);
       } else if (column.key === "fishClassification") {
         val = row?.classification_name || row?.fishClassification || row?.classification?.classification_name || "";
       } else if (column.key === "qty") {
@@ -814,6 +913,10 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
         val = row?.contact_number ?? row?.contactNumber ?? val;
       } else if (column.key === "address") {
         val = row?.address ?? val;
+      } else if (column.key === "billReferenceNo") {
+        val = firstValue(row?.billReferenceNo, row?.bill_reference_no, row?.bill_reference, row?.reference_no, row?.referenceNo, row?.id, "");
+      } else if (column.key === "totalAmount") {
+        val = getBillingTotalAmount(row);
       }
 
       acc[column.key] = getExportValue(val);
@@ -829,6 +932,7 @@ const getExportFilters = ({
   remittanceFilterType,
   dockingFilterType,
   banyeraFilterType,
+  billingFilterType,
   vehicleDailyFilterType,
   dailyDate,
   monthlyMonth,
@@ -878,6 +982,15 @@ const getExportFilters = ({
     };
   }
 
+  if (activeReport === "billing") {
+    return {
+      filterType: billingFilterType,
+      date: billingFilterType === "daily" ? dailyDate : undefined,
+      month: billingFilterType === "monthly" ? monthlyMonth : undefined,
+      year: billingFilterType === "monthly" ? monthlyYear : billingFilterType === "yearly" ? yearlyDate : undefined,
+    };
+  }
+
   if (activeReport === "daily-vehicle-ticket") {
     return {
       filterType: vehicleDailyFilterType,
@@ -908,6 +1021,7 @@ const getExportSheetName = (reportKey) => {
     case "fisheries-bfar": return "BFAR";
     case "daily-vehicle-ticket": return "VehicleDaily";
     case "vehicle-ticket": return "VehicleAnnual";
+    case "billing": return "Billing";
     case "fees": return "Fees";
     default: return "Report";
   }
@@ -924,6 +1038,7 @@ const getExportRowCount = ({
   banyeraData,
   bfarData,
   vehicleTicketReportData,
+  billingReportData,
   feeReportData,
 }) => {
   const rows = getReportRowsForExport({
@@ -936,6 +1051,7 @@ const getExportRowCount = ({
     banyeraData,
     bfarData,
     vehicleTicketReportData,
+    billingReportData,
     feeReportData,
   });
   return Array.isArray(rows) ? rows.length : 0;
@@ -964,6 +1080,7 @@ const getExportStatus = ({
   banyeraData,
   bfarData,
   vehicleTicketReportData,
+  billingReportData,
   feeReportData,
 }) => ({
   rows: getReportRowsForExport({
@@ -976,6 +1093,7 @@ const getExportStatus = ({
     banyeraData,
     bfarData,
     vehicleTicketReportData,
+    billingReportData,
     feeReportData,
   }),
 });
@@ -990,6 +1108,7 @@ const getExportData = ({
   banyeraData,
   bfarData,
   vehicleTicketReportData,
+  billingReportData,
   feeReportData,
 }) => getReportRowsForExport({
   activeReport,
@@ -1001,6 +1120,7 @@ const getExportData = ({
   banyeraData,
   bfarData,
   vehicleTicketReportData,
+  billingReportData,
   feeReportData,
 });
 
@@ -1018,6 +1138,7 @@ const getExportBlobAndName = async (context) => {
     remittanceFilterType: context.remittanceFilterType,
     dockingFilterType: context.dockingFilterType,
     banyeraFilterType: context.banyeraFilterType,
+    billingFilterType: context.billingFilterType,
     vehicleDailyFilterType: context.vehicleDailyFilterType,
   });
   const reportHeader = getExportReportHeader({
@@ -1032,6 +1153,7 @@ const getExportBlobAndName = async (context) => {
     banyeraData: context.banyeraData,
     bfarData: context.bfarData,
     vehicleTicketReportData: context.vehicleTicketReportData,
+    billingReportData: context.billingReportData,
     feeReportData: context.feeReportData,
     registeredBoatsReportData: context.registeredBoatsReportData,
     ownerInfoReportData: context.ownerInfoReportData,
@@ -1076,11 +1198,6 @@ const getDateParts = (value) => {
     month: String(value).slice(5, 7),
     day: String(value).slice(8, 10),
   };
-};
-
-const setDateYear = (value, year) => {
-  const normalized = String(value || `${year}-01-01`);
-  return `${year}-${normalized.slice(5, 7) || "01"}-${normalized.slice(8, 10) || "01"}`;
 };
 
 const setMonthYear = (value, year) => {
@@ -1132,14 +1249,23 @@ const SuperReports = () => {
     window.innerWidth >= 1024 ? 256 : 0,
   );
   const [reportPdfUrl, setReportPdfUrl] = useState("");
+  const [reportPdfFileName, setReportPdfFileName] = useState("");
   const [reportPdfLoading, setReportPdfLoading] = useState(false);
   const [isGenerateActionDisabled, setIsGenerateActionDisabled] = useState(false);
   const [isExportActionDisabled, setIsExportActionDisabled] = useState(false);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [reportBuildKey, setReportBuildKey] = useState(0);
+  const [reportBuildRequest, setReportBuildRequest] = useState(null);
   const [generatedFilters, setGeneratedFilters] = useState({});
+  const reportPreviewCacheRef = useRef({});
+  const ownerInfoReportDataRef = useRef(null);
+  const dockingReportDataRef = useRef(null);
+  const banyeraReportDataRef = useRef(null);
+  const bfarReportDataRef = useRef(null);
+  const vehicleTicketReportDataRef = useRef(null);
+  const feeReportDataRef = useRef(null);
   const [dailyDate, setDailyDate] = useState(() => {
-    if (requestedDate && requestedTab !== "remittance") return setDateYear(requestedDate, fiscalYear);
+    if (requestedDate && requestedTab !== "remittance") return requestedDate;
     return undefined;
   });
   const [monthlyDate, setMonthlyDate] = useState(() => undefined);
@@ -1147,7 +1273,7 @@ const SuperReports = () => {
   const [monthlyYear, setMonthlyYear] = useState(() => undefined);
   const [yearlyDate, setYearlyDate] = useState(() => undefined);
   const [remittanceDailyDate, setRemittanceDailyDate] = useState(() => {
-    if (requestedDate && requestedTab === "remittance") return setDateYear(requestedDate, fiscalYear);
+    if (requestedDate && requestedTab === "remittance") return requestedDate;
     return undefined;
   });
   const [remittanceMonthlyMonth, setRemittanceMonthlyMonth] = useState(() => undefined);
@@ -1156,6 +1282,7 @@ const SuperReports = () => {
   const [dockingFilterType, setDockingFilterType] = useState("daily");
   const [banyeraFilterType, setBanyeraFilterType] = useState("daily");
   const [remittanceFilterType, setRemittanceFilterType] = useState("daily");
+  const [billingFilterType, setBillingFilterType] = useState("daily");
   const [vehicleDailyFilterType, setVehicleDailyFilterType] = useState("daily");
   const [revenueFilterType, setRevenueFilterType] = useState(
     ["daily", "monthly", "yearly"].includes(requestedTab) ? requestedTab : "daily",
@@ -1187,10 +1314,8 @@ const SuperReports = () => {
   }, [sidebarCollapsed, sidebarOpen]);
 
   useEffect(() => {
-    setDailyDate((current) => (current ? setDateYear(current, fiscalYear) : current));
     setMonthlyDate((current) => (current ? setMonthYear(current, fiscalYear) : current));
     setYearlyDate((current) => (current ? fiscalYear : current));
-    setRemittanceDailyDate((current) => (current ? setDateYear(current, fiscalYear) : current));
     setRemittanceMonthlyYear((current) => (current ? fiscalYear : current));
     setRemittanceYearlyDate((current) => (current ? fiscalYear : current));
   }, [fiscalYear]);
@@ -1215,6 +1340,7 @@ const SuperReports = () => {
   const isBfarReport = activeReport === "fisheries-bfar";
   const isDailyVehicleTicketReport = activeReport === "daily-vehicle-ticket";
   const isVehicleTicketReport = activeReport === "vehicle-ticket";
+  const isBillingReport = activeReport === "billing";
   const isFeesReport = activeReport === "fees";
   const dailyDateParts = useMemo(() => getDateParts(dailyDate), [dailyDate]);
   const selectedMonthLabel = useMemo(
@@ -1388,15 +1514,57 @@ const SuperReports = () => {
     { enabled: shouldFetchFees },
   );
   const feeReportData = feeReportQuery.data;
-  const reportViewerUrl = (isRevenueReport || isRemittanceReport || isRegisteredBoatsReport || isOwnerInfoReport || isDockingReport || isBanyeraReport || isBfarReport || isDailyVehicleTicketReport || isVehicleTicketReport || isFeesReport) && reportPdfUrl
+
+  const shouldFetchBilling = reportGenerated && isBillingReport && (
+    (generatedFilters.filterType === "daily" && Boolean(generatedFilters.date)) ||
+    (generatedFilters.filterType === "monthly" && Boolean(generatedFilters.month) && Boolean(generatedFilters.year)) ||
+    (generatedFilters.filterType === "yearly" && Boolean(generatedFilters.year))
+  );
+  const billingParams = useMemo(() => ({
+    filterType: generatedFilters.filterType || billingFilterType,
+    selectedDate: generatedFilters.date,
+    selectedMonth: generatedFilters.month && generatedFilters.year ? `${generatedFilters.year}-${generatedFilters.month}` : undefined,
+    selectedYear: generatedFilters.year,
+  }), [generatedFilters.filterType, generatedFilters.date, generatedFilters.month, generatedFilters.year, billingFilterType]);
+
+  const billingReportQuery = useBillingReportDataQuery(
+    billingParams,
+    { enabled: shouldFetchBilling },
+  );
+  const billingReportData = billingReportQuery.data;
+
+  const reportViewerUrl = (isRevenueReport || isRemittanceReport || isRegisteredBoatsReport || isOwnerInfoReport || isDockingReport || isBanyeraReport || isBfarReport || isDailyVehicleTicketReport || isVehicleTicketReport || isBillingReport || isFeesReport) && reportPdfUrl
     ? `${reportPdfUrl}#view=FitH`
     : "about:blank";
+
+  const restoreCachedReportPreview = (reportKey) => {
+    const cachedPreview = reportPreviewCacheRef.current[reportKey];
+
+    if (!cachedPreview?.url) {
+      setReportGenerated(false);
+      setReportPdfUrl("");
+      setReportPdfFileName("");
+      setReportPdfLoading(false);
+      setGeneratedFilters({});
+      setReportBuildRequest(null);
+      return;
+    }
+
+    setReportGenerated(true);
+    setReportPdfUrl(cachedPreview.url);
+    setReportPdfFileName(cachedPreview.fileName || getPdfFileName(reportKey, cachedPreview.generatedFilters ?? {}));
+    setReportPdfLoading(false);
+    setGeneratedFilters(cachedPreview.generatedFilters ?? {});
+    setReportBuildRequest(null);
+  };
 
   const clearReportPreview = () => {
     setReportGenerated(false);
     setReportPdfUrl("");
+    setReportPdfFileName("");
     setReportPdfLoading(false);
     setGeneratedFilters({});
+    setReportBuildRequest(null);
   };
 
   const resetReportFilters = () => {
@@ -1413,15 +1581,16 @@ const SuperReports = () => {
     setDockingFilterType("daily");
     setBanyeraFilterType("daily");
     setRemittanceFilterType("daily");
+    setBillingFilterType("daily");
     setVehicleDailyFilterType("daily");
   };
 
   const handleReportChange = (nextReport) => {
     if (!isAllowedReportKey(nextReport)) return;
-    clearReportPreview();
     resetReportFilters();
     setActiveReport(nextReport);
     setActiveItem(nextReport === "remittance" ? "Remittance" : "Reports");
+    restoreCachedReportPreview(nextReport);
   };
 
   const handleDailyDateChange = (_, currentDateString) => {
@@ -1482,6 +1651,11 @@ const SuperReports = () => {
     setRemittanceFilterType(value);
   };
 
+  const handleBillingFilterTypeChange = (value) => {
+    if (!value) return;
+    setBillingFilterType(value);
+  };
+
   const handleVehicleDailyFilterTypeChange = (value) => {
     if (!value) return;
     setVehicleDailyFilterType(value);
@@ -1503,6 +1677,15 @@ const SuperReports = () => {
         date: remittanceFilterType === "daily" ? remittanceDailyDate : undefined,
         month: remittanceFilterType === "monthly" ? remittanceMonthlyMonth : undefined,
         year: remittanceFilterType === "monthly" ? remittanceMonthlyYear : remittanceFilterType === "yearly" ? remittanceYearlyDate : undefined,
+      };
+    }
+
+    if (isBillingReport) {
+      return {
+        filterType: billingFilterType,
+        date: billingFilterType === "daily" ? dailyDate : undefined,
+        month: billingFilterType === "monthly" ? monthlyMonth : undefined,
+        year: billingFilterType === "monthly" ? monthlyYear : billingFilterType === "yearly" ? yearlyDate : undefined,
       };
     }
 
@@ -1563,6 +1746,10 @@ const SuperReports = () => {
       if (remittanceFilterType === "daily" && !remittanceDailyDate) { missing("Please select a day."); return; }
       if (remittanceFilterType === "monthly" && !(remittanceMonthlyMonth && remittanceMonthlyYear)) { missing("Please select month and year."); return; }
       if (remittanceFilterType === "yearly" && !remittanceYearlyDate) { missing("Please select a year."); return; }
+    } else if (isBillingReport) {
+      if (billingFilterType === "daily" && !dailyDate) { missing("Please select a day."); return; }
+      if (billingFilterType === "monthly" && !(monthlyMonth && monthlyYear)) { missing("Please select month and year."); return; }
+      if (billingFilterType === "yearly" && !yearlyDate) { missing("Please select a year."); return; }
     } else if (isDockingReport) {
       if (dockingFilterType === "daily" && !dailyDate) { missing("Please select a day."); return; }
       if (dockingFilterType === "monthly" && !(monthlyMonth && monthlyYear)) { missing("Please select month and year."); return; }
@@ -1585,8 +1772,11 @@ const SuperReports = () => {
     setIsGenerateActionDisabled(true);
     setGeneratedFilters(nextFilters);
     setReportGenerated(true);
-    setReportBuildKey((current) => current + 1);
+    const nextBuildKey = reportBuildKey + 1;
+    setReportBuildKey(nextBuildKey);
+    setReportBuildRequest({ key: nextBuildKey, report: activeReport });
     setReportPdfUrl("");
+    setReportPdfFileName("");
     setReportPdfLoading(true);
   };
 
@@ -1610,12 +1800,14 @@ const SuperReports = () => {
       banyeraData,
       bfarData,
       vehicleTicketReportData,
+      billingReportData,
       feeReportData,
       generatedFilters,
       revenueFilterType,
       remittanceFilterType,
       dockingFilterType,
       banyeraFilterType,
+      billingFilterType,
       vehicleDailyFilterType,
       dailyDate,
       monthlyMonth,
@@ -1639,6 +1831,7 @@ const SuperReports = () => {
             remittanceFilterType: exportContext.remittanceFilterType,
             dockingFilterType: exportContext.dockingFilterType,
             banyeraFilterType: exportContext.banyeraFilterType,
+            billingFilterType: exportContext.billingFilterType,
             vehicleDailyFilterType: exportContext.vehicleDailyFilterType,
           }) || [];
           const exportRows = getExportRowsForColumns(rawRows, columns, exportContext.activeReport) || [];
@@ -1647,7 +1840,7 @@ const SuperReports = () => {
           showBottomToast(
             "error",
             rawCount === 0
-              ? "There is no report data available to export. (0 rows)"
+              ? "There is no report data available to export."
               : exportCount === 0
               ? `Report has ${rawCount} rows but no exportable columns produced (0 export rows).`
               : "There is no report data available to export.",
@@ -1678,9 +1871,11 @@ const SuperReports = () => {
                   ? bfarReportQuery.isSuccess && !bfarReportQuery.isFetching
                   : (isDailyVehicleTicketReport || isVehicleTicketReport)
                       ? vehicleTicketReportQuery.isSuccess && !vehicleTicketReportQuery.isFetching
-                      : isFeesReport
-                        ? feeReportQuery.isSuccess && !feeReportQuery.isFetching
-                        : true
+                      : isBillingReport
+                        ? billingReportQuery.isSuccess && !billingReportQuery.isFetching
+                        : isFeesReport
+                          ? feeReportQuery.isSuccess && !feeReportQuery.isFetching
+                          : true
   );
 
   useEffect(() => {
@@ -1690,8 +1885,162 @@ const SuperReports = () => {
   }, [reportPdfLoading]);
 
   useEffect(() => {
+    return () => {
+      Object.values(reportPreviewCacheRef.current).forEach((cachedPreview) => {
+        if (cachedPreview?.url?.startsWith("blob:")) URL.revokeObjectURL(cachedPreview.url);
+      });
+      reportPreviewCacheRef.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!reportGenerated || !isOwnerInfoReport || !ownerInfoReportData || !isQueryDataReady) {
+      ownerInfoReportDataRef.current = ownerInfoReportData || null;
+      return;
+    }
+
+    if (!ownerInfoReportDataRef.current) {
+      ownerInfoReportDataRef.current = ownerInfoReportData;
+      return;
+    }
+
+    if (ownerInfoReportDataRef.current === ownerInfoReportData) return;
+
+    ownerInfoReportDataRef.current = ownerInfoReportData;
+    if (reportBuildRequest) return;
+
+    setReportBuildKey((currentKey) => {
+      const nextBuildKey = currentKey + 1;
+      setReportBuildRequest({ key: nextBuildKey, report: "owner-info" });
+      return nextBuildKey;
+    });
+  }, [isOwnerInfoReport, isQueryDataReady, ownerInfoReportData, reportBuildRequest, reportGenerated]);
+
+  useEffect(() => {
+    if (!reportGenerated || !isDockingReport || !dockingReportData || !isQueryDataReady) {
+      dockingReportDataRef.current = dockingReportData || null;
+      return;
+    }
+
+    if (!dockingReportDataRef.current) {
+      dockingReportDataRef.current = dockingReportData;
+      return;
+    }
+
+    if (dockingReportDataRef.current === dockingReportData) return;
+
+    dockingReportDataRef.current = dockingReportData;
+    if (reportBuildRequest) return;
+
+    setReportBuildKey((currentKey) => {
+      const nextBuildKey = currentKey + 1;
+      setReportBuildRequest({ key: nextBuildKey, report: "docking" });
+      return nextBuildKey;
+    });
+  }, [dockingReportData, isDockingReport, isQueryDataReady, reportBuildRequest, reportGenerated]);
+
+  useEffect(() => {
+    if (!reportGenerated || !isBanyeraReport || !banyeraData || !isQueryDataReady) {
+      banyeraReportDataRef.current = banyeraData || null;
+      return;
+    }
+
+    if (!banyeraReportDataRef.current) {
+      banyeraReportDataRef.current = banyeraData;
+      return;
+    }
+
+    if (banyeraReportDataRef.current === banyeraData) return;
+
+    banyeraReportDataRef.current = banyeraData;
+    if (reportBuildRequest) return;
+
+    setReportBuildKey((currentKey) => {
+      const nextBuildKey = currentKey + 1;
+      setReportBuildRequest({ key: nextBuildKey, report: "banyera" });
+      return nextBuildKey;
+    });
+  }, [banyeraData, isBanyeraReport, isQueryDataReady, reportBuildRequest, reportGenerated]);
+
+  useEffect(() => {
+    if (!reportGenerated || !isBfarReport || !bfarData || !isQueryDataReady) {
+      bfarReportDataRef.current = bfarData || null;
+      return;
+    }
+
+    if (!bfarReportDataRef.current) {
+      bfarReportDataRef.current = bfarData;
+      return;
+    }
+
+    if (bfarReportDataRef.current === bfarData) return;
+
+    bfarReportDataRef.current = bfarData;
+    if (reportBuildRequest) return;
+
+    setReportBuildKey((currentKey) => {
+      const nextBuildKey = currentKey + 1;
+      setReportBuildRequest({ key: nextBuildKey, report: "fisheries-bfar" });
+      return nextBuildKey;
+    });
+  }, [bfarData, isBfarReport, isQueryDataReady, reportBuildRequest, reportGenerated]);
+
+  useEffect(() => {
+    const isVehicleReport = isDailyVehicleTicketReport || isVehicleTicketReport;
+    if (!reportGenerated || !isVehicleReport || !vehicleTicketReportData || !isQueryDataReady) {
+      vehicleTicketReportDataRef.current = vehicleTicketReportData || null;
+      return;
+    }
+
+    if (!vehicleTicketReportDataRef.current) {
+      vehicleTicketReportDataRef.current = vehicleTicketReportData;
+      return;
+    }
+
+    if (vehicleTicketReportDataRef.current === vehicleTicketReportData) return;
+
+    vehicleTicketReportDataRef.current = vehicleTicketReportData;
+    if (reportBuildRequest) return;
+
+    setReportBuildKey((currentKey) => {
+      const nextBuildKey = currentKey + 1;
+      setReportBuildRequest({ key: nextBuildKey, report: activeReport });
+      return nextBuildKey;
+    });
+  }, [activeReport, isDailyVehicleTicketReport, isQueryDataReady, isVehicleTicketReport, reportBuildRequest, reportGenerated, vehicleTicketReportData]);
+
+  useEffect(() => {
+    if (!reportGenerated || !isFeesReport || !feeReportData || !isQueryDataReady) {
+      feeReportDataRef.current = feeReportData || null;
+      return;
+    }
+
+    if (!feeReportDataRef.current) {
+      feeReportDataRef.current = feeReportData;
+      return;
+    }
+
+    if (feeReportDataRef.current === feeReportData) return;
+
+    feeReportDataRef.current = feeReportData;
+    if (reportBuildRequest) return;
+
+    setReportBuildKey((currentKey) => {
+      const nextBuildKey = currentKey + 1;
+      setReportBuildRequest({ key: nextBuildKey, report: "fees" });
+      return nextBuildKey;
+    });
+  }, [feeReportData, isFeesReport, isQueryDataReady, reportBuildRequest, reportGenerated]);
+
+  useEffect(() => {
     // Only build when user explicitly requested generation and data is ready
-    if (!reportGenerated || !isQueryDataReady) {
+    if (
+      !reportGenerated ||
+      !isQueryDataReady ||
+      !reportBuildRequest ||
+      reportBuildRequest.key !== reportBuildKey ||
+      reportBuildRequest.report !== activeReport
+    ) {
       return;
     }
 
@@ -1701,7 +2050,7 @@ const SuperReports = () => {
     const buildPdf = async () => {
       if (!isActive.current) return;
 
-      if (!isRevenueReport && !isRemittanceReport && !isRegisteredBoatsReport && !isOwnerInfoReport && !isDockingReport && !isBanyeraReport && !isBfarReport && !isDailyVehicleTicketReport && !isVehicleTicketReport && !isFeesReport) {
+      if (!isRevenueReport && !isRemittanceReport && !isRegisteredBoatsReport && !isOwnerInfoReport && !isDockingReport && !isBanyeraReport && !isBfarReport && !isDailyVehicleTicketReport && !isVehicleTicketReport && !isBillingReport && !isFeesReport) {
         setReportPdfUrl("");
         setReportPdfLoading(false);
         return;
@@ -1709,6 +2058,7 @@ const SuperReports = () => {
 
       setReportPdfLoading(true);
       try {
+        const nextFileName = getPdfFileName(activeReport, generatedFilters);
         const pdfBytes = isRevenueReport
           ? await buildRevenuePdf({
               filterType: generatedFilters.filterType,
@@ -1726,29 +2076,49 @@ const SuperReports = () => {
             : isOwnerInfoReport
               ? await buildOwnerInfoPdf({ preparedBy, reportData: ownerInfoReportData })
               : isDockingReport
-                ? await buildDockingPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedYearlyDate, yearlyDate: generatedYearlyDate, preparedBy, reportData: dockingReportData })
+                ? await buildDockingPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedMonthlyDateParts.year, yearlyDate: generatedYearlyDate, preparedBy, reportData: dockingReportData })
                 : isBanyeraReport
-                  ? await buildBanyeraPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedYearlyDate, yearlyDate: generatedYearlyDate, preparedBy, reportData: banyeraData })
+                  ? await buildBanyeraPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedMonthlyDateParts.year, yearlyDate: generatedYearlyDate, preparedBy, reportData: banyeraData })
                   : isBfarReport
-                    ? await buildBfarPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedYearlyDate, yearlyDate: generatedYearlyDate, preparedBy, reportData: bfarData })
+                    ? await buildBfarPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedMonthlyDateParts.year, yearlyDate: generatedYearlyDate, preparedBy, reportData: bfarData })
                     : isDailyVehicleTicketReport
-                      ? await buildVehicleDailyPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedYearlyDate, yearlyDate: generatedYearlyDate, preparedBy, reportData: vehicleTicketReportData })
+                      ? await buildVehicleDailyPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedMonthlyDateParts.year, yearlyDate: generatedYearlyDate, preparedBy, reportData: vehicleTicketReportData })
                       : isVehicleTicketReport
                         ? await buildVehicleAnnualPdf({ year: generatedYearlyDate, yearlyDate: generatedYearlyDate, preparedBy, reportData: vehicleTicketReportData })
+                        : isBillingReport
+                          ? await buildBillingReportPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedMonthlyDateParts.year, yearlyDate: generatedYearlyDate, preparedBy, reportData: billingReportData })
                         : isFeesReport
                           ? await buildFeePdf({ year: generatedYearlyDate, yearlyDate: generatedYearlyDate, preparedBy, reportData: feeReportData })
                           : isRemittanceReport
-                            ? await buildRemittanceReportPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedYearlyDate, yearlyDate: generatedYearlyDate, preparedBy, reportData: remittanceReportData })
+                            ? await buildRemittanceReportPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedYearlyDate, yearlyDate: generatedYearlyDate, preparedBy, reportData: remittanceReportData, includeCollectionSources: false })
                             : null;
 
         if (!pdfBytes) return;
-        const pdfBlob = new Blob([pdfBytes], { type: "application/pdf" });
-        nextUrl = URL.createObjectURL(pdfBlob);
-        if (isActive.current) setReportPdfUrl(nextUrl);
+        nextUrl = createBlobPdfPreviewUrl(pdfBytes, nextFileName);
+        if (!isActive.current) {
+          if (nextUrl.startsWith("blob:")) URL.revokeObjectURL(nextUrl);
+          return;
+        }
+
+        const previousUrl = reportPreviewCacheRef.current[activeReport]?.url;
+        if (previousUrl && previousUrl !== nextUrl) {
+          if (previousUrl.startsWith("blob:")) URL.revokeObjectURL(previousUrl);
+        }
+
+        reportPreviewCacheRef.current[activeReport] = {
+          url: nextUrl,
+          fileName: nextFileName,
+          generatedFilters: { ...generatedFilters },
+        };
+        setReportPdfUrl(nextUrl);
+        setReportPdfFileName(nextFileName);
       } catch (error) {
         if (isActive.current) setReportPdfUrl("");
       } finally {
-        if (isActive.current) setReportPdfLoading(false);
+        if (isActive.current) {
+          setReportBuildRequest(null);
+          setReportPdfLoading(false);
+        }
       }
     };
 
@@ -1756,11 +2126,12 @@ const SuperReports = () => {
 
     return () => {
       isActive.current = false;
-      if (nextUrl) URL.revokeObjectURL(nextUrl);
     };
   }, [
     reportGenerated,
     reportBuildKey,
+    reportBuildRequest,
+    activeReport,
     isQueryDataReady,
     isRevenueReport,
     isRemittanceReport,
@@ -1771,6 +2142,7 @@ const SuperReports = () => {
     isBfarReport,
     isDailyVehicleTicketReport,
     isVehicleTicketReport,
+    isBillingReport,
     isFeesReport,
     revenueReportData,
     remittanceReportData,
@@ -1780,6 +2152,7 @@ const SuperReports = () => {
     banyeraData,
     bfarData,
     vehicleTicketReportData,
+    billingReportData,
     feeReportData,
     preparedBy,
     generatedFilters.filterType,
@@ -1909,6 +2282,8 @@ const SuperReports = () => {
                   onBanyeraFilterTypeChange={handleBanyeraFilterTypeChange}
                   remittanceFilterType={remittanceFilterType}
                   onRemittanceFilterTypeChange={handleRemittanceFilterTypeChange}
+                  billingFilterType={billingFilterType}
+                  onBillingFilterTypeChange={handleBillingFilterTypeChange}
                   vehicleDailyFilterType={vehicleDailyFilterType}
                   onVehicleDailyFilterTypeChange={handleVehicleDailyFilterTypeChange}
                   monthOptions={MONTH_OPTIONS}

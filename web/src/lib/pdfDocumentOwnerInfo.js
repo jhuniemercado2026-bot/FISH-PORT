@@ -181,6 +181,7 @@ export const buildOwnerInfoPdf = async ({
 }) => {
   const composer = await createPdfComposer();
   const owners = Array.isArray(reportData.owners) ? reportData.owners : [];
+  const totalOwners = Number(reportData.totalOwners ?? reportData.total_owners ?? owners.length);
   const generatedOn = new Date().toLocaleDateString("en-PH", {
     month: "long",
     day: "numeric",
@@ -263,7 +264,7 @@ export const buildOwnerInfoPdf = async ({
   const secondRowItems = [
     ["Municipality", "Opol"],
     ["Region", "X"],
-    ["Total Owners", String(owners.length)],
+    ["Total Owners", String(Number.isFinite(totalOwners) ? totalOwners : owners.length)],
   ];
   const firstRowWidth = CONTENT_WIDTH / firstRowItems.length;
   const secondRowWidth = CONTENT_WIDTH / secondRowItems.length;

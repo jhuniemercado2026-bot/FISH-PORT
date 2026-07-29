@@ -201,14 +201,23 @@ export const removeBanyeraFishClassificationFromCache = (queryClient, classifica
   queryClient.setQueriesData({ queryKey: ["banyera-data", "fish-classifications"] }, (previous) => {
     if (!previous) return previous;
 
-    const nextClassifications = (previous.classifications ?? []).filter(
+    const previousClassifications = previous.classifications ?? [];
+    const removedClassification = previousClassifications.find(
+      (item) => String(item?.classification_id ?? "") === String(classificationId)
+    );
+    const removedWasUsed = Number(removedClassification?.fish_using_count ?? 0) > 0;
+    const nextClassifications = previousClassifications.filter(
       (item) => String(item?.classification_id ?? "") !== String(classificationId)
     );
     const nextSummary = previous.summary ? { ...previous.summary } : { total: 0, used: 0, unused: 0 };
 
-    nextSummary.total = Math.max(0, Number(nextSummary.total ?? 0) - 1);
-    nextSummary.used = Math.max(0, Number(nextSummary.used ?? 0) - 1);
-    nextSummary.unused = Math.max(0, Number(nextSummary.unused ?? 0) - 1);
+    if (removedClassification) {
+      if (removedWasUsed) {
+        nextSummary.used = Math.max(0, Number(nextSummary.used ?? 0) - 1);
+      } else {
+        nextSummary.unused = Math.max(0, Number(nextSummary.unused ?? 0) - 1);
+      }
+    }
 
     return {
       ...previous,

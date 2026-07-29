@@ -17,6 +17,7 @@ class Boat extends Model
         'owner_id',
         'boat_type_id',
         'image_path',
+        'image_public_id',
         'status',
         'created_by',
     ];
@@ -24,6 +25,7 @@ class Boat extends Model
     protected $hidden = [
         'updated_at',
         'image_path',
+        'image_public_id',
         'deleted_at',
     ];
 
@@ -87,7 +89,7 @@ class Boat extends Model
     public function scopeForManagementIndex(Builder $query): Builder
     {
         return $query
-            ->select('boat_id', 'boat_name', 'owner_id', 'boat_type_id', 'image_path', 'status', 'created_at', 'created_by')
+            ->select('boat_id', 'boat_name', 'owner_id', 'boat_type_id', 'image_path', 'image_public_id', 'status', 'created_at', 'created_by')
             ->with(self::managementRelations())
             ->active();
     }

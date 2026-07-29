@@ -136,6 +136,7 @@ class BillController extends Controller
                 'stats' => [
                     'total_records' => 0,
                     'today_records' => 0,
+                    'today_payments' => 0,
                 ],
             ], 200);
         }
@@ -193,6 +194,50 @@ class BillController extends Controller
         return max(1, intdiv($rowsBeforeTarget, $perPage) + 1);
     }
 
+    private function highlightedOwnerStatementPage($query, ?string $highlightOwnerId, int $requestedPage, int $perPage): int
+    {
+        $highlightOwnerId = trim((string) $highlightOwnerId);
+
+        if ($highlightOwnerId === '' || !ctype_digit($highlightOwnerId)) {
+            return $requestedPage;
+        }
+
+        $source = fn () => DB::query()->fromSub(clone $query, 'owner_highlight_source');
+        $target = $source()
+            ->whereRaw('FIND_IN_SET(?, owner_ids)', [(int) $highlightOwnerId])
+            ->first(['owner_id', 'owner_ids', 'owner_firstname_sort', 'owner_lastname_sort', 'owner_archived_sort']);
+
+        if (!$target?->owner_id) {
+            return $requestedPage;
+        }
+
+        $targetArchived = (int) $target->owner_archived_sort;
+        $targetFirstName = (string) ($target->owner_firstname_sort ?? '');
+        $targetLastName = (string) ($target->owner_lastname_sort ?? '');
+
+        $rowsBeforeTarget = $source()
+            ->where(function ($positionQuery) use ($targetArchived, $targetFirstName, $targetLastName) {
+                $positionQuery
+                    ->where('owner_archived_sort', '<', $targetArchived)
+                    ->orWhere(function ($sameArchiveQuery) use ($targetArchived, $targetFirstName, $targetLastName) {
+                        $sameArchiveQuery
+                            ->where('owner_archived_sort', $targetArchived)
+                            ->where(function ($nameQuery) use ($targetFirstName, $targetLastName) {
+                                $nameQuery
+                                    ->where('owner_firstname_sort', '<', $targetFirstName)
+                                    ->orWhere(function ($sameFirstNameQuery) use ($targetFirstName, $targetLastName) {
+                                        $sameFirstNameQuery
+                                            ->where('owner_firstname_sort', $targetFirstName)
+                                            ->where('owner_lastname_sort', '<', $targetLastName);
+                                    });
+                            });
+                    });
+            })
+            ->count();
+
+        return max(1, intdiv($rowsBeforeTarget, $perPage) + 1);
+    }
+
     public function statementOfAccount(Request $request)
     {
         $perPage = min(max((int) $request->query('per_page', 10), 1), 100);
@@ -200,6 +245,7 @@ class BillController extends Controller
         $status = (string) $request->query('status', 'all');
         $selectedBoat = trim((string) $request->query('boat', ''));
         $highlightBoatId = $request->query('highlight_boat_id', '');
+        $statementType = (string) $request->query('statement_type', 'boats');
         $fiscalYear = null;
 
         if ($request->boolean('selected_only') && $selectedBoat !== '') {
@@ -220,6 +266,10 @@ class BillController extends Controller
                 ],
                 'selected_record' => $this->statementBoatDetails($selectedBoat, $fiscalYear),
             ]);
+        }
+
+        if ($statementType === 'owners') {
+            return $this->statementOwnerResponse($request, $fiscalYear);
         }
 
         $paymentTotals = DB::table('payments')
@@ -280,6 +330,7 @@ class BillController extends Controller
                 DB::raw("TRIM(CONCAT(COALESCE(owner.owner_firstname, ''), ' ', COALESCE(owner.owner_lastname, ''))) as owner_name"),
                 'boat_type.type_name as boat_type',
                 'boat.created_at as boat_created_at',
+                'boat.deleted_at as boat_deleted_at',
                 DB::raw('COALESCE(summary.billed_total, 0) as billed_total'),
                 DB::raw('COALESCE(summary.paid_total, 0) as paid_total'),
                 DB::raw('COALESCE(summary.balance_total, 0) as balance_total'),
@@ -290,11 +341,16 @@ class BillController extends Controller
                 DB::raw('COALESCE(unbilled_banyera.unbilled_banyera_total, 0) as unbilled_banyera_total'),
                 DB::raw('(COALESCE(summary.billed_total, 0) + COALESCE(unbilled_dockings.unbilled_docking_total, 0) + COALESCE(unbilled_banyera.unbilled_banyera_total, 0)) as total_billed'),
                 DB::raw('(COALESCE(summary.balance_total, 0) + COALESCE(unbilled_dockings.unbilled_docking_total, 0) + COALESCE(unbilled_banyera.unbilled_banyera_total, 0)) as balance_due'),
-            ])
-            ->whereRaw('(COALESCE(summary.billed_total, 0) + COALESCE(unbilled_dockings.unbilled_docking_total, 0) + COALESCE(unbilled_banyera.unbilled_banyera_total, 0)) > 0');
+            ]);
+
+        $masterStatsRows = DB::query()->fromSub(clone $query, 'master_stats_source')->get();
 
         if ($search !== '') {
-            $query->where('boat.boat_name', 'like', "%{$search}%");
+            $query->where(function ($searchQuery) use ($search) {
+                $searchQuery
+                    ->where('boat.boat_name', 'like', "%{$search}%")
+                    ->orWhereRaw("TRIM(CONCAT(COALESCE(owner.owner_firstname, ''), ' ', COALESCE(owner.owner_lastname, ''))) like ?", ["%{$search}%"]);
+            });
         }
 
         if ($status !== 'all') {
@@ -306,6 +362,11 @@ class BillController extends Controller
             'total_billed' => (float) $statsRows->sum('total_billed'),
             'total_collected' => (float) $statsRows->sum('paid_total'),
             'total_receivables' => (float) $statsRows->sum('balance_due'),
+        ];
+        $masterStats = [
+            'total_billed' => (float) $masterStatsRows->sum('total_billed'),
+            'total_collected' => (float) $masterStatsRows->sum('paid_total'),
+            'total_receivables' => (float) $masterStatsRows->sum('balance_due'),
         ];
 
         $page = max((int) $request->query('page', 1), 1);
@@ -331,8 +392,21 @@ class BillController extends Controller
                 'to' => $records->lastItem(),
             ],
             'stats' => $stats,
+            'overview_stats' => $masterStats,
             'selected_record' => $selectedBoat !== '' ? $this->statementBoatDetails($selectedBoat, $fiscalYear) : null,
         ]);
+    }
+
+    public function boatStatement(Request $request)
+    {
+        $request->merge(['statement_type' => 'boats']);
+
+        return $this->statementOfAccount($request);
+    }
+
+    public function ownerStatement(Request $request)
+    {
+        return $this->statementOwnerResponse($request, null);
     }
 
     public function store(Request $request)
@@ -502,12 +576,22 @@ class BillController extends Controller
 
                 if ($transactionType === 'docking') {
                     $record = Docking::findOrFail($item['docking_id']);
+                    if (!is_null($record->voided_at)) {
+                        throw ValidationException::withMessages([
+                            'items' => 'Selected billing item is no longer available.',
+                        ]);
+                    }
                     $normalized['docking_id'] = $record->docking_id;
                     $normalized['amount'] = (float) ($item['amount'] ?? $record->docking_fee ?? 0);
                 }
 
                 if ($transactionType === 'banyera') {
                     $record = BanyeraTransaction::findOrFail($item['banyera_id']);
+                    if (!is_null($record->voided_at)) {
+                        throw ValidationException::withMessages([
+                            'items' => 'Selected billing item is no longer available.',
+                        ]);
+                    }
                     $normalized['banyera_id'] = $record->banyera_id;
                     $normalized['amount'] = (float) ($item['amount'] ?? $record->total_fee ?? 0);
                 }
@@ -569,6 +653,252 @@ class BillController extends Controller
         END";
     }
 
+    private function statementOwnerResponse(Request $request, ?int $fiscalYear = null)
+    {
+        $perPage = min(max((int) $request->query('per_page', 10), 1), 100);
+        $page = max((int) $request->query('page', 1), 1);
+        $search = trim((string) $request->query('search', ''));
+        $status = (string) $request->query('status', 'all');
+        $highlightOwnerId = $request->query('highlight_owner_id', '');
+
+        [$boatTotals, $paymentTotals] = $this->statementBoatTotalsSubqueries($fiscalYear);
+
+        $ownerNameSql = "TRIM(CONCAT(COALESCE(owner.owner_firstname, ''), ' ', COALESCE(owner.owner_lastname, '')))";
+        $billedSumSql = 'COALESCE(SUM(COALESCE(boat_summary.total_billed, 0)), 0)';
+        $paidSumSql = 'COALESCE(SUM(COALESCE(boat_summary.paid_total, 0)), 0)';
+        $balanceSumSql = 'COALESCE(SUM(COALESCE(boat_summary.balance_due, 0)), 0)';
+        $statusSql = "CASE
+            WHEN {$balanceSumSql} <= 0.009 THEN 'paid'
+            WHEN {$paidSumSql} > 0.009 THEN 'partial'
+            ELSE 'pending'
+        END";
+
+        $query = DB::table('boat_owners as owner')
+            ->leftJoinSub($boatTotals, 'boat_summary', function ($join) {
+                $join->on('boat_summary.owner_id', '=', 'owner.owner_id');
+            })
+            ->select([
+                DB::raw('MIN(owner.owner_id) as owner_id'),
+                DB::raw('GROUP_CONCAT(owner.owner_id) as owner_ids'),
+                DB::raw("{$ownerNameSql} as owner_name"),
+                'owner.owner_firstname as owner_firstname_sort',
+                'owner.owner_lastname as owner_lastname_sort',
+                DB::raw('MIN(owner.created_at) as owner_created_at'),
+                DB::raw('MAX(owner.deleted_at) as owner_deleted_at'),
+                DB::raw('MAX(owner.deleted_at) is not null as owner_archived_sort'),
+                DB::raw('COUNT(DISTINCT boat_summary.boat_id) as boat_count'),
+                DB::raw('COALESCE(SUM(COALESCE(boat_summary.bill_count, 0)), 0) as bill_count'),
+                DB::raw('COALESCE(SUM(COALESCE(boat_summary.payment_count, 0)), 0) as payment_count'),
+                DB::raw("{$billedSumSql} as total_billed"),
+                DB::raw("{$paidSumSql} as paid_total"),
+                DB::raw("{$balanceSumSql} as balance_due"),
+                DB::raw('MAX(boat_summary.latest_billed_date) as latest_billed_date'),
+            ])
+            ->groupBy('owner.owner_firstname', 'owner.owner_lastname');
+
+        $masterStatsRows = DB::query()->fromSub(clone $query, 'owner_master_stats_source')->get();
+        $masterStats = [
+            'total_billed' => (float) $masterStatsRows->sum('total_billed'),
+            'total_collected' => (float) $masterStatsRows->sum('paid_total'),
+            'total_receivables' => (float) $masterStatsRows->sum('balance_due'),
+        ];
+
+        if ($search !== '') {
+            $query->where(function ($searchQuery) use ($search, $ownerNameSql) {
+                $searchQuery
+                    ->whereRaw("{$ownerNameSql} like ?", ["%{$search}%"])
+                    ->orWhereExists(function ($existsQuery) use ($search) {
+                        $existsQuery
+                            ->selectRaw('1')
+                            ->from('boats as owner_search_boats')
+                            ->whereColumn('owner_search_boats.owner_id', 'owner.owner_id')
+                            ->where('owner_search_boats.boat_name', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        if ($status !== 'all') {
+            $query->havingRaw("{$statusSql} = ?", [$status]);
+        }
+
+        $statsRows = DB::query()->fromSub(clone $query, 'owner_stats_source')->get();
+        $stats = [
+            'total_billed' => (float) $statsRows->sum('total_billed'),
+            'total_collected' => (float) $statsRows->sum('paid_total'),
+            'total_receivables' => (float) $statsRows->sum('balance_due'),
+        ];
+
+        $page = $this->highlightedOwnerStatementPage($query, $highlightOwnerId, $page, $perPage);
+
+        $records = $query
+            ->orderByRaw('MAX(owner.deleted_at) is not null')
+            ->orderBy('owner.owner_firstname')
+            ->orderBy('owner.owner_lastname')
+            ->paginate($perPage, ['*'], 'page', $page)
+            ->appends($request->query());
+
+        $items = collect($records->items())->map(fn ($row) => $this->transformStatementOwnerRecord($row))->values();
+        $ownerIds = $items
+            ->flatMap(fn ($owner) => $owner['owner_ids'] ?? [])
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $boatsByOwner = $this->statementBoatRowsForOwners($ownerIds, $fiscalYear);
+
+        $items = $items->map(function (array $owner) use ($boatsByOwner) {
+            $owner['boats'] = collect($owner['owner_ids'] ?? [])
+                ->flatMap(fn ($ownerId) => $boatsByOwner->get((int) $ownerId, collect()))
+                ->values();
+            return $owner;
+        })->values();
+
+        return response()->json([
+            'data' => $items,
+            'meta' => [
+                'current_page' => $records->currentPage(),
+                'last_page' => $records->lastPage(),
+                'per_page' => $records->perPage(),
+                'total' => $records->total(),
+                'from' => $records->firstItem(),
+                'to' => $records->lastItem(),
+            ],
+            'stats' => $stats,
+            'overview_stats' => $masterStats,
+            'selected_record' => null,
+        ]);
+    }
+
+    private function statementBoatTotalsSubqueries(?int $fiscalYear = null): array
+    {
+        $paymentTotals = DB::table('payments')
+            ->select(
+                'bill_id',
+                DB::raw('COALESCE(SUM(amount_paid), 0) as total_paid'),
+                DB::raw('COUNT(*) as payment_count')
+            )
+            ->groupBy('bill_id');
+
+        $billSummaries = DB::table('bills as b')
+            ->leftJoinSub($paymentTotals, 'payment_totals', function ($join) {
+                $join->on('payment_totals.bill_id', '=', 'b.bill_id');
+            })
+            ->select([
+                'b.boat_id',
+                DB::raw('SUM(b.total_amount) as billed_total'),
+                DB::raw('SUM(COALESCE(payment_totals.total_paid, 0)) as paid_total'),
+                DB::raw('SUM(GREATEST(b.total_amount - COALESCE(payment_totals.total_paid, 0), 0)) as balance_total'),
+                DB::raw('COUNT(b.bill_id) as bill_count'),
+                DB::raw('SUM(COALESCE(payment_totals.payment_count, 0)) as payment_count'),
+                DB::raw('MAX(b.created_at) as latest_billed_date'),
+            ])
+            ->when($fiscalYear, fn ($query) => $query->whereYear('b.created_at', $fiscalYear))
+            ->groupBy('b.boat_id');
+
+        $unbilledDockings = DB::table('dockings as d')
+            ->leftJoin('bill_items as bi', 'bi.docking_id', '=', 'd.docking_id')
+            ->whereNull('bi.docking_id')
+            ->whereNull('d.voided_at')
+            ->when($fiscalYear, fn ($query) => $query->whereYear('d.docking_date', $fiscalYear))
+            ->select('d.boat_id', DB::raw('SUM(d.docking_fee) as unbilled_docking_total'))
+            ->groupBy('d.boat_id');
+
+        $unbilledBanyera = DB::table('banyera_transactions as bt')
+            ->leftJoin('bill_items as bi', 'bi.banyera_id', '=', 'bt.banyera_id')
+            ->whereNull('bi.banyera_id')
+            ->whereNull('bt.voided_at')
+            ->when($fiscalYear, fn ($query) => $query->whereYear('bt.transaction_date', $fiscalYear))
+            ->select('bt.boat_id', DB::raw('SUM(bt.total_fee) as unbilled_banyera_total'))
+            ->groupBy('bt.boat_id');
+
+        $boatTotals = DB::table('boats as boat')
+            ->leftJoin('boat_owners as owner', 'owner.owner_id', '=', 'boat.owner_id')
+            ->leftJoin('boat_types as boat_type', 'boat_type.boat_type_id', '=', 'boat.boat_type_id')
+            ->leftJoinSub($billSummaries, 'summary', function ($join) {
+                $join->on('summary.boat_id', '=', 'boat.boat_id');
+            })
+            ->leftJoinSub($unbilledDockings, 'unbilled_dockings', function ($join) {
+                $join->on('unbilled_dockings.boat_id', '=', 'boat.boat_id');
+            })
+            ->leftJoinSub($unbilledBanyera, 'unbilled_banyera', function ($join) {
+                $join->on('unbilled_banyera.boat_id', '=', 'boat.boat_id');
+            })
+            ->select([
+                'boat.boat_id',
+                'boat.owner_id',
+                'boat.boat_name',
+                DB::raw("TRIM(CONCAT(COALESCE(owner.owner_firstname, ''), ' ', COALESCE(owner.owner_lastname, ''))) as owner_name"),
+                'boat_type.type_name as boat_type',
+                'boat.created_at as boat_created_at',
+                'boat.deleted_at as boat_deleted_at',
+                DB::raw('COALESCE(summary.billed_total, 0) as billed_total'),
+                DB::raw('COALESCE(summary.paid_total, 0) as paid_total'),
+                DB::raw('COALESCE(summary.balance_total, 0) as balance_total'),
+                DB::raw('COALESCE(summary.bill_count, 0) as bill_count'),
+                DB::raw('COALESCE(summary.payment_count, 0) as payment_count'),
+                DB::raw('summary.latest_billed_date as latest_billed_date'),
+                DB::raw('COALESCE(unbilled_dockings.unbilled_docking_total, 0) as unbilled_docking_total'),
+                DB::raw('COALESCE(unbilled_banyera.unbilled_banyera_total, 0) as unbilled_banyera_total'),
+                DB::raw('(COALESCE(summary.billed_total, 0) + COALESCE(unbilled_dockings.unbilled_docking_total, 0) + COALESCE(unbilled_banyera.unbilled_banyera_total, 0)) as total_billed'),
+                DB::raw('(COALESCE(summary.balance_total, 0) + COALESCE(unbilled_dockings.unbilled_docking_total, 0) + COALESCE(unbilled_banyera.unbilled_banyera_total, 0)) as balance_due'),
+            ]);
+
+        return [$boatTotals, $paymentTotals];
+    }
+
+    private function transformStatementOwnerRecord(object $row): array
+    {
+        $balance = (float) ($row->balance_due ?? 0);
+        $paid = (float) ($row->paid_total ?? 0);
+        $status = $balance <= 0.009 ? 'paid' : ($paid > 0.009 ? 'partial' : 'pending');
+
+        return [
+            'owner_key' => (string) $row->owner_id,
+            'owner_id' => (int) $row->owner_id,
+            'owner_ids' => collect(explode(',', (string) ($row->owner_ids ?? $row->owner_id)))
+                ->map(fn ($id) => (int) $id)
+                ->filter()
+                ->unique()
+                ->values()
+                ->all(),
+            'owner_name' => trim((string) $row->owner_name) !== '' ? $row->owner_name : '-',
+            'owner_created_at' => $row->owner_created_at,
+            'owner_deleted_at' => $row->owner_deleted_at,
+            'is_archived' => $row->owner_deleted_at !== null,
+            'boat_count' => (int) ($row->boat_count ?? 0),
+            'bill_count' => (int) ($row->bill_count ?? 0),
+            'payment_count' => (int) ($row->payment_count ?? 0),
+            'total_billed' => (float) ($row->total_billed ?? 0),
+            'total_paid' => $paid,
+            'balance_due' => $balance,
+            'latest_billed_date' => $row->latest_billed_date,
+            'statement_status' => $status,
+            'statement_status_label' => match ($status) {
+                'paid' => 'Paid',
+                'partial' => 'Partial',
+                default => 'Unpaid',
+            },
+            'boats' => [],
+        ];
+    }
+
+    private function statementBoatRowsForOwners(array $ownerIds, ?int $fiscalYear = null)
+    {
+        if (empty($ownerIds)) {
+            return collect();
+        }
+
+        [$boatTotals] = $this->statementBoatTotalsSubqueries($fiscalYear);
+
+        return DB::query()
+            ->fromSub($boatTotals, 'boat_statement_rows')
+            ->whereIn('owner_id', $ownerIds)
+            ->orderBy('boat_name')
+            ->get()
+            ->map(fn ($row) => $this->transformStatementBoatRecord($row))
+            ->groupBy(fn ($row) => (int) ($row['owner_id'] ?? 0));
+    }
+
     private function transformStatementBoatRecord(object $row): array
     {
         $balance = (float) ($row->balance_due ?? 0);
@@ -578,10 +908,13 @@ class BillController extends Controller
         return [
             'boat_key' => (string) $row->boat_id,
             'boat_id' => $row->boat_id,
+            'owner_id' => isset($row->owner_id) ? (int) $row->owner_id : null,
             'boat_name' => $row->boat_name ?: '-',
             'owner_name' => trim((string) $row->owner_name) !== '' ? $row->owner_name : '-',
             'boat_type' => $row->boat_type ?: '-',
             'boat_created_at' => $row->boat_created_at,
+            'boat_deleted_at' => $row->boat_deleted_at ?? null,
+            'is_archived' => ($row->boat_deleted_at ?? null) !== null,
             'total_billed' => (float) ($row->total_billed ?? 0),
             'total_paid' => $paid,
             'balance_due' => $balance,
@@ -623,7 +956,7 @@ class BillController extends Controller
             });
 
         $firstBill = $bills->first();
-        $boat = $firstBill?->boat ?? Boat::with(['owner', 'boatType'])->find($boatId);
+        $boat = $firstBill?->boat ?? Boat::withTrashed()->with(['owner', 'boatType'])->find($boatId);
 
         $unbilledCharges = collect();
         $billedDockingIds = BillItem::query()->whereNotNull('docking_id')->pluck('docking_id')->all();
@@ -681,6 +1014,8 @@ class BillController extends Controller
             'owner_name' => $boat?->owner?->full_name ?? ($firstBill?->payer_name ?? '-'),
             'boat_type' => $boat?->boatType?->type_name ?? '-',
             'boat_created_at' => $boat?->created_at,
+            'boat_deleted_at' => $boat?->deleted_at,
+            'is_archived' => $boat?->deleted_at !== null,
             'total_billed' => $totalBilled,
             'total_paid' => $totalPaid,
             'balance_due' => $balance,
@@ -711,6 +1046,15 @@ class BillController extends Controller
         $bill->setAttribute('payments_count', (int) ($bill->payments_count ?? ((bool) ($bill->has_payments ?? false) ? 1 : 0)));
         $bill->setAttribute('amount_paid', $totalPaid);
         $bill->setAttribute('balance', $balance);
+        $bill->items->each(function (BillItem $item) {
+            $transactionDate = match ($item->transaction_type) {
+                'docking' => $item->docking?->docking_date,
+                'banyera' => $item->banyeraTransaction?->transaction_date,
+                default => null,
+            };
+
+            $item->setAttribute('transaction_date', $transactionDate);
+        });
         $bill->setAttribute(
             'transaction_labels',
             $bill->items->map(function (BillItem $item) {
@@ -748,10 +1092,17 @@ class BillController extends Controller
                 : $today;
             $billsQuery = Bill::query();
             $this->applyFiscalYear($billsQuery, $request, 'bills.created_at');
+            $paymentsQuery = DB::table('payments');
+            $this->applyFiscalYear($paymentsQuery, $request, 'payments.payment_date');
 
             return [
                 'total_records' => (clone $billsQuery)->count(),
+                'total_payment_records' => (clone $paymentsQuery)->count(),
                 'today_records' => (clone $billsQuery)->whereBetween('created_at', [
+                    $statsDate->copy()->startOfDay(),
+                    $statsDate->copy()->endOfDay(),
+                ])->count(),
+                'today_payments' => (clone $paymentsQuery)->whereBetween('payment_date', [
                     $statsDate->copy()->startOfDay(),
                     $statsDate->copy()->endOfDay(),
                 ])->count(),
@@ -760,7 +1111,9 @@ class BillController extends Controller
             // Return default stats if query times out or fails
             return [
                 'total_records' => 0,
+                'total_payment_records' => 0,
                 'today_records' => 0,
+                'today_payments' => 0,
             ];
         }
     }

@@ -30,7 +30,7 @@ const sanitizeText = (value) =>
     .replace(/\s+/g, " ")
     .trim();
 
-const formatDateLabel = (value) => {
+const formatDateLabel = (value, options = {}) => {
   const normalized = String(value || "").slice(0, 10);
   if (!normalized) return "-";
 
@@ -38,7 +38,7 @@ const formatDateLabel = (value) => {
   if (Number.isNaN(date.getTime())) return normalized;
 
   return date.toLocaleDateString("en-PH", {
-    month: "long",
+    month: options.shortMonth ? "short" : "long",
     day: "numeric",
     year: "numeric",
   });
@@ -66,18 +66,6 @@ const formatMoneyValue = (value) =>
   });
 
 const formatMoney = (value) => `PHP ${formatMoneyValue(value)}`;
-
-const splitTimeParts = (value) => {
-  const label = String(value ?? "").trim();
-  if (!label || label === "-") return { main: "-", suffix: "" };
-
-  const tokens = label.split(" ");
-  if (tokens.length === 1) return { main: label, suffix: "" };
-
-  const suffix = tokens.pop();
-  const main = tokens.join(" ");
-  return { main: main || label, suffix };
-};
 
 const loadPngBytes = async (path) => {
   try {
@@ -344,7 +332,7 @@ const getBanyeraRows = (reportData, filterType, coverageKey) => {
 
       return {
         rowKey: String(transaction?.banyera_id ?? index),
-        transactionDate: formatDateLabel(transactionDate),
+        transactionDate: formatDateLabel(transactionDate, { shortMonth: filterType !== "daily" }),
         transactionTime: formatTimeLabel(transactionDateValue),
         boatName: transaction?.boat?.boat_name || transaction?.boat_name || "-",
         boatType:
@@ -458,7 +446,7 @@ export const buildBanyeraPdf = async ({
   const firstRowItems = [
     ["Report Type", reportTypeLabel],
     ["Coverage", reportDateLabel],
-    ["Day", reportDayLabel],
+    ...(filterType === "daily" ? [["Day", reportDayLabel]] : []),
     ["Prepared By", preparedBy],
   ];
   const secondRowItems = [
@@ -542,8 +530,8 @@ export const buildBanyeraPdf = async ({
           { key: "total", label: "Total (PHP)", width: 68 },
         ]
       : [
-          { key: "transactionDate", label: "Banyera Date", width: 90 },
-          { key: "transactionTime", label: "Time", width: 36 },
+          { key: "transactionDate", label: "Banyera Date", width: 78 },
+          { key: "transactionTime", label: "Time", width: 48 },
           { key: "boatName", label: "Boat Name", width: 70 },
           { key: "boatType", label: "Boat Type", width: 62 },
           { key: "fishItems", label: "Fish Items", width: 90 },
@@ -611,17 +599,10 @@ export const buildBanyeraPdf = async ({
           composer.cursorY - 19,
         );
       } else if (column.key === "transactionTime") {
-        const { main, suffix } = splitTimeParts(row.transactionTime);
-        composer.drawText(main, x + 8, composer.cursorY - 16, {
+        composer.drawText(String(row.transactionTime ?? "-"), x + 8, composer.cursorY - 19, {
           fontSize: 8,
           color: COLORS.black,
         });
-        if (suffix) {
-          composer.drawText(suffix, x + 8, composer.cursorY - 26, {
-            fontSize: 8,
-            color: COLORS.black,
-          });
-        }
       } else if (column.key === "boatName" || column.key === "boatType") {
         composer.drawText(String(row[column.key] ?? "-"), x + 8, composer.cursorY - 19, {
           fontSize: 8,

@@ -31,6 +31,7 @@ export const ModalTextInput = ({
   labelStyle = {},
   disabled = false,
   containerClassName = "",
+  wrapperClassName = "",
   ...inputProps
 }) => {
   const isReadOnly = disabled || inputProps.readOnly;
@@ -45,7 +46,7 @@ export const ModalTextInput = ({
       {label}
     </p>
     <div
-      className={`modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border bg-white px-4 transition-all focus-within:border-[#4096ff] ${visibleError ? "border-red-300" : "border-slate-200"} ${disabled ? "bg-slate-50" : ""}`}
+      className={`modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border bg-white px-4 transition-all focus-within:border-[#4096ff] ${visibleError ? "border-red-300" : "border-slate-200"} ${disabled ? "bg-slate-50" : ""} ${wrapperClassName}`.trim()}
     >
       <input
         type={type}
@@ -67,6 +68,7 @@ export const ModalTextInput = ({
 const Modal = ({
   title,
   onClose,
+  onCancel,
   onSave,
   closeOnBackdrop = false,
   saving = false,
@@ -76,9 +78,14 @@ const Modal = ({
   savingLabel = "",
   saveButtonWidth = "103px",
   closeLabel = "Cancel",
+  closeButtonWidth,
   maxWidth = "560px",
   minimumSavingMs = 2000,
   showSavingSpinner = true,
+  showFooter = true,
+  footerLeftContent = null,
+  bodyClassName = "",
+  contentClassName = "",
 }) => {
   const [internalSaving, setInternalSaving] = useState(false);
   const [externalSavingVisible, setExternalSavingVisible] = useState(false);
@@ -254,47 +261,53 @@ const Modal = ({
         </div>
         <div className="border-t border-slate-200" />
         <SkeletonLoadingProvider loading={false}>
-          <div className="universal-modal-scroll-hide max-h-[70vh] overflow-y-auto px-8 pb-5 pt-5">
-            <div className="flex flex-col gap-5">{children}</div>
+          <div className={`universal-modal-scroll-hide max-h-[70vh] overflow-y-auto px-8 pb-5 pt-5 ${bodyClassName}`.trim()}>
+            <div className={`flex flex-col gap-5 ${contentClassName}`.trim()}>{children}</div>
           </div>
         </SkeletonLoadingProvider>
-        <div className="flex justify-end gap-3 border-t border-slate-200 px-8 py-5">
-          <button
-            onClick={onClose}
-            disabled={isSaving}
-            className="cursor-pointer rounded-[10px] bg-white px-6 py-3 text-[14px] font-semibold transition-colors"
-            style={{
-              border: "2px solid #1a1f36",
-              color: "#1a1f36",
-              fontFamily: FONT,
-              opacity: isSaving ? 0.5 : 1,
-            }}
-          >
-            {closeLabel}
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={isSaving || saveDisabled}
-            className="flex cursor-pointer items-center justify-center gap-2 rounded-[10px] border-none px-6 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-[#2d3561]"
-            style={{
-              width: saveButtonWidth,
-              backgroundColor: "#1a1f36",
-              fontFamily: FONT,
-              opacity: isSaving || saveDisabled ? 0.7 : 1,
-            }}
-          >
-            {isSaving ? (
-              showSavingSpinner ? (
-              <>
-                <Spinner size={4} />
-                {savingLabel ? <span>{savingLabel}</span> : null}
-              </>
-              ) : (
-                savingLabel || saveLabel
-              )
-            ) : saveLabel}
-          </button>
-        </div>
+        {showFooter ? (
+          <div className="flex flex-col gap-4 border-t border-slate-200 px-8 py-5 sm:flex-row sm:items-center sm:justify-between">
+            {footerLeftContent ? <div className="min-w-0">{footerLeftContent}</div> : <div />}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={onCancel ?? onClose}
+                disabled={isSaving}
+                className="cursor-pointer rounded-[10px] bg-white px-6 py-3 text-[14px] font-semibold transition-colors"
+                style={{
+                  border: "2px solid #1a1f36",
+                  color: "#1a1f36",
+                  fontFamily: FONT,
+                  width: closeButtonWidth,
+                  opacity: isSaving ? 0.5 : 1,
+                }}
+              >
+                {closeLabel}
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isSaving || saveDisabled}
+                className="flex cursor-pointer items-center justify-center gap-2 rounded-[10px] border-none px-6 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-[#2d3561]"
+                style={{
+                  width: saveButtonWidth,
+                  backgroundColor: "#1a1f36",
+                  fontFamily: FONT,
+                  opacity: isSaving || saveDisabled ? 0.7 : 1,
+                }}
+              >
+                {isSaving ? (
+                  showSavingSpinner ? (
+                  <>
+                    <Spinner size={4} />
+                    {savingLabel ? <span>{savingLabel}</span> : null}
+                  </>
+                  ) : (
+                    savingLabel || saveLabel
+                  )
+                ) : saveLabel}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -56,14 +56,14 @@ const FILTER_SELECT_STYLES = `
 }
 
 .universal-filter-select.annual-fee-readonly .ant-select-selector {
-  background: #A5A5B4 !important;
-  border-color: #A5A5B4 !important;
+  background: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
   box-shadow: none !important;
 }
 
 .universal-filter-select.annual-fee-readonly .ant-select-selection-item,
 .universal-filter-select.annual-fee-readonly .ant-select-selection-placeholder {
-  color: #ffffff !important;
+  color: #64748b !important;
 }
 
 .universal-filter-select-dropdown {
