@@ -47,6 +47,9 @@ const NOTIFICATION_TABS = [
   { key: "history", label: "Notifications", icon: IoNotificationsOutline },
 ];
 
+const formatNotificationMessage = (message) =>
+  String(message || "").replace(/\bPHP\s+/g, "₱");
+
 const TH = ({ children }) => (
   <th
     className="px-4 py-3 text-left text-xs font-semibold whitespace-nowrap"
@@ -243,6 +246,70 @@ const NotificationsPage = () => {
   const getNotificationNavigationTarget = (notification) => {
     const relatedType = String(notification?.related_type || "").trim().toLowerCase();
     const relatedId = notification?.related_id;
+
+    if (relatedType === "void_request_docking" && relatedId) {
+      const highlightId = `docking-${relatedId}`;
+
+      return {
+        pathname: "/docking",
+        search: `?highlight=${highlightId}`,
+        state: {
+          universalSearchResult: {
+            id: highlightId,
+            group: "Docking",
+            path: `/docking?highlight=${highlightId}`,
+            title: notification?.title || "Void Request",
+            subtitle: notification?.message || "",
+          },
+        },
+      };
+    }
+
+    if (relatedType === "void_request_banyera" && relatedId) {
+      const highlightId = `banyera-${relatedId}`;
+
+      return {
+        pathname: "/banyera",
+        search: `?highlight=${highlightId}`,
+        state: {
+          universalSearchResult: {
+            id: highlightId,
+            group: "Banyera",
+            path: `/banyera?highlight=${highlightId}`,
+            title: notification?.title || "Void Request",
+            subtitle: notification?.message || "",
+          },
+        },
+      };
+    }
+
+    if (
+      [
+        "void_request_tickets",
+        "void_request_daily_ticket",
+        "void_request_annual_ticket",
+      ].includes(relatedType) &&
+      relatedId
+    ) {
+      const highlightId = `ticket-${relatedId}`;
+      const isAnnualTicket = relatedType === "void_request_annual_ticket";
+      const pathname = isAnnualTicket ? "/annual-vehicle-tickets" : "/daily-vehicle-tickets";
+      const group = isAnnualTicket ? "Annual Vehicle Tickets" : "Daily Vehicle Tickets";
+
+      return {
+        pathname,
+        search: `?highlight=${highlightId}`,
+        state: {
+          universalSearchResult: {
+            id: highlightId,
+            group,
+            path: `${pathname}?highlight=${highlightId}`,
+            title: notification?.title || "Void Request",
+            subtitle: notification?.message || "",
+          },
+        },
+      };
+    }
 
     if (relatedType === "remittance" && relatedId) {
       const highlightId = `remittance-${relatedId}`;
@@ -445,7 +512,7 @@ const NotificationsPage = () => {
                                     whiteSpace: "normal",
                                   }}
                                 >
-                                  {row.message || "-"}
+                                  {row.message ? formatNotificationMessage(row.message) : "-"}
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-[13px] text-[#1a1f36]">{formatNotificationDate(row.created_at)}</td>

@@ -32,6 +32,7 @@ class CollectionController extends Controller
 
         $collections = $baseQuery
             ->orderByDesc('sort_date')
+            ->orderByDesc('sort_created_at')
             ->orderByDesc('source_id')
             ->paginate($perPage, ['*'], 'page', $page);
 
@@ -74,6 +75,7 @@ class CollectionController extends Controller
                 'p.payment_date as collection_date',
                 'p.amount_paid as cash_received',
                 DB::raw('COALESCE(p.payment_date, p.created_at) as sort_date'),
+                'p.created_at as sort_created_at',
             ]);
         $this->applyFiscalYear($payments, $request, 'p.payment_date');
 
@@ -89,6 +91,7 @@ class CollectionController extends Controller
                 'vt.ticket_date as collection_date',
                 'vt.ticket_fee as cash_received',
                 DB::raw('COALESCE(vt.ticket_date, vt.created_at) as sort_date'),
+                'vt.created_at as sort_created_at',
             ]);
         $this->applyFiscalYear($tickets, $request, 'vt.ticket_date');
 

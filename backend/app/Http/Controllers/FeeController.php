@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MasterDataUpdated;
 use App\Enums\FeeTypeName;
 use App\Jobs\SendFeeChangeInspectorNotifications;
 use App\Models\Fee;
@@ -174,7 +175,7 @@ class FeeController extends Controller
     {
         $fee->loadMissing([
             'boatType:boat_type_id,type_name',
-            'vehicleType:vehicle_type_id,type_name',
+            'vehicleType:vehicle_type_id,type_name,deleted_at',
         ]);
 
         return [
@@ -193,6 +194,7 @@ class FeeController extends Controller
             'vehicle_type' => $fee->vehicleType ? [
                 'vehicle_type_id' => $fee->vehicleType->vehicle_type_id,
                 'type_name' => $fee->vehicleType->type_name,
+                'deleted_at' => $fee->vehicleType->deleted_at?->toDateTimeString(),
             ] : null,
             'effective_from' => $fee->effective_from?->toDateString(),
             'effective_to' => $fee->effective_to?->toDateString(),
@@ -264,6 +266,10 @@ class FeeController extends Controller
         // Return minimal fees for form lookups (docking, banyera, etc.)
         if ($compact) {
             $fees = Fee::forFormLookup()
+                ->with([
+                    'boatType:boat_type_id,type_name',
+                    'vehicleType:vehicle_type_id,type_name,deleted_at',
+                ])
                 ->orderBy('fee_type_name')
                 ->orderBy('effective_from', 'desc')
                 ->get();
@@ -275,7 +281,7 @@ class FeeController extends Controller
             ->select($this->feeSelectionColumns())
             ->with([
                 'boatType:boat_type_id,type_name',
-                'vehicleType:vehicle_type_id,type_name',
+                'vehicleType:vehicle_type_id,type_name,deleted_at',
             ])
             ->searchTable($search)
             ->tableFilters($status, $feeType, $period)
@@ -353,20 +359,22 @@ class FeeController extends Controller
         app(ActivityLogService::class)->log(
             action: 'INSERT',
             module: 'Set Fees',
-            details: 'Created fee record for "' . $fee->fee_name . '".',
+            details: 'Created fee record in "' . $this->getFeeTypeLabel($fee) . '" for "' . $this->formatFeeApplicableLabel($fee) . '".',
             user: Auth::user()
         );
 
         $this->queueInspectorFeeNotifications($fee, 'created');
+        $payload = $this->prepareFeeForResponse($fee);
+        broadcast(new MasterDataUpdated('fees', 'created', $payload));
 
-        return response()->json($this->prepareFeeForResponse($fee), 201);
+        return response()->json($payload, 201);
     }
 
     public function show($id)
     {
         $fee = Fee::query()
             ->select($this->feeSelectionColumns())
-            ->with(['boatType:boat_type_id,type_name', 'vehicleType:vehicle_type_id,type_name'])
+            ->with(['boatType:boat_type_id,type_name', 'vehicleType:vehicle_type_id,type_name,deleted_at'])
             ->findOrFail($id);
 
         return response()->json($this->prepareFeeForResponse($fee));
@@ -392,8 +400,8 @@ class FeeController extends Controller
             'fee_type_name' => $this->getFeeTypeLabel($fee),
             'applicable_to' => $this->formatFeeApplicableLabel($fee),
             'amount' => number_format((float) $fee->amount, 2),
-            'effective_from' => optional($fee->effective_from)->toDateString() ?? 'blank',
-            'effective_to' => optional($fee->effective_to)->toDateString() ?? 'blank',
+            'effective_from' => optional($fee->effective_from)->toDateString(),
+            'effective_to' => optional($fee->effective_to)->toDateString(),
         ];
 
         $fee->update([
@@ -407,32 +415,34 @@ class FeeController extends Controller
             'fee_type_name' => $this->getFeeTypeLabel($fee),
             'applicable_to' => $this->formatFeeApplicableLabel($fee),
             'amount' => number_format((float) $fee->amount, 2),
-            'effective_from' => optional($fee->effective_from)->toDateString() ?? 'blank',
-            'effective_to' => optional($fee->effective_to)->toDateString() ?? 'blank',
+            'effective_from' => optional($fee->effective_from)->toDateString(),
+            'effective_to' => optional($fee->effective_to)->toDateString(),
         ];
 
         $changeDetails = app(ActivityLogService::class)->describeChanges(
             $beforeState,
             $afterState,
             [
-                'fee_type_name' => 'Fee type',
-                'applicable_to' => 'Applicable to',
-                'amount' => 'Amount',
-                'effective_from' => 'Effective from',
-                'effective_to' => 'Effective to',
+                'fee_type_name' => 'fee type',
+                'applicable_to' => 'applicable to',
+                'amount' => 'amount',
+                'effective_from' => 'effective from',
+                'effective_to' => 'effective to',
             ]
         );
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Set Fees',
-            details: 'Updated fee record for "' . $this->getFeeTypeLabel($fee) . '"' . ($changeDetails !== '' ? ': ' . $changeDetails . '.' : '.'),
+            details: 'Updated fee record for "' . $this->getFeeTypeLabel($fee) . '"' . ($changeDetails !== '' ? ' in ' . $changeDetails . '.' : '.'),
             user: Auth::user()
         );
 
         $this->queueInspectorFeeNotifications($fee, 'updated');
+        $payload = $this->prepareFeeForResponse($fee);
+        broadcast(new MasterDataUpdated('fees', 'updated', $payload));
 
-        return response()->json($this->prepareFeeForResponse($fee));
+        return response()->json($payload);
     }
 
 }

@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "../api/axios";
 
-export const getTodaySystemCashReceivedQueryOptions = ({ date = "", enabled = true } = {}) => ({
-  queryKey: ["today-system-cash-received", { date }],
+export const getTodayCollectionQueryOptions = ({ date = "", enabled = true } = {}) => ({
+  queryKey: ["today-collection", { date }],
   queryFn: async ({ signal }) => {
-    const res = await api.get("/remittances/today-system-cash-received", {
+    const res = await api.get("/remittances/today-collection", {
       params: { date },
       signal,
     });
@@ -20,8 +20,8 @@ export const getTodaySystemCashReceivedQueryOptions = ({ date = "", enabled = tr
   refetchInterval: false,
 });
 
-export const useTodaySystemCashReceivedQuery = (params = {}, queryOptions = {}) =>
+export const useTodayCollectionQuery = (params = {}, queryOptions = {}) =>
   useQuery({
-    ...getTodaySystemCashReceivedQueryOptions(params),
+    ...getTodayCollectionQueryOptions(params),
     ...queryOptions,
   });

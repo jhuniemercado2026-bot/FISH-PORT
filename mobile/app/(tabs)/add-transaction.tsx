@@ -1,6 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
 import * as ImagePicker from "expo-image-picker";
-import { useEffect, useState } from "react";
+import { usePreventScreenCapture } from "expo-screen-capture";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -12,18 +15,40 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { getAuthToken } from "../../api/auth";
+import { getAuthSession, getAuthToken } from "../../api/auth";
 import { buildApiHeaders, getApiBaseUrl } from "../../api/axios";
+import ConsentModal, {
+  SignatureConsentOptions,
+} from "../../components/ConsentModal";
 import DatePicker from "../../components/DatePicker";
+import IncreaseDecreaseInput from "../../components/IncreaseDecreaseInput";
 import PlateNumberPicker from "../../components/PlateNumberPicker";
 import SearchFilter from "../../components/SearchFilter";
+import SignatureModal from "../../components/SignatureModal";
 import TimePicker from "../../components/TimePicker";
 import VehiclePicker from "../../components/VehiclePicker";
 import { useToastStore } from "../../store/toastStore";
 import { useHistoryStore } from "../../store/historyStore";
+import { useMasterDataStore } from "../../store/masterDataStore";
+import {
+  getOfflineBoats,
+  getOfflineResourceArray,
+  saveOfflineBoats,
+  saveOfflineResource,
+} from "../../utils/offlineMasterData";
+import { startTransactionsRealtime } from "../../utils/realtimeTransactions";
+import { submitOrQueueOfflineTransaction } from "../../utils/offlineTransactionQueue";
 
 
-type TransactionType = "banyera" | "docking" | "tickets";
+type TransactionType = "banyera" | "docking" | "tickets" | "remittance";
+
+const REMITTANCE_COLLECTION_CACHE_PREFIX = "opol:remittance_today_collection";
+
+type RemittanceCollectionCache = {
+  amount: string;
+  date: string;
+  hasSubmittedRemittance: boolean;
+};
 
 const transactionOptions: Array<{
   key: TransactionType;
@@ -54,6 +79,14 @@ const transactionOptions: Array<{
     title: "Tickets",
     subtitle: "Vehicle ticket details",
     icon: "ticket-outline",
+    tint: "rgba(37,99,235,0.08)",
+    color: "#2563EB",
+  },
+  {
+    key: "remittance",
+    title: "Remittance",
+    subtitle: "Daily ticket remittance",
+    icon: "cash-outline",
     tint: "rgba(37,99,235,0.08)",
     color: "#2563EB",
   },
@@ -162,6 +195,16 @@ type FishClassification = {
 type BoatOption = {
   boat_id: number;
   boat_name: string;
+  owner_id?: number | null;
+  owner?: {
+    owner_id?: number | null;
+    owner_firstname?: string | null;
+    owner_lastname?: string | null;
+    full_name?: string | null;
+    owner_signature_data_url?: string | null;
+    owner_signature_signed_at?: string | null;
+  } | null;
+  owner_name?: string | null;
   status?: string | null;
   boat_type_id?: number | null;
   registration_id?: string | null;
@@ -192,6 +235,16 @@ type FeeOption = {
   } | null;
   feeType?: {
     fee_name?: string | null;
+  } | null;
+  vehicle_type?: {
+    vehicle_type_id?: number | null;
+    type_name?: string | null;
+    deleted_at?: string | null;
+  } | null;
+  vehicleType?: {
+    vehicle_type_id?: number | null;
+    type_name?: string | null;
+    deleted_at?: string | null;
   } | null;
 };
 
@@ -230,6 +283,8 @@ type TicketFeeItem = {
 type TransactionLockState = {
   is_locked?: boolean | null;
   message?: string | null;
+  applies_to?: string | null;
+  lock_scope?: string | null;
   unlock_at?: string | null;
   remittance_reference_no?: string | null;
 };
@@ -272,6 +327,28 @@ function isFeeActive(fee?: FeeOption | null) {
 
 function getFeeAmount(fee?: FeeOption | null) {
   return Number(fee?.amount ?? 0);
+}
+
+function hasArchivedAt(value?: string | null) {
+  return String(value ?? "").trim() !== "";
+}
+
+function isActiveVehicleType(vehicleType?: VehicleTypeOption | null) {
+  return Boolean(vehicleType?.vehicle_type_id) && !hasArchivedAt(vehicleType?.deleted_at);
+}
+
+function feeHasArchivedVehicleType(fee?: FeeOption | null) {
+  const rawVehicleType = fee?.vehicleType ?? fee?.vehicle_type ?? null;
+
+  return hasArchivedAt(rawVehicleType?.deleted_at);
+}
+
+function hasReachableInternet(state: {
+  isConnected: boolean | null;
+  isInternetReachable: boolean | null;
+} | null) {
+  if (!state) return false;
+  return state.isConnected === true && state.isInternetReachable !== false;
 }
 
 function getBoatTypeId(boat?: BoatOption | null) {
@@ -344,6 +421,55 @@ function buildDateObjectFromParts(year: string, month: string, day: string) {
   return nextDate;
 }
 
+function buildRemittanceCollectionCacheKey(userId: string | number | null | undefined, date: string) {
+  return `${REMITTANCE_COLLECTION_CACHE_PREFIX}:${String(userId ?? "guest")}:${date}`;
+}
+
+function getRealtimeRecordDate(record?: Record<string, any> | null) {
+  return String(
+    record?.date ??
+      record?.ticket_date ??
+      record?.transaction_date ??
+      record?.created_at ??
+      ""
+  ).slice(0, 10);
+}
+
+async function readRemittanceCollectionCache(
+  userId: string | number | null | undefined,
+  date: string
+): Promise<RemittanceCollectionCache | null> {
+  try {
+    const raw = await AsyncStorage.getItem(buildRemittanceCollectionCacheKey(userId, date));
+    if (!raw) return null;
+
+    const cached = JSON.parse(raw) as Partial<RemittanceCollectionCache>;
+    if (cached.date !== date) return null;
+
+    return {
+      amount: String(cached.amount ?? "0"),
+      date,
+      hasSubmittedRemittance: Boolean(cached.hasSubmittedRemittance),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function saveRemittanceCollectionCache(
+  userId: string | number | null | undefined,
+  cache: RemittanceCollectionCache
+) {
+  try {
+    await AsyncStorage.setItem(
+      buildRemittanceCollectionCacheKey(userId, cache.date),
+      JSON.stringify(cache)
+    );
+  } catch {
+    // Cache writes are best-effort; the live API value remains the source of truth.
+  }
+}
+
 function getVehicleSpecificFees(
   feeOptions: FeeOption[],
   vehicleTypeId: string
@@ -385,7 +511,7 @@ function getAutoFeeForTicketType(
 function buildDailyTicketFeeItems(
   feeOptions: FeeOption[],
   vehicleTypeId: string,
-  quantity = "1",
+  quantity = "0",
   options: { zeroDailyTicket?: boolean } = {}
 ): TicketFeeItem[] {
   const applicableFees = getDailyApplicableVehicleFees(feeOptions, vehicleTypeId);
@@ -395,12 +521,12 @@ function buildDailyTicketFeeItems(
   return [
     {
       fee_id: options.zeroDailyTicket ? "" : dailyFee ? String(dailyFee.fee_id) : "",
-      quantity: quantity || "1",
+      quantity: quantity || "0",
       row_type: "daily",
     },
     {
       fee_id: banyeraFee ? String(banyeraFee.fee_id) : "",
-      quantity: "1",
+      quantity: "0",
       row_type: "banyera",
     },
   ];
@@ -410,19 +536,22 @@ function buildVehicleTypesFromFees(feeOptions: FeeOption[]): VehicleTypeOption[]
   const seen = new Map<string, VehicleTypeOption>();
 
   feeOptions.forEach((fee) => {
-    const vehicleTypeId = String(fee.vehicle_type_id ?? "").trim();
+    const rawVehicleType = fee.vehicleType ?? fee.vehicle_type ?? null;
+
+    if (feeHasArchivedVehicleType(fee)) {
+      return;
+    }
+
+    const vehicleTypeId = String(
+      fee.vehicle_type_id ?? rawVehicleType?.vehicle_type_id ?? ""
+    ).trim();
 
     if (!vehicleTypeId) {
       return;
     }
 
-    const rawVehicleType = fee as FeeOption & {
-      vehicleType?: { type_name?: string | null } | null;
-      vehicle_type?: { type_name?: string | null } | null;
-    };
     const typeName =
-      rawVehicleType.vehicleType?.type_name ??
-      rawVehicleType.vehicle_type?.type_name ??
+      rawVehicleType?.type_name ??
       "";
 
     if (!typeName || seen.has(vehicleTypeId)) {
@@ -465,11 +594,29 @@ function isValidAnnualVehicleTicket(ticket?: AnnualVehicleTicketOption | null) {
   return true;
 }
 
+function unwrapSavedTransactionData(data: any) {
+  if (data?.data && !Array.isArray(data.data)) return data.data;
+  if (data?.transaction && !Array.isArray(data.transaction)) return data.transaction;
+  if (data?.ticket && !Array.isArray(data.ticket)) return data.ticket;
+  if (data?.docking && !Array.isArray(data.docking)) return data.docking;
+  if (data?.banyera && !Array.isArray(data.banyera)) return data.banyera;
+  if (data?.remittance && !Array.isArray(data.remittance)) return data.remittance;
+
+  return data;
+}
+
 export default function AddTransactionScreen() {
+  usePreventScreenCapture();
+
   const manilaNow = getManilaDateParts();
   const authToken = getAuthToken();
   const showToast = useToastStore((state) => state.showToast);
   const triggerHistoryRefresh = useHistoryStore((state) => state.triggerRefresh);
+  const addSyncedTransactions = useHistoryStore((state) => state.addSyncedTransactions);
+  const addQueuedDrafts = useHistoryStore((state) => state.addQueuedDrafts);
+  const realtimeTransactionLock = useHistoryStore((state) => state.transactionLock);
+  const setRealtimeTransactionLock = useHistoryStore((state) => state.setTransactionLock);
+  const masterDataRefreshKey = useMasterDataStore((state) => state.refreshKey);
   const [selectedType, setSelectedType] =
     useState<TransactionType>("docking");
   const [boatId, setBoatId] = useState("");
@@ -489,9 +636,11 @@ export default function AddTransactionScreen() {
   const [dockingMeridiem, setDockingMeridiem] = useState<"AM" | "PM">(
     manilaNow.meridiem === "PM" ? "PM" : "AM"
   );
+  const [isDockingDateAuto, setIsDockingDateAuto] = useState(true);
+  const [isDockingTimeAuto, setIsDockingTimeAuto] = useState(true);
   const [classifications, setClassifications] = useState<FishClassification[]>([]);
   const [selectedClassificationId, setSelectedClassificationId] = useState<number | null>(null);
-  const [isLoadingClassifications, setIsLoadingClassifications] = useState(true);
+  const [isLoadingClassifications, setIsLoadingClassifications] = useState(false);
   const [boats, setBoats] = useState<BoatOption[]>([]);
   const [banyeraBoatId, setBanyeraBoatId] = useState("");
   const [banyeraBoatSearch, setBanyeraBoatSearch] = useState("");
@@ -507,41 +656,70 @@ export default function AddTransactionScreen() {
   const [banyeraMeridiem, setBanyeraMeridiem] = useState<"AM" | "PM">(
     manilaNow.meridiem === "PM" ? "PM" : "AM"
   );
+  const [isBanyeraDateAuto, setIsBanyeraDateAuto] = useState(true);
+  const [isBanyeraTimeAuto, setIsBanyeraTimeAuto] = useState(true);
   const [banyeraItems, setBanyeraItems] = useState<BanyeraItem[]>([
     { classification_id: "", quantity: "0", daug: "" },
   ]);
+  const [banyeraOwnerSignature, setBanyeraOwnerSignature] = useState("");
+  const [banyeraOwnerSignatureSaveForFuture, setBanyeraOwnerSignatureSaveForFuture] =
+    useState(false);
+  const [pendingBanyeraOwnerSignature, setPendingBanyeraOwnerSignature] =
+    useState("");
+  const [isBanyeraSignatureModalOpen, setIsBanyeraSignatureModalOpen] =
+    useState(false);
+  const [isBanyeraConsentModalOpen, setIsBanyeraConsentModalOpen] =
+    useState(false);
+  const [isSavingBanyeraSignature, setIsSavingBanyeraSignature] =
+    useState(false);
   const [banyeraFieldErrors, setBanyeraFieldErrors] = useState<Record<string, string>>({});
   const [dockingFieldErrors, setDockingFieldErrors] = useState<Record<string, string>>({});
   const [boatSearch, setBoatSearch] = useState("");
   const [isBoatPickerOpen, setIsBoatPickerOpen] = useState(false);
-  const [isLoadingBoats, setIsLoadingBoats] = useState(true);
+  const [isLoadingBoats, setIsLoadingBoats] = useState(false);
   const [fees, setFees] = useState<FeeOption[]>([]);
   const [feeSearch, setFeeSearch] = useState("");
   const [isFeePickerOpen, setIsFeePickerOpen] = useState(false);
-  const [isLoadingFees, setIsLoadingFees] = useState(true);
+  const [isLoadingFees, setIsLoadingFees] = useState(false);
   const [vehicleTypes, setVehicleTypes] = useState<VehicleTypeOption[]>([]);
-  const [isLoadingVehicleTypes, setIsLoadingVehicleTypes] = useState(true);
+  const [isLoadingVehicleTypes, setIsLoadingVehicleTypes] = useState(false);
   const [annualVehicleTickets, setAnnualVehicleTickets] = useState<
     AnnualVehicleTicketOption[]
   >([]);
   const [isLoadingAnnualVehicleTickets, setIsLoadingAnnualVehicleTickets] =
-    useState(true);
+    useState(false);
   const [ticketControlNumber, setTicketControlNumber] = useState("");
   const [ticketPlateSearch, setTicketPlateSearch] = useState("");
   const [ticketVehicleTypeId, setTicketVehicleTypeId] = useState("");
   const [ticketVehicleTypeSearch, setTicketVehicleTypeSearch] = useState("");
   const [ticketFeeItems, setTicketFeeItems] = useState<TicketFeeItem[]>(() =>
-    buildDailyTicketFeeItems([], "", "1")
+    buildDailyTicketFeeItems([], "", "0")
   );
   const [ticketMonth, setTicketMonth] = useState(manilaNow.month);
   const [ticketDay, setTicketDay] = useState(manilaNow.day);
   const [ticketYear, setTicketYear] = useState(manilaNow.year);
+  const [isTicketDateAuto, setIsTicketDateAuto] = useState(true);
   const [ticketFieldErrors, setTicketFieldErrors] = useState<
+    Record<string, string>
+  >({});
+  const [remittanceMonth, setRemittanceMonth] = useState(manilaNow.month);
+  const [remittanceDay, setRemittanceDay] = useState(manilaNow.day);
+  const [remittanceYear, setRemittanceYear] = useState(manilaNow.year);
+  const [isRemittanceDateAuto, setIsRemittanceDateAuto] = useState(true);
+  const [remittanceCollected, setRemittanceCollected] = useState("0");
+  const [remittanceCash, setRemittanceCash] = useState("0");
+  const [remittanceRemarks, setRemittanceRemarks] = useState("");
+  const [isLoadingRemittanceCollection, setIsLoadingRemittanceCollection] =
+    useState(false);
+  const [hasSubmittedRemittance, setHasSubmittedRemittance] = useState(false);
+  const [remittanceFieldErrors, setRemittanceFieldErrors] = useState<
     Record<string, string>
   >({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [transactionLock, setTransactionLock] = useState<TransactionLockState | null>(null);
+  const [hasInternet, setHasInternet] = useState(true);
+  const remittanceCollectionRequestRef = useRef(0);
   const ticketDateValue = buildDateObjectFromParts(
     ticketYear,
     ticketMonth,
@@ -552,6 +730,199 @@ export default function AddTransactionScreen() {
     banyeraMonth,
     banyeraDay
   );
+  const selectedRemittanceDate = buildDateFromParts(
+    remittanceYear,
+    remittanceMonth,
+    remittanceDay
+  );
+  const remittanceSystemCollection = Number(remittanceCollected || 0);
+  const remittanceCashAmount = Number(remittanceCash || 0);
+  const remittanceSurplus = Math.max(
+    remittanceCashAmount - remittanceSystemCollection,
+    0
+  );
+  const remittanceDeficit = Math.max(
+    remittanceSystemCollection - remittanceCashAmount,
+    0
+  );
+  const isGlobalTransactionLocked = Boolean(
+    transactionLock?.is_locked && transactionLock?.applies_to === "transactions"
+  );
+  const isTicketTransactionLocked = Boolean(
+    transactionLock?.is_locked &&
+      transactionLock?.applies_to === "vehicle-tickets" &&
+      selectedType === "tickets"
+  );
+  const isSelectedTransactionLocked = Boolean(
+    selectedType !== "remittance" &&
+      (isGlobalTransactionLocked || isTicketTransactionLocked)
+  );
+  const isRemittanceAlreadySubmitted = Boolean(
+    selectedType === "remittance" &&
+      (hasSubmittedRemittance ||
+        (transactionLock?.is_locked && transactionLock?.applies_to === "vehicle-tickets"))
+  );
+  const isOfflineRemittance = selectedType === "remittance" && !hasInternet;
+  const isSaveDisabled =
+    isSubmitting ||
+    isSelectedTransactionLocked ||
+    isRemittanceAlreadySubmitted ||
+    isOfflineRemittance;
+
+  const refreshRemittanceCollection = useCallback(
+    async (options: { hydrateCache?: boolean; showSpinner?: boolean } = {}) => {
+      const requestId = remittanceCollectionRequestRef.current + 1;
+      remittanceCollectionRequestRef.current = requestId;
+      const userId = getAuthSession()?.user?.user_id ?? null;
+
+      if (selectedType !== "remittance" || !selectedRemittanceDate) {
+        setIsLoadingRemittanceCollection(false);
+        return;
+      }
+
+      let hasCachedCollection = false;
+
+      if (options.hydrateCache) {
+        const cached = await readRemittanceCollectionCache(userId, selectedRemittanceDate);
+
+        if (requestId !== remittanceCollectionRequestRef.current) {
+          return;
+        }
+
+        if (cached) {
+          hasCachedCollection = true;
+          setHasSubmittedRemittance(cached.hasSubmittedRemittance);
+          setRemittanceCollected(cached.amount);
+          setRemittanceCash(cached.amount);
+          setRemittanceFieldErrors((current) => ({ ...current, date: "" }));
+        }
+      }
+
+      if (!authToken) {
+        setIsLoadingRemittanceCollection(false);
+        return;
+      }
+
+      if (options.showSpinner || !hasCachedCollection) {
+        setIsLoadingRemittanceCollection(true);
+      }
+
+      try {
+        const response = await fetch(
+          `${getApiBaseUrl()}/remittances/today-collection?date=${encodeURIComponent(
+            selectedRemittanceDate
+          )}`,
+          { headers: buildApiHeaders(authToken) }
+        );
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          throw new Error(data?.message || "Unable to load daily ticket collection.");
+        }
+
+        if (requestId !== remittanceCollectionRequestRef.current) {
+          return;
+        }
+
+        const hasSubmittedForDate = Boolean(data?.has_submitted_remittance);
+        const amount = hasSubmittedForDate ? 0 : Number(data?.amount ?? 0);
+        const amountText = amount > 0 ? amount.toFixed(2) : "0";
+
+        setHasSubmittedRemittance(hasSubmittedForDate);
+        setRemittanceCollected(amountText);
+        setRemittanceCash(amountText);
+        setRemittanceFieldErrors((current) => ({ ...current, date: "" }));
+        await saveRemittanceCollectionCache(userId, {
+          amount: amountText,
+          date: selectedRemittanceDate,
+          hasSubmittedRemittance: hasSubmittedForDate,
+        });
+      } catch {
+        if (requestId !== remittanceCollectionRequestRef.current || hasCachedCollection) {
+          return;
+        }
+
+        setRemittanceCollected("0");
+        setRemittanceFieldErrors((current) => ({
+          ...current,
+          date: "Unable to load daily vehicle ticket collection.",
+        }));
+      } finally {
+        if (requestId === remittanceCollectionRequestRef.current) {
+          setIsLoadingRemittanceCollection(false);
+        }
+      }
+    },
+    [authToken, selectedRemittanceDate, selectedType]
+  );
+
+  useEffect(() => {
+    function refreshAutoClockFields() {
+      const nextNow = getManilaDateParts();
+
+      if (isDockingDateAuto) {
+        setDockingMonth(nextNow.month);
+        setDockingDay(nextNow.day);
+        setDockingYear(nextNow.year);
+      }
+
+      if (isDockingTimeAuto) {
+        setDockingHour(nextNow.hour);
+        setDockingMinute(nextNow.minute);
+        setDockingMeridiem(nextNow.meridiem === "PM" ? "PM" : "AM");
+      }
+
+      if (isBanyeraDateAuto) {
+        setBanyeraMonth(nextNow.month);
+        setBanyeraDay(nextNow.day);
+        setBanyeraYear(nextNow.year);
+      }
+
+      if (isBanyeraTimeAuto) {
+        setBanyeraHour(nextNow.hour);
+        setBanyeraMinute(nextNow.minute);
+        setBanyeraMeridiem(nextNow.meridiem === "PM" ? "PM" : "AM");
+      }
+
+      if (isTicketDateAuto) {
+        setTicketMonth(nextNow.month);
+        setTicketDay(nextNow.day);
+        setTicketYear(nextNow.year);
+      }
+
+      if (isRemittanceDateAuto) {
+        setRemittanceMonth(nextNow.month);
+        setRemittanceDay(nextNow.day);
+        setRemittanceYear(nextNow.year);
+      }
+    }
+
+    refreshAutoClockFields();
+    const interval = setInterval(refreshAutoClockFields, 15000);
+
+    return () => clearInterval(interval);
+  }, [
+    isBanyeraDateAuto,
+    isBanyeraTimeAuto,
+    isDockingDateAuto,
+    isDockingTimeAuto,
+    isRemittanceDateAuto,
+    isTicketDateAuto,
+  ]);
+
+  useEffect(() => {
+    NetInfo.fetch().then((state) => {
+      setHasInternet(hasReachableInternet(state));
+    });
+
+    return NetInfo.addEventListener((state) => {
+      setHasInternet(hasReachableInternet(state));
+    });
+  }, []);
+
+  useEffect(() => {
+    setTransactionLock(realtimeTransactionLock ?? null);
+  }, [realtimeTransactionLock]);
 
   useEffect(() => {
     let isMounted = true;
@@ -563,7 +934,7 @@ export default function AddTransactionScreen() {
       }
 
       try {
-        const response = await fetch(`${getApiBaseUrl()}/transaction-lock`, {
+        const response = await fetch(`${getApiBaseUrl()}/transaction-lock?resource=vehicle-tickets`, {
           headers: buildApiHeaders(authToken),
         });
         const json = await response.json().catch(() => null);
@@ -571,8 +942,10 @@ export default function AddTransactionScreen() {
 
         if (lock && (lock.is_locked || lock.message)) {
           setTransactionLock(lock);
+          setRealtimeTransactionLock(lock);
         } else {
           setTransactionLock(null);
+          setRealtimeTransactionLock(null);
         }
       } catch {
         setTransactionLock(null);
@@ -584,19 +957,64 @@ export default function AddTransactionScreen() {
     return () => {
       isMounted = false;
     };
-  }, [authToken]);
+  }, [authToken, setRealtimeTransactionLock]);
+
+  useEffect(() => {
+    refreshRemittanceCollection({ hydrateCache: true });
+
+    return () => {
+      remittanceCollectionRequestRef.current += 1;
+    };
+  }, [refreshRemittanceCollection]);
+
+  useEffect(() => {
+    if (selectedType !== "remittance" || !selectedRemittanceDate || !authToken) {
+      return undefined;
+    }
+
+    return startTransactionsRealtime({
+      onTransactionUpdate: (record, payload) => {
+        if (payload.type !== "tickets") {
+          return;
+        }
+
+        if (getRealtimeRecordDate(record) === selectedRemittanceDate) {
+          void refreshRemittanceCollection({ showSpinner: true });
+        }
+      },
+      onRemittanceUpdate: (record) => {
+        if (getRealtimeRecordDate(record) === selectedRemittanceDate) {
+          void refreshRemittanceCollection({ showSpinner: true });
+        }
+      },
+    });
+  }, [
+    authToken,
+    refreshRemittanceCollection,
+    selectedRemittanceDate,
+    selectedType,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadClassifications() {
+      const cachedClassifications =
+        await getOfflineResourceArray<FishClassification>("fish_classifications");
+
+      if (isMounted && cachedClassifications.length > 0) {
+        setClassifications(cachedClassifications);
+      }
+
       if (!authToken) {
         if (isMounted) {
-          setFormError("Please sign in again to load protected transaction data.");
-          showToast("error", "Please sign in again to load protected transaction data.");
           setIsLoadingClassifications(false);
         }
         return;
+      }
+
+      if (cachedClassifications.length === 0 && isMounted) {
+        setIsLoadingClassifications(true);
       }
 
       try {
@@ -621,11 +1039,17 @@ export default function AddTransactionScreen() {
                 : [];
 
           setClassifications(normalizedClassifications as FishClassification[]);
+          await saveOfflineResource(
+            "fish_classifications",
+            normalizedClassifications
+          );
         }
       } catch {
         if (isMounted) {
-          setFormError("Unable to load fish classifications.");
-          showToast("error", "Unable to load fish classifications.");
+          if (cachedClassifications.length === 0) {
+            setFormError("Unable to load fish classifications.");
+            showToast("error", "Unable to load fish classifications.");
+          }
         }
       } finally {
         if (isMounted) {
@@ -639,17 +1063,31 @@ export default function AddTransactionScreen() {
     return () => {
       isMounted = false;
     };
-  }, [authToken]);
+  }, [authToken, masterDataRefreshKey]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadVehicleTypes() {
+      const cachedVehicleTypes =
+        await getOfflineResourceArray<VehicleTypeOption>("vehicle_types");
+      const activeCachedVehicleTypes = cachedVehicleTypes.filter((item) =>
+        isActiveVehicleType(item)
+      );
+
+      if (isMounted && activeCachedVehicleTypes.length > 0) {
+        setVehicleTypes(activeCachedVehicleTypes);
+      }
+
       if (!authToken) {
         if (isMounted) {
           setIsLoadingVehicleTypes(false);
         }
         return;
+      }
+
+      if (activeCachedVehicleTypes.length === 0 && isMounted) {
+        setIsLoadingVehicleTypes(true);
       }
 
       try {
@@ -664,21 +1102,29 @@ export default function AddTransactionScreen() {
         }
 
         if (isMounted) {
-          const nextVehicleTypes = (
-            Array.isArray(data) ? data : []
-          ).filter((item) => !item?.deleted_at);
+          const rawVehicleTypes = Array.isArray(data)
+            ? data
+            : Array.isArray(data?.data)
+              ? data.data
+              : [];
+          const nextVehicleTypes = rawVehicleTypes.filter(
+            (item: VehicleTypeOption) => isActiveVehicleType(item)
+          );
 
           setVehicleTypes(
             nextVehicleTypes.length
               ? nextVehicleTypes
               : buildVehicleTypesFromFees(fees)
           );
+          await saveOfflineResource("vehicle_types", nextVehicleTypes);
         }
       } catch {
         if (isMounted) {
           const fallbackVehicleTypes = buildVehicleTypesFromFees(fees);
 
-          if (fallbackVehicleTypes.length) {
+          if (activeCachedVehicleTypes.length) {
+            setVehicleTypes(activeCachedVehicleTypes);
+          } else if (fallbackVehicleTypes.length) {
             setVehicleTypes(fallbackVehicleTypes);
           } else {
             setFormError("Unable to load vehicle types.");
@@ -697,17 +1143,31 @@ export default function AddTransactionScreen() {
     return () => {
       isMounted = false;
     };
-  }, [authToken, fees]);
+  }, [authToken, fees, masterDataRefreshKey]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadAnnualVehicleTickets() {
+      const cachedTickets =
+        await getOfflineResourceArray<AnnualVehicleTicketOption>(
+          "annual_vehicle_tickets"
+        );
+      const validCachedTickets = cachedTickets.filter(isValidAnnualVehicleTicket);
+
+      if (isMounted && validCachedTickets.length > 0) {
+        setAnnualVehicleTickets(validCachedTickets);
+      }
+
       if (!authToken) {
         if (isMounted) {
           setIsLoadingAnnualVehicleTickets(false);
         }
         return;
+      }
+
+      if (validCachedTickets.length === 0 && isMounted) {
+        setIsLoadingAnnualVehicleTickets(true);
       }
 
       try {
@@ -724,16 +1184,18 @@ export default function AddTransactionScreen() {
         const ticketsPayload = Array.isArray(data) ? data : data?.data ?? [];
 
         if (isMounted) {
-          setAnnualVehicleTickets(
-            (Array.isArray(ticketsPayload) ? ticketsPayload : []).filter(
-              isValidAnnualVehicleTicket
-            )
+          const validTickets = (Array.isArray(ticketsPayload) ? ticketsPayload : []).filter(
+            isValidAnnualVehicleTicket
           );
+          setAnnualVehicleTickets(validTickets);
+          await saveOfflineResource("annual_vehicle_tickets", validTickets);
         }
       } catch {
         if (isMounted) {
-          setFormError("Unable to load annual vehicle tickets.");
-          showToast("error", "Unable to load annual vehicle tickets.");
+          if (validCachedTickets.length === 0) {
+            setFormError("Unable to load annual vehicle tickets.");
+            showToast("error", "Unable to load annual vehicle tickets.");
+          }
         }
       } finally {
         if (isMounted) {
@@ -747,17 +1209,30 @@ export default function AddTransactionScreen() {
     return () => {
       isMounted = false;
     };
-  }, [authToken]);
+  }, [authToken, masterDataRefreshKey]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadFees() {
+      const cachedFees = await getOfflineResourceArray<FeeOption>("fees");
+      const activeCachedFees = cachedFees.filter(
+        (fee) => !feeHasArchivedVehicleType(fee)
+      );
+
+      if (isMounted && activeCachedFees.length > 0) {
+        setFees(activeCachedFees);
+      }
+
       if (!authToken) {
         if (isMounted) {
           setIsLoadingFees(false);
         }
         return;
+      }
+
+      if (activeCachedFees.length === 0 && isMounted) {
+        setIsLoadingFees(true);
       }
 
       try {
@@ -781,12 +1256,19 @@ export default function AddTransactionScreen() {
                 ? ((payload as { fees?: FeeOption[] }).fees ?? [])
                 : [];
 
-          setFees(normalizedFees as FeeOption[]);
+          const activeFees = (normalizedFees as FeeOption[]).filter(
+            (fee) => !feeHasArchivedVehicleType(fee)
+          );
+
+          setFees(activeFees);
+          await saveOfflineResource("fees", activeFees);
         }
       } catch {
         if (isMounted) {
-          setFormError("Unable to load active fees.");
-          showToast("error", "Unable to load active fees.");
+          if (activeCachedFees.length === 0) {
+            setFormError("Unable to load active fees.");
+            showToast("error", "Unable to load active fees.");
+          }
         }
       } finally {
         if (isMounted) {
@@ -800,17 +1282,41 @@ export default function AddTransactionScreen() {
     return () => {
       isMounted = false;
     };
-  }, [authToken]);
+  }, [authToken, masterDataRefreshKey]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadBoats() {
+      const cachedBoats = await getOfflineBoats<BoatOption>();
+
+      if (isMounted && cachedBoats.length > 0) {
+        setBoats(cachedBoats);
+      }
+
       if (!authToken) {
         if (isMounted) {
           setIsLoadingBoats(false);
         }
         return;
+      }
+
+      const networkState = await NetInfo.fetch().catch(() => null);
+      if (!hasReachableInternet(networkState)) {
+        if (isMounted) {
+          if (cachedBoats.length > 0) {
+            showToast("info", "Transaction is offline now. You can add data as draft.");
+          } else {
+            setFormError("Unable to load available boats.");
+            showToast("error", "Unable to load available boats.");
+          }
+          setIsLoadingBoats(false);
+        }
+        return;
+      }
+
+      if (cachedBoats.length === 0 && isMounted) {
+        setIsLoadingBoats(true);
       }
 
       try {
@@ -835,11 +1341,16 @@ export default function AddTransactionScreen() {
                 : [];
 
           setBoats(normalizedBoats as BoatOption[]);
+          await saveOfflineBoats(normalizedBoats as BoatOption[]);
         }
       } catch {
         if (isMounted) {
-          setFormError("Unable to load available boats.");
-          showToast("error", "Unable to load available boats.");
+          if (cachedBoats.length > 0) {
+            showToast("info", "Transaction is offline now. You can add data as draft.");
+          } else {
+            setFormError("Unable to load available boats.");
+            showToast("error", "Unable to load available boats.");
+          }
         }
       } finally {
         if (isMounted) {
@@ -853,7 +1364,7 @@ export default function AddTransactionScreen() {
     return () => {
       isMounted = false;
     };
-  }, [authToken]);
+  }, [authToken, masterDataRefreshKey]);
 
   const filteredBoats = boats.filter((boat) => {
     const search = boatSearch.trim().toLowerCase();
@@ -878,13 +1389,29 @@ export default function AddTransactionScreen() {
     selectedBanyeraBoat?.boat_type?.type_name ??
     "";
   const selectedBanyeraBoatOwner =
-    (selectedBanyeraBoat as BoatOption & {
-      owner?: { full_name?: string | null } | null;
-      owner_name?: string | null;
-    })?.owner?.full_name ??
-    (selectedBanyeraBoat as BoatOption & { owner_name?: string | null })
-      ?.owner_name ??
+    selectedBanyeraBoat?.owner?.full_name ||
+    [
+      selectedBanyeraBoat?.owner?.owner_firstname,
+      selectedBanyeraBoat?.owner?.owner_lastname,
+    ].filter(Boolean).join(" ") ||
+    selectedBanyeraBoat?.owner_name ||
     "";
+  const selectedBanyeraBoatOwnerSignature =
+    selectedBanyeraBoat?.owner?.owner_signature_data_url ?? "";
+  const hasFreshBanyeraOwnerSignature =
+    !!banyeraOwnerSignature &&
+    banyeraOwnerSignature !== selectedBanyeraBoatOwnerSignature;
+  const hasBanyeraOwnerSignature =
+    !!banyeraOwnerSignature || !!selectedBanyeraBoatOwnerSignature;
+  const banyeraOwnerSignatureImage =
+    banyeraOwnerSignature || selectedBanyeraBoatOwnerSignature;
+  const banyeraOwnerSignatureStatus = !selectedBanyeraBoat
+    ? "Auto-filled after selecting a boat"
+    : hasBanyeraOwnerSignature
+      ? hasFreshBanyeraOwnerSignature
+        ? "Signature captured"
+        : "Signature registered"
+      : "No signature registered";
   const banyeraApplicableFees = fees.filter((fee) => {
     if (!selectedBanyeraBoat?.boat_type_id) {
       return false;
@@ -981,12 +1508,17 @@ export default function AddTransactionScreen() {
       (ticket) =>
         String(ticket.control_number ?? "") === String(ticketControlNumber)
     ) ?? null;
+  const selectedTicketVehicleType =
+    vehicleTypes.find(
+      (vehicleType) =>
+        String(vehicleType.vehicle_type_id) === String(ticketVehicleTypeId)
+    ) ?? null;
   const isAnnualRegisteredDailyEntry = Boolean(selectedAnnualVehicleTicket);
   const ticketDailyRow =
     ticketFeeItems.find((item) => item.row_type === "daily") ??
     ({
       fee_id: "",
-      quantity: "1",
+      quantity: "0",
       row_type: "daily",
     } as TicketFeeItem);
   const ticketBanyeraRow =
@@ -1050,7 +1582,7 @@ export default function AddTransactionScreen() {
         current.find((item) => item.row_type === "daily") ??
         current[0] ?? {
           fee_id: "",
-          quantity: "1",
+          quantity: "0",
           row_type: "daily" as const,
         };
       const banyeraRow =
@@ -1062,7 +1594,7 @@ export default function AddTransactionScreen() {
         };
 
       return [
-        { ...dailyRow, row_type: "daily", quantity: dailyRow.quantity || "1" },
+        { ...dailyRow, row_type: "daily", quantity: dailyRow.quantity || "0" },
         {
           ...banyeraRow,
           row_type: "banyera",
@@ -1081,7 +1613,7 @@ export default function AddTransactionScreen() {
       const nextRows = buildDailyTicketFeeItems(
         fees,
         ticketVehicleTypeId,
-        current[0]?.quantity || "1",
+        current[0]?.quantity ?? "0",
         { zeroDailyTicket: isAnnualRegisteredDailyEntry }
       );
       const currentDailyRow =
@@ -1096,7 +1628,7 @@ export default function AddTransactionScreen() {
         return {
           ...row,
           fee_id: row.fee_id,
-          quantity: currentRow?.quantity || row.quantity || "1",
+          quantity: currentRow?.quantity ?? row.quantity ?? "0",
         };
       });
     });
@@ -1117,7 +1649,7 @@ export default function AddTransactionScreen() {
     setTicketVehicleTypeId(nextVehicleTypeId);
     setTicketVehicleTypeSearch("");
     setTicketFeeItems(
-      buildDailyTicketFeeItems(fees, nextVehicleTypeId, "1", {
+      buildDailyTicketFeeItems(fees, nextVehicleTypeId, "0", {
         zeroDailyTicket: Boolean(matchedTicket),
       })
     );
@@ -1143,8 +1675,142 @@ export default function AddTransactionScreen() {
     setBanyeraHour(resetNow.hour);
     setBanyeraMinute(resetNow.minute);
     setBanyeraMeridiem(resetNow.meridiem === "PM" ? "PM" : "AM");
+    setIsBanyeraDateAuto(true);
+    setIsBanyeraTimeAuto(true);
     setBanyeraItems([{ classification_id: "", quantity: "0" }]);
+    setBanyeraOwnerSignature("");
+    setBanyeraOwnerSignatureSaveForFuture(false);
+    setPendingBanyeraOwnerSignature("");
+    setIsBanyeraSignatureModalOpen(false);
+    setIsBanyeraConsentModalOpen(false);
     setBanyeraFieldErrors({});
+  }
+
+  async function saveBanyeraOwnerSignature(
+    signature: string,
+    options: SignatureConsentOptions
+  ) {
+    if (isSavingBanyeraSignature) {
+      return;
+    }
+
+    const ownerId =
+      selectedBanyeraBoat?.owner?.owner_id ?? selectedBanyeraBoat?.owner_id;
+
+    if (!ownerId) {
+      setBanyeraOwnerSignature(signature);
+      setBanyeraOwnerSignatureSaveForFuture(false);
+      setIsBanyeraSignatureModalOpen(false);
+      setIsBanyeraConsentModalOpen(false);
+      setPendingBanyeraOwnerSignature("");
+      setBanyeraFieldErrors((current) => ({
+        ...current,
+        owner_signature: "",
+      }));
+      showToast("error", "Select a boat owner before saving signature.");
+      return;
+    }
+
+    if (!options.saveForFuture) {
+      setBanyeraOwnerSignature(signature);
+      setBanyeraOwnerSignatureSaveForFuture(false);
+      setIsBanyeraSignatureModalOpen(false);
+      setIsBanyeraConsentModalOpen(false);
+      setPendingBanyeraOwnerSignature("");
+      setBanyeraFieldErrors((current) => ({
+        ...current,
+        owner_signature: "",
+      }));
+      showToast("success", "Successfully added the signature.");
+      return;
+    }
+
+    const networkState = await NetInfo.fetch().catch(() => null);
+    const isOffline =
+      !networkState ||
+      (networkState.isConnected === false ||
+        networkState.isInternetReachable === false);
+
+    if (isOffline) {
+      setBanyeraOwnerSignature(signature);
+      setBanyeraOwnerSignatureSaveForFuture(true);
+      setIsBanyeraSignatureModalOpen(false);
+      setIsBanyeraConsentModalOpen(false);
+      setPendingBanyeraOwnerSignature("");
+      setBanyeraFieldErrors((current) => ({
+        ...current,
+        owner_signature: "",
+      }));
+      showToast(
+        "success",
+        "Signature saved locally and will sync with the Banyera draft."
+      );
+      return;
+    }
+
+    if (!authToken) {
+      showToast("error", "Please sign in again before saving signature.");
+      return;
+    }
+
+    const signedAt = new Date().toISOString();
+
+    setIsSavingBanyeraSignature(true);
+
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/boat-owners/${ownerId}`, {
+        method: "PUT",
+        headers: buildApiHeaders(authToken),
+        body: JSON.stringify({
+          owner_signature_data_url: signature,
+          owner_signature_signed_at: signedAt,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(data?.message ?? "Unable to save signature.");
+      }
+
+      const updatedBoats = boats.map((boat) => {
+        const boatOwnerId = boat.owner?.owner_id ?? boat.owner_id;
+
+        if (String(boatOwnerId ?? "") !== String(ownerId)) {
+          return boat;
+        }
+
+        return {
+          ...boat,
+          owner: {
+            ...(boat.owner ?? {}),
+            owner_id: ownerId,
+            owner_signature_data_url: signature,
+            owner_signature_signed_at: signedAt,
+          },
+        };
+      });
+
+      setBoats(updatedBoats);
+      await saveOfflineBoats(updatedBoats);
+      setBanyeraOwnerSignature(signature);
+      setBanyeraOwnerSignatureSaveForFuture(true);
+      setIsBanyeraSignatureModalOpen(false);
+      setIsBanyeraConsentModalOpen(false);
+      setPendingBanyeraOwnerSignature("");
+      setBanyeraFieldErrors((current) => ({
+        ...current,
+        owner_signature: "",
+      }));
+      showToast("success", "Successfully added the signature.");
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof Error ? error.message : "Unable to save signature."
+      );
+    } finally {
+      setIsSavingBanyeraSignature(false);
+    }
   }
 
   function resetTicketForm() {
@@ -1153,25 +1819,151 @@ export default function AddTransactionScreen() {
     setTicketPlateSearch("");
     setTicketVehicleTypeId("");
     setTicketVehicleTypeSearch("");
-    setTicketFeeItems(buildDailyTicketFeeItems(fees, "", "1"));
+    setTicketFeeItems(buildDailyTicketFeeItems(fees, "", "0"));
     setTicketMonth(resetNow.month);
     setTicketDay(resetNow.day);
     setTicketYear(resetNow.year);
+    setIsTicketDateAuto(true);
     setTicketFieldErrors({});
   }
 
+  function resetRemittanceForm() {
+    const resetNow = getManilaDateParts();
+    setRemittanceMonth(resetNow.month);
+    setRemittanceDay(resetNow.day);
+    setRemittanceYear(resetNow.year);
+    setIsRemittanceDateAuto(true);
+    setRemittanceCollected("0");
+    setRemittanceCash("0");
+    setRemittanceRemarks("");
+    setRemittanceFieldErrors({});
+  }
+
   async function handleSave() {
-    if (transactionLock?.is_locked) {
-      setFormError(transactionLock.message || "Transactions are view-only at the moment.");
-      showToast("error", transactionLock.message || "Transactions are view-only at the moment.");
+    if (isSelectedTransactionLocked) {
+      const lockMessage = transactionLock?.message || "Transactions are view-only at the moment.";
+      setFormError(lockMessage);
+      showToast("error", lockMessage);
+      return;
+    }
+
+    if (isRemittanceAlreadySubmitted) {
+      const message = "Today's remittance has already been submitted.";
+      setFormError(message);
+      showToast("error", message);
       return;
     }
 
     setFormError("");
 
+    if (!authToken) {
+      setFormError("Please sign in again before saving.");
+      showToast("error", "Please sign in again before saving.");
+      return;
+    }
+
+    const signedInToken = authToken ?? "";
+
     setIsSubmitting(true);
 
     try {
+      if (selectedType === "remittance") {
+        const builtRemittanceDate = buildDateFromParts(
+          remittanceYear,
+          remittanceMonth,
+          remittanceDay
+        );
+        const trimmedRemarks = remittanceRemarks.trim();
+        const nextErrors: Record<string, string> = {};
+
+        if (!builtRemittanceDate) {
+          nextErrors.date = "Remittance date is required.";
+        }
+
+        if (remittanceSystemCollection <= 0) {
+          nextErrors.date = "No cash collections were found for today.";
+        }
+
+        if (!String(remittanceCash || "").trim()) {
+          nextErrors.amount = "Amount to remit is required.";
+        }
+
+        if ((remittanceSurplus > 0 || remittanceDeficit > 0) && !trimmedRemarks) {
+          nextErrors.remarks = "Remarks is required when there is a surplus or deficit.";
+        }
+
+        setRemittanceFieldErrors(nextErrors);
+
+        if (Object.keys(nextErrors).length) {
+          setFormError("Please complete the remittance form.");
+          return;
+        }
+
+        const remittancePayload = {
+          date: builtRemittanceDate,
+          amount: remittanceCashAmount,
+          surplus: remittanceSurplus,
+          deficit: remittanceDeficit,
+          remarks: trimmedRemarks || null,
+        };
+
+        const { queued, response, draft } = await submitOrQueueOfflineTransaction({
+          type: "remittance",
+          endpoint: "/remittances",
+          payload: remittancePayload,
+          label: "Remittance",
+          token: signedInToken,
+          metadata: {
+            date: builtRemittanceDate,
+            source: "daily_vehicle_tickets",
+          },
+        });
+
+        if (queued) {
+          if (draft) {
+            addQueuedDrafts([draft]);
+          }
+          setHasSubmittedRemittance(true);
+          showToast("success", "Remittance saved as offline draft.");
+          resetRemittanceForm();
+          return;
+        }
+
+        const data = await response?.json().catch(() => null);
+
+        if (!response?.ok) {
+          const backendErrors = data?.errors ?? {};
+          setRemittanceFieldErrors({
+            date: backendErrors.date?.[0] ?? "",
+            amount: backendErrors.amount?.[0] ?? "",
+            remarks: backendErrors.remarks?.[0] ?? "",
+          });
+          setFormError(data?.message ?? "Unable to submit remittance.");
+          showToast("error", data?.message ?? "Unable to submit remittance.");
+          return;
+        }
+
+        showToast("success", data?.message ?? "Remittance submitted successfully.");
+        setHasSubmittedRemittance(true);
+        if (data?.transaction_lock) {
+          setTransactionLock(data.transaction_lock);
+          setRealtimeTransactionLock(data.transaction_lock);
+        }
+        if (data) {
+          addSyncedTransactions([
+            {
+              local_id: `remittance-online-${Date.now()}`,
+              type: "remittance",
+              data: unwrapSavedTransactionData(data),
+            },
+          ]);
+        } else {
+          triggerHistoryRefresh();
+        }
+        resetRemittanceForm();
+        return;
+      }
+
       if (selectedType === "banyera") {
         const nextErrors: Record<string, string> = {};
         const builtDate = `${banyeraYear}-${banyeraMonth.padStart(2, "0")}-${banyeraDay.padStart(2, "0")}`;
@@ -1208,10 +2000,13 @@ export default function AddTransactionScreen() {
           nextErrors.fish_items = "Please select a fish and put 1 or more quantity.";
         }
 
+        if (!banyeraOwnerSignature && !selectedBanyeraBoatOwnerSignature) {
+          nextErrors.owner_signature = "Boat owner signature is required.";
+        }
+
         if (Object.keys(nextErrors).length) {
           setBanyeraFieldErrors(nextErrors);
           setFormError("Please complete the banyera form.");
-          showToast("error", "Please complete the banyera form.");
           return;
         }
 
@@ -1234,32 +2029,62 @@ export default function AddTransactionScreen() {
           return;
         }
 
-        const response = await fetch(`${getApiBaseUrl()}/banyera-transactions`, {
-          method: "POST",
-          headers: buildApiHeaders(authToken),
-          body: JSON.stringify({
-            boat_id: Number(banyeraBoatId),
-            transaction_date: transactionDateTime,
-            items: banyeraItems.map((item) => ({
-              classification_id: Number(item.classification_id),
-              quantity: Number(item.quantity),
-              fee_id: Number(banyeraFeeId),
-              subtotal: getFeeAmount(selectedBanyeraFee) * Number(item.quantity),
-              daug: item.daug ? Number(item.daug) : null,
-            })),
-          }),
+        const banyeraPayload = {
+          boat_id: Number(banyeraBoatId),
+          transaction_date: transactionDateTime,
+          owner_signature_data_url: banyeraOwnerSignature || selectedBanyeraBoatOwnerSignature,
+          owner_signature_signed_at: new Date().toISOString(),
+          owner_signature_save_for_future: banyeraOwnerSignatureSaveForFuture,
+          items: banyeraItems.map((item) => ({
+            classification_id: Number(item.classification_id),
+            quantity: Number(item.quantity),
+            fee_id: Number(banyeraFeeId),
+            subtotal: getFeeAmount(selectedBanyeraFee) * Number(item.quantity),
+            daug: item.daug ? Number(item.daug) : null,
+          })),
+        };
+
+        const { queued, response, draft } = await submitOrQueueOfflineTransaction({
+          type: "banyera",
+          endpoint: "/banyera-transactions",
+          payload: banyeraPayload,
+          label: "Banyera",
+          token: signedInToken,
+          metadata: {
+            boat_name: selectedBanyeraBoat?.boat_name,
+            boat_type_name: selectedBanyeraBoatType,
+          },
         });
 
-        const data = await response.json().catch(() => null);
+        if (queued) {
+          if (draft) {
+            addQueuedDrafts([draft]);
+          }
+          showToast("success", "Banyera saved as offline draft.");
+          resetBanyeraForm();
+          return;
+        }
 
-        if (!response.ok) {
+        const data = await response?.json().catch(() => null);
+
+        if (!response?.ok) {
           setFormError(data?.message ?? "Unable to save Banyera transaction.");
           showToast("error", data?.message ?? "Unable to save Banyera transaction.");
           return;
         }
 
         showToast("success", "Banyera was successfully added.");
-        triggerHistoryRefresh();
+        if (data) {
+          addSyncedTransactions([
+            {
+              local_id: `banyera-online-${Date.now()}`,
+              type: "banyera",
+              data: unwrapSavedTransactionData(data),
+            },
+          ]);
+        } else {
+          triggerHistoryRefresh();
+        }
         resetBanyeraForm();
         return;
       }
@@ -1278,7 +2103,6 @@ export default function AddTransactionScreen() {
         if (Object.keys(nextDockingErrors).length) {
           setDockingFieldErrors(nextDockingErrors);
           setFormError("Please complete the daily docking form.");
-          showToast("error", "Please complete the daily docking form.");
           return;
         }
 
@@ -1291,7 +2115,6 @@ export default function AddTransactionScreen() {
           !dockingFee.trim()
         ) {
           setFormError("Please complete the daily docking form.");
-          showToast("error", "Please complete the daily docking form.");
           return;
         }
 
@@ -1315,27 +2138,67 @@ export default function AddTransactionScreen() {
           return;
         }
 
-        const response = await fetch(`${getApiBaseUrl()}/dockings`, {
-          method: "POST",
-          headers: buildApiHeaders(authToken),
-          body: JSON.stringify({
-            boat_id: Number(dockingBoatId),
-            fee_id: Number(dockingFeeId),
-            docking_date: dockingDateTime,
-            docking_fee: Number(dockingFee),
-          }),
+        const dockingPayload = {
+          boat_id: Number(dockingBoatId),
+          fee_id: Number(dockingFeeId),
+          docking_date: dockingDateTime,
+          docking_fee: Number(dockingFee),
+        };
+
+        const { queued, response, draft } = await submitOrQueueOfflineTransaction({
+          type: "docking",
+          endpoint: "/dockings",
+          payload: dockingPayload,
+          label: "Docking",
+          token: signedInToken,
+          metadata: {
+            boat_name: selectedDockingBoat?.boat_name,
+            boat_type_name: selectedDockingBoatType,
+          },
         });
 
-        const data = await response.json().catch(() => null);
+        if (queued) {
+          if (draft) {
+            addQueuedDrafts([draft]);
+          }
+          showToast("success", "Docking saved as offline draft.");
+          setDockingBoatId("");
+          setDockingFeeId("");
+          setDockingFee("");
+          const resetNow = getManilaDateParts();
+          setDockingMonth(resetNow.month);
+          setDockingDay(resetNow.day);
+          setDockingYear(resetNow.year);
+          setDockingHour(resetNow.hour);
+          setDockingMinute(resetNow.minute);
+          setDockingMeridiem(resetNow.meridiem === "PM" ? "PM" : "AM");
+          setIsDockingDateAuto(true);
+          setIsDockingTimeAuto(true);
+          setBoatSearch("");
+          setIsBoatPickerOpen(false);
+          return;
+        }
 
-        if (!response.ok) {
+        const data = await response?.json().catch(() => null);
+
+        if (!response?.ok) {
           setFormError(data?.message ?? "Unable to save Docking record.");
           showToast("error", data?.message ?? "Unable to save Docking record.");
           return;
         }
 
         showToast("success", "Docking was successfully added.");
-        triggerHistoryRefresh();
+        if (data) {
+          addSyncedTransactions([
+            {
+              local_id: `docking-online-${Date.now()}`,
+              type: "docking",
+              data: unwrapSavedTransactionData(data),
+            },
+          ]);
+        } else {
+          triggerHistoryRefresh();
+        }
         setDockingBoatId("");
         setDockingFeeId("");
         setDockingFee("");
@@ -1346,6 +2209,8 @@ export default function AddTransactionScreen() {
         setDockingHour(resetNow.hour);
         setDockingMinute(resetNow.minute);
         setDockingMeridiem(resetNow.meridiem === "PM" ? "PM" : "AM");
+        setIsDockingDateAuto(true);
+        setIsDockingTimeAuto(true);
         setBoatSearch("");
         setIsBoatPickerOpen(false);
         return;
@@ -1385,19 +2250,18 @@ export default function AddTransactionScreen() {
             return;
           }
 
-          if (!item.quantity || Number.parseInt(item.quantity, 10) < 1) {
-            nextErrors[`fee_qty_${index}`] = "Please enter 1 or more quantity.";
+          if (Number.parseInt(item.quantity || "0", 10) < 0) {
+            nextErrors[`fee_qty_${index}`] = "Quantity cannot be negative.";
           }
         });
 
-        if (ticketTotalFee <= 0 && !hasFeeSelection) {
+        if (ticketTotalFee <= 0) {
           nextErrors.fee_id = "Fee is required.";
         }
 
         if (Object.keys(nextErrors).length) {
           setTicketFieldErrors(nextErrors);
           setFormError("Please complete the daily ticket form.");
-          showToast("error", "Please complete the daily ticket form.");
           return;
         }
 
@@ -1421,30 +2285,47 @@ export default function AddTransactionScreen() {
           { dailyFee: 0, banyeraFee: 0 }
         );
 
-        const response = await fetch(`${getApiBaseUrl()}/vehicle-tickets`, {
-          method: "POST",
-          headers: buildApiHeaders(authToken),
-          body: JSON.stringify({
-            control_number: ticketControlNumber.trim() || null,
-            official_receipt_no: null,
-            vehicle_type_id: Number(ticketVehicleTypeId),
-            plate_number:
-              selectedAnnualVehicleTicket?.plate_number?.trim() ?? "",
-            driver_name:
-              selectedAnnualVehicleTicket?.driver_name?.trim() || null,
-            ticket_type: "daily",
-            fee_id: Number(ticketPrimaryFeeId),
-            daily_fee: ticketFeeParts.dailyFee,
-            banyera_fee: ticketFeeParts.banyeraFee,
-            ticket_fee: Number(ticketTotalFee),
-            ticket_date: builtTicketDate,
-            end_date: null,
-          }),
+        const ticketPayload = {
+          control_number: ticketControlNumber.trim() || null,
+          official_receipt_no: null,
+          vehicle_type_id: Number(ticketVehicleTypeId),
+          plate_number:
+            selectedAnnualVehicleTicket?.plate_number?.trim() ?? "",
+          driver_name:
+            selectedAnnualVehicleTicket?.driver_name?.trim() || null,
+          ticket_type: "daily",
+          fee_id: Number(ticketPrimaryFeeId),
+          daily_fee: ticketFeeParts.dailyFee,
+          banyera_fee: ticketFeeParts.banyeraFee,
+          ticket_fee: Number(ticketTotalFee),
+          ticket_date: builtTicketDate,
+          end_date: null,
+        };
+
+        const { queued, response, draft } = await submitOrQueueOfflineTransaction({
+          type: "tickets",
+          endpoint: "/vehicle-tickets",
+          payload: ticketPayload,
+          label: "Vehicle ticket",
+          token: signedInToken,
+          metadata: {
+            vehicle_type_name: selectedTicketVehicleType?.type_name,
+            plate_number: selectedAnnualVehicleTicket?.plate_number,
+          },
         });
 
-        const data = await response.json().catch(() => null);
+        if (queued) {
+          if (draft) {
+            addQueuedDrafts([draft]);
+          }
+          showToast("success", "Vehicle ticket saved as offline draft.");
+          resetTicketForm();
+          return;
+        }
 
-        if (!response.ok) {
+        const data = await response?.json().catch(() => null);
+
+        if (!response?.ok) {
           const backendErrors = data?.errors ?? {};
           setTicketFieldErrors({
             vehicle_type_id: backendErrors.vehicle_type_id?.[0] ?? "",
@@ -1460,7 +2341,17 @@ export default function AddTransactionScreen() {
         }
 
         showToast("success", "Vehicle ticket was successfully added.");
-        triggerHistoryRefresh();
+        if (data) {
+          addSyncedTransactions([
+            {
+              local_id: `tickets-online-${Date.now()}`,
+              type: "tickets",
+              data: unwrapSavedTransactionData(data),
+            },
+          ]);
+        } else {
+          triggerHistoryRefresh();
+        }
         resetTicketForm();
         return;
       }
@@ -1483,10 +2374,7 @@ export default function AddTransactionScreen() {
         <View
           className="h-[66px] flex-row items-center justify-between overflow-hidden rounded-b-[20px] bg-[#1A1F36] px-5"
           style={{
-            shadowColor: "#000000",
-            shadowOpacity: 0.18,
-            shadowRadius: 12,
-            shadowOffset: { width: 0, height: 6 },
+            boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.18)",
             elevation: 18,
           }}
         >
@@ -1496,9 +2384,25 @@ export default function AddTransactionScreen() {
           >
             Transactions
           </Text>
-          <Pressable hitSlop={10}>
-            <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
-          </Pressable>
+          <View
+            className={`h-9 flex-row items-center justify-center rounded-full px-3 ${
+              hasInternet ? "bg-[#DCFCE7]" : "bg-[#FEE2E2]"
+            }`}
+          >
+            <Ionicons
+              name={hasInternet ? "wifi-outline" : "cloud-offline-outline"}
+              size={16}
+              color={hasInternet ? "#16A34A" : "#DC2626"}
+            />
+            <Text
+              className={`ml-1.5 text-[11px] ${
+                hasInternet ? "text-[#16A34A]" : "text-[#DC2626]"
+              }`}
+              style={{ fontFamily: "Montserrat_600SemiBold" }}
+            >
+              {hasInternet ? "Connected" : "Offline"}
+            </Text>
+          </View>
         </View>
       </SafeAreaView>
 
@@ -1508,30 +2412,23 @@ export default function AddTransactionScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View className="px-5 pt-0">
-          <View className="mt-2 flex-row justify-between">
+          <View className="mt-2 flex-row flex-wrap justify-between">
             {transactionOptions.map((option) => {
               const isActive = selectedType === option.key;
 
               return (
                 <Pressable
                   key={option.key}
-                  className={`w-[31%] rounded-[10px] border px-3 py-4 ${
+                  className={`mb-3 w-[48%] rounded-[10px] border px-3 py-4 ${
                     isActive
                       ? "border-[#1A1F36] bg-[#F8F8FA]"
                       : "border-[#E8E1E6] bg-white"
                   }`}
                   onPress={() => setSelectedType(option.key)}
-                  style={
-                    isActive
-                      ? {
-                          shadowColor: "#1A1F36",
-                          shadowOpacity: 0.08,
-                          shadowRadius: 10,
-                          shadowOffset: { width: 0, height: 4 },
-                          elevation: 4,
-                        }
-                      : undefined
-                  }
+                  style={{
+                    boxShadow: "0px 4px 8px rgba(0, 0, 0, 0.06)",
+                    elevation: 3,
+                  }}
                 >
                   <View
                     className="h-10 w-10 items-center justify-center self-center rounded-[10px]"
@@ -1560,7 +2457,13 @@ export default function AddTransactionScreen() {
             })}
           </View>
 
-          <View className="mt-6 rounded-[10px] border border-[#E8E1E6] bg-white px-5 py-5">
+          <View
+            className="mt-3 rounded-[10px] border border-[#E8E1E6] bg-white px-5 py-5"
+            style={{
+              boxShadow: "0px 4px 8px rgba(0, 0, 0, 0.06)",
+              elevation: 3,
+            }}
+          >
             <View className="flex-row items-center">
               <View
                 className="h-11 w-11 items-center justify-center rounded-[10px]"
@@ -1709,6 +2612,7 @@ export default function AddTransactionScreen() {
                         return;
                       }
 
+                      setIsDockingDateAuto(false);
                       setDockingYear(String(nextDate.getFullYear()));
                       setDockingMonth(String(nextDate.getMonth() + 1));
                       setDockingDay(String(nextDate.getDate()));
@@ -1729,6 +2633,7 @@ export default function AddTransactionScreen() {
                     meridiem: dockingMeridiem,
                   }}
                   onChange={(nextValue) => {
+                    setIsDockingTimeAuto(false);
                     setDockingHour(nextValue.hour);
                     setDockingMinute(nextValue.minute);
                     setDockingMeridiem(nextValue.meridiem);
@@ -1780,13 +2685,20 @@ export default function AddTransactionScreen() {
                     emptyText="No matching boats found."
                     sheetTitle="Select Boat"
                     onChangeValue={(value) => {
+                      const nextBoat = boats.find((boat) => matchesId(boat.boat_id, value)) ?? null;
                       setBanyeraBoatId(value);
                       setBanyeraFeeId("");
                       setBanyeraFeeSearch("");
+                      setBanyeraOwnerSignature(nextBoat?.owner?.owner_signature_data_url ?? "");
+                      setBanyeraOwnerSignatureSaveForFuture(false);
+                      setPendingBanyeraOwnerSignature("");
+                      setIsBanyeraSignatureModalOpen(false);
+                      setIsBanyeraConsentModalOpen(false);
                       setBanyeraFieldErrors((current) => ({
                         ...current,
                         boat_id: "",
                         fee_id: "",
+                        owner_signature: "",
                       }));
                     }}
                   />
@@ -1861,6 +2773,7 @@ export default function AddTransactionScreen() {
                     maxDate={new Date()}
                     value={banyeraDateValue}
                     onChange={(nextDate) => {
+                      setIsBanyeraDateAuto(false);
                       setBanyeraMonth(String(nextDate.getMonth() + 1).padStart(2, "0"));
                       setBanyeraDay(String(nextDate.getDate()).padStart(2, "0"));
                       setBanyeraYear(String(nextDate.getFullYear()));
@@ -1885,6 +2798,7 @@ export default function AddTransactionScreen() {
                     meridiem: banyeraMeridiem,
                   }}
                   onChange={(nextValue) => {
+                    setIsBanyeraTimeAuto(false);
                     setBanyeraHour(nextValue.hour);
                     setBanyeraMinute(nextValue.minute);
                     setBanyeraMeridiem(nextValue.meridiem);
@@ -1993,16 +2907,15 @@ export default function AddTransactionScreen() {
                         <View className="mt-3 flex-row items-start gap-2">
                           <View className="flex-1">
                             <FormSectionLabel label="Qty" />
-                            <TextInput
-                              className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-3 text-[14px] text-[#1A1F36]"
-                              keyboardType="number-pad"
-                              placeholder="0"
+                            <IncreaseDecreaseInput
+                              accessibilityLabel="Banyera quantity"
+                              min={0}
                               value={item.quantity}
-                              onChangeText={(value) => {
+                              onChange={(value) => {
                                 setBanyeraItems((current) =>
                                   current.map((entry, currentIndex) =>
                                     currentIndex === index
-                                      ? { ...entry, quantity: value.replace(/\D/g, "") }
+                                      ? { ...entry, quantity: value }
                                       : entry
                                   )
                                 );
@@ -2011,7 +2924,6 @@ export default function AddTransactionScreen() {
                                   fish_items: "",
                                 }));
                               }}
-                              style={{ fontFamily: "Montserrat_400Regular" }}
                             />
                           </View>
                           <View className="w-[112px]">
@@ -2081,6 +2993,76 @@ export default function AddTransactionScreen() {
                   </View>
                 </View>
 
+                <View className="mt-4">
+                  <View className="mb-2 flex-row items-center justify-between">
+                    <View className="h-6 mt-2 justify-center">
+                      <FormSectionLabel label="Signature" required className="mb-0" />
+                    </View>
+                    <Pressable
+                      className="h-6 flex-row items-center justify-center"
+                      disabled={!selectedBanyeraBoat}
+                      onPress={() => {
+                        setIsBanyeraSignatureModalOpen(true);
+                        setBanyeraFieldErrors((current) => ({
+                          ...current,
+                          owner_signature: "",
+                        }));
+                      }}
+                    >
+                      <Ionicons
+                        name="add-outline"
+                        size={16}
+                        color={selectedBanyeraBoat ? "#2563EB" : "#9AA3AF"}
+                      />
+                      <Text
+                        className={`ml-1 text-[12px] ${
+                          selectedBanyeraBoat ? "text-[#2563EB]" : "text-[#9AA3AF]"
+                        }`}
+                        style={{ fontFamily: "Montserrat_600SemiBold" }}
+                      >
+                        {hasBanyeraOwnerSignature ? "Update Signature" : "Add Signature"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  <View className="relative h-24 justify-center overflow-hidden border border-[#E8E1E6] bg-white px-4">
+                    {banyeraOwnerSignatureImage ? (
+                      <>
+                        <Image
+                          source={{ uri: banyeraOwnerSignatureImage }}
+                          className="h-20 w-full opacity-70"
+                          resizeMode="contain"
+                          blurRadius={12}
+                        />
+                        <View className="absolute inset-0 items-center justify-center bg-white/40">
+                          <View className="flex-row items-center bg-[#1A1F36]/90 px-3 py-1.5">
+                            <Ionicons
+                              name="eye-off-outline"
+                              size={14}
+                              color="#FFFFFF"
+                            />
+                            <Text
+                              className="ml-1.5 text-[11px] text-white"
+                              style={{ fontFamily: "Montserrat_600SemiBold" }}
+                            >
+                              Signature hidden
+                            </Text>
+                          </View>
+                        </View>
+                      </>
+                    ) : (
+                      <Text
+                        className="text-center text-[14px] text-[#9AA3AF]"
+                        style={{ fontFamily: "Montserrat_400Regular" }}
+                      >
+                        {banyeraOwnerSignatureStatus}
+                      </Text>
+                    )}
+                  </View>
+                  {banyeraFieldErrors.owner_signature ? (
+                    <InlineErrorCard message={banyeraFieldErrors.owner_signature} />
+                  ) : null}
+                </View>
+
               </>
             ) : null}
 
@@ -2139,7 +3121,7 @@ export default function AddTransactionScreen() {
                     setTicketVehicleTypeId("");
                     setTicketControlNumber("");
                     setTicketPlateSearch("");
-                    setTicketFeeItems(buildDailyTicketFeeItems(fees, "", "1"));
+                    setTicketFeeItems(buildDailyTicketFeeItems(fees, "", "0"));
                     setTicketFieldErrors((current) => ({
                       ...current,
                       vehicle_type_id: "",
@@ -2161,7 +3143,7 @@ export default function AddTransactionScreen() {
                       buildDailyTicketFeeItems(
                         fees,
                         nextValue,
-                        ticketDailyRow.quantity || "1"
+                        ticketDailyRow.quantity ?? "0"
                       )
                     );
                     setTicketFieldErrors((current) => ({
@@ -2183,13 +3165,13 @@ export default function AddTransactionScreen() {
                       DAILY TICKET
                     </Text>
                     <Text
-                      className="mr-2 w-[54px] text-center text-[11px] uppercase text-[#6F6F82]"
+                      className="mr-2 w-[86px] text-center text-[11px] uppercase text-[#6F6F82]"
                       style={{ fontFamily: "Montserrat_600SemiBold" }}
                     >
                       QTY
                     </Text>
                     <Text
-                      className="w-[88px] text-right text-[11px] uppercase text-[#6F6F82]"
+                      className="flex-1 text-right text-[11px] uppercase text-[#6F6F82]"
                       style={{ fontFamily: "Montserrat_600SemiBold" }}
                     >
                       SUBTOTAL
@@ -2219,9 +3201,10 @@ export default function AddTransactionScreen() {
                         ) : null}
                         <View className="flex-row items-start">
                           <View className="mr-2 flex-1">
-                            <View className="h-12 justify-center rounded-[10px] border border-[#E8E1E6] bg-white px-3">
+                            <View className="h-[46px] justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-3">
                               <Text
                                 className="text-[12px] text-[#1A1F36]"
+                                numberOfLines={1}
                                 style={{ fontFamily: "Montserrat_400Regular" }}
                               >
                                 {isZeroedDailyRow
@@ -2238,37 +3221,38 @@ export default function AddTransactionScreen() {
                             </View>
                           </View>
 
-                          <View className="mr-2 w-[54px] items-center">
-                            <TextInput
-                              className="h-12 w-full rounded-[10px] border border-[#E8E1E6] bg-white text-center text-[12px] text-[#1A1F36]"
-                              keyboardType="number-pad"
+                          <View className="mr-2 w-[86px] items-center">
+                            <IncreaseDecreaseInput
+                              accessibilityLabel={`${rowType} ticket quantity`}
+                              buttonClassName="w-6"
+                              buttonTextClassName="text-[14px]"
+                              className="h-[46px]"
+                              emptyWhenMin={false}
+                              inputClassName="text-[12px]"
+                              min={0}
                               value={item.quantity}
-                              onChangeText={(value) => {
+                              onChange={(value) => {
                                 setTicketFeeItems((current) =>
                                   current.map((entry) =>
                                     entry.row_type === rowType
-                                      ? { ...entry, quantity: value.replace(/\D/g, "") }
+                                      ? { ...entry, quantity: value }
                                       : entry
                                   )
                                 );
                                 setTicketFieldErrors((current) => ({
                                   ...current,
+                                  fee_id: "",
                                   [`fee_qty_${index}`]: "",
                                 }));
-                              }}
-                              textAlign="center"
-                              style={{
-                                fontFamily: "Montserrat_400Regular",
-                                paddingLeft: 0,
-                                paddingRight: 0,
                               }}
                             />
                           </View>
 
-                          <View className="w-[88px]">
-                            <View className="h-12 items-end justify-center rounded-[10px] border border-[#E8E1E6] bg-white px-3">
+                          <View className="flex-1">
+                            <View className="h-[46px] items-end justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-2">
                               <Text
                                 className="text-[12px] text-[#1A1F36]"
+                                numberOfLines={1}
                                 style={{ fontFamily: "Montserrat_400Regular" }}
                               >
                                 {isZeroedDailyRow
@@ -2308,6 +3292,7 @@ export default function AddTransactionScreen() {
                     maxDate={new Date()}
                     value={ticketDateValue}
                     onChange={(nextDate) => {
+                      setIsTicketDateAuto(false);
                       setTicketMonth(
                         String(nextDate.getMonth() + 1).padStart(2, "0")
                       );
@@ -2345,12 +3330,108 @@ export default function AddTransactionScreen() {
               </>
             ) : null}
 
-            {transactionLock?.is_locked ? (
+            {selectedType === "remittance" ? (
+              <>
+                <View className="mt-4">
+                  <FormSectionLabel label="Today's Collection" required />
+                  <View className="h-14 flex-row items-center justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
+                    {isLoadingRemittanceCollection ? (
+                      <ActivityIndicator color="#1A1F36" size="small" />
+                    ) : (
+                      <Text
+                        className="w-full text-[14px] text-[#1A1F36]"
+                        style={{ fontFamily: "Montserrat_400Regular" }}
+                      >
+                        {`₱${remittanceSystemCollection.toLocaleString("en-PH", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}`}
+                      </Text>
+                    )}
+                  </View>
+                  <InlineErrorCard message={remittanceFieldErrors.date || ""} />
+                </View>
+
+                <Field
+                  label="Amount to Remit"
+                  placeholder="0.00"
+                  value={remittanceCash}
+                  onChangeText={(value) => {
+                    setRemittanceCash(value.replace(/[^0-9.]/g, ""));
+                    setRemittanceFieldErrors((current) => ({
+                      ...current,
+                      amount: "",
+                    }));
+                  }}
+                />
+                <InlineErrorCard message={remittanceFieldErrors.amount || ""} />
+
+                <View className="mt-4 flex-row gap-3">
+                  <View className="flex-1">
+                    <FormSectionLabel label="Surplus" />
+                    <TextInput
+                      editable={false}
+                      value={`₱${remittanceSurplus.toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`}
+                      className="h-14 rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4 text-[14px] text-[#1A1F36]"
+                      style={{ fontFamily: "Montserrat_400Regular" }}
+                    />
+                  </View>
+                  <View className="flex-1">
+                    <FormSectionLabel label="Deficit" />
+                    <TextInput
+                      editable={false}
+                      value={`₱${remittanceDeficit.toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`}
+                      className="h-14 rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4 text-[14px] text-[#1A1F36]"
+                      style={{ fontFamily: "Montserrat_400Regular" }}
+                    />
+                  </View>
+                </View>
+
+                <Field
+                  label="Remarks"
+                  placeholder="Add remittance remarks"
+                  value={remittanceRemarks}
+                  onChangeText={(value) => {
+                    setRemittanceRemarks(value);
+                    setRemittanceFieldErrors((current) => ({
+                      ...current,
+                      remarks: "",
+                    }));
+                  }}
+                  multiline
+                />
+                <InlineErrorCard message={remittanceFieldErrors.remarks || ""} />
+              </>
+            ) : null}
+
+            {(isSelectedTransactionLocked || isRemittanceAlreadySubmitted) ? (
               <View className="mt-4 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3">
                 <View className="flex-row items-center">
                   <Ionicons name="lock-closed-outline" size={16} color="#DC2626" />
                   <Text className="ml-2 flex-1 text-[12px] leading-4 text-[#991B1B]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                    {transactionLock.message || "Transactions are view-only at the moment."}
+                    {isRemittanceAlreadySubmitted
+                      ? "Today's remittance has already been submitted."
+                      : transactionLock?.message || "Transactions are view-only at the moment."}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            {isOfflineRemittance ? (
+              <View className="mt-4 rounded-[10px] border border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3">
+                <View className="flex-row items-center">
+                  <Ionicons name="cloud-offline-outline" size={16} color="#2563EB" />
+                  <Text
+                    className="ml-2 flex-1 text-[12px] leading-4 text-[#1E3A8A]"
+                    style={{ fontFamily: "Montserrat_400Regular" }}
+                  >
+                    An internet connection is required to submit a remittance.
                   </Text>
                 </View>
               </View>
@@ -2358,9 +3439,9 @@ export default function AddTransactionScreen() {
 
             <Pressable
               className={`mt-6 h-14 items-center justify-center rounded-[10px] ${
-                isSubmitting || transactionLock?.is_locked ? "bg-[#46506E]" : "bg-[#1A1F36]"
+                isSaveDisabled ? "bg-[#46506E]" : "bg-[#1A1F36]"
               }`}
-              disabled={isSubmitting || Boolean(transactionLock?.is_locked)}
+              disabled={isSaveDisabled}
               onPress={handleSave}
             >
               {isSubmitting ? (
@@ -2377,6 +3458,52 @@ export default function AddTransactionScreen() {
           </View>
         </View>
       </ScrollView>
+      <SignatureModal
+        ownerName={selectedBanyeraBoatOwner}
+        visible={isBanyeraSignatureModalOpen}
+        onClose={() => setIsBanyeraSignatureModalOpen(false)}
+        onBegin={() =>
+          setBanyeraFieldErrors((current) => ({
+            ...current,
+            owner_signature: "",
+          }))
+        }
+        onEmpty={() => {
+          setBanyeraOwnerSignature("");
+          setBanyeraFieldErrors((current) => ({
+            ...current,
+            owner_signature: "Boat owner signature is required.",
+          }));
+        }}
+        onOK={(signature) => {
+          setPendingBanyeraOwnerSignature(signature);
+          setIsBanyeraSignatureModalOpen(false);
+          setIsBanyeraConsentModalOpen(true);
+        }}
+      />
+      <ConsentModal
+        isSaving={isSavingBanyeraSignature}
+        visible={isBanyeraConsentModalOpen}
+        onClose={() => {
+          if (!isSavingBanyeraSignature) {
+            setIsBanyeraConsentModalOpen(false);
+          }
+        }}
+        onSkip={() => {
+          if (pendingBanyeraOwnerSignature) {
+            void saveBanyeraOwnerSignature(pendingBanyeraOwnerSignature, {
+              consentedToDataPrivacy: false,
+              declaredTermsAccepted: false,
+              saveForFuture: false,
+            });
+          }
+        }}
+        onConfirm={(options) => {
+          if (pendingBanyeraOwnerSignature) {
+            void saveBanyeraOwnerSignature(pendingBanyeraOwnerSignature, options);
+          }
+        }}
+      />
     </View>
   );
 }

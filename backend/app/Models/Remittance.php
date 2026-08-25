@@ -46,18 +46,21 @@ class Remittance extends Model
 
     public function scopeForTableIndex(Builder $query): Builder
     {
-        return $query->select([
-            'remittance_id',
-            'remittance_reference_no',
-            'date',
-            'amount',
-            'surplus',
-            'deficit',
-            'status',
-            'remarks',
-            'created_at',
-            'updated_at',
-        ]);
+        return $query
+            ->with(['submittedBy:user_id,first_name,last_name,email,role'])
+            ->select([
+                'remittance_id',
+                'remittance_reference_no',
+                'date',
+                'amount',
+                'surplus',
+                'deficit',
+                'status',
+                'remarks',
+                'submitted_by',
+                'created_at',
+                'updated_at',
+            ]);
     }
 
     public function scopeSearchTable(Builder $query, ?string $search): Builder

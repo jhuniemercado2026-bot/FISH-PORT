@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\TransactionUpdated;
 use App\Models\Payment;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
@@ -161,7 +162,7 @@ class PaymentController extends Controller
             'payment_method' => ['nullable', Rule::in(['cash'])],
             'payment_date' => 'required|date',
             'remarks' => 'nullable|string',
-            'official_receipt_no' => 'required|string|max:100',
+            'official_receipt_no' => 'required|digits:7',
         ]);
 
         $validated['official_receipt_no'] = trim($validated['official_receipt_no']);
@@ -232,9 +233,11 @@ class PaymentController extends Controller
         app(ActivityLogService::class)->log(
             action: 'INSERT',
             module: 'Payments',
-            details: 'Recorded payment #' . ($payment->payment_reference ?? $payment->payment_id) . ' for bill #' . ($payment->bill_reference ?? $payment->bill_id) . '.',
+            details: $this->paymentRecordedActivityDetails($payment),
             user: Auth::user()
         );
+
+        broadcast(new TransactionUpdated('payment', 'created', $this->transformPaymentRecord($payment)));
 
         if ($minimal) {
             return response()->json([
@@ -306,11 +309,13 @@ class PaymentController extends Controller
         app(ActivityLogService::class)->log(
             action: 'INSERT',
             module: 'Payments',
-            details: 'Recorded boat payment for ' . $bills->count() . ' bill(s) under boat "' . ($firstRecord->boat_name ?? 'Unknown boat') . '".',
+            details: $this->paymentRecordedActivityDetails($paymentRecords),
             user: Auth::user()
         );
 
         $payments = $paymentRecords->map(fn ($payment) => $this->transformPaymentRecord($payment))->values();
+
+        $payments->each(fn ($payment) => broadcast(new TransactionUpdated('payment', 'created', $payment)));
 
         if ($minimal) {
             return response()->json([
@@ -405,11 +410,13 @@ class PaymentController extends Controller
         app(ActivityLogService::class)->log(
             action: 'INSERT',
             module: 'Payments',
-            details: 'Recorded selected-bill payment for ' . $bills->count() . ' bill(s) under boat "' . ($firstRecord->boat_name ?? 'Unknown boat') . '".',
+            details: $this->paymentRecordedActivityDetails($paymentRecords),
             user: Auth::user()
         );
 
         $payments = $paymentRecords->map(fn ($payment) => $this->transformPaymentRecord($payment))->values();
+
+        $payments->each(fn ($payment) => broadcast(new TransactionUpdated('payment', 'created', $payment)));
 
         if ($minimal) {
             return response()->json([
@@ -474,7 +481,7 @@ class PaymentController extends Controller
     public function update(Request $request, $id)
     {
         $validated = $request->validate([
-            'official_receipt_no' => 'required|string|max:100',
+            'official_receipt_no' => 'required|digits:7',
             'remarks' => 'nullable|string',
         ]);
 
@@ -507,15 +514,15 @@ class PaymentController extends Controller
                 'remarks' => (string) ($payment->remarks ?? ''),
             ],
             [
-                'official_receipt_no' => 'Official Receipt No.',
-                'remarks' => 'Remarks',
+                'official_receipt_no' => 'official receipt no.',
+                'remarks' => 'remarks',
             ]
         );
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Payments',
-            details: 'Updated payment #' . ($record->payment_reference_no ?? $payment->payment_id) . ($changeDetails !== '' ? ': ' . $changeDetails . '.' : '.'),
+            details: 'Updated payment #' . ($record->payment_reference_no ?? $payment->payment_id) . ($changeDetails !== '' ? ' in ' . $changeDetails . '.' : '.'),
             user: Auth::user()
         );
 
@@ -771,6 +778,26 @@ class PaymentController extends Controller
             'created_at' => $payment->created_at,
             'updated_at' => $payment->updated_at,
         ];
+    }
+
+    private function paymentRecordedActivityDetails($paymentRecords): string
+    {
+        $records = is_iterable($paymentRecords)
+            ? collect($paymentRecords)
+            : collect([$paymentRecords]);
+
+        $firstRecord = $records->first();
+        $boatName = trim((string) ($firstRecord->boat_name ?? '')) ?: 'Unknown boat';
+        $referenceNumbers = $records
+            ->map(fn ($record) => trim((string) ($record->payment_reference_no ?? $record->payment_reference ?? $record->payment_id ?? '')))
+            ->filter()
+            ->unique()
+            ->join(', ');
+        $amount = $records->sum(fn ($record) => (float) ($record->amount_paid ?? 0));
+
+        return 'Recorded payment for boat "' . $boatName . '" with reference number "' .
+            ($referenceNumbers !== '' ? $referenceNumbers : '-') .
+            '" and an amount of ₱' . number_format($amount, 2) . '.';
     }
 
     private function transformPaymentableBill(object $bill, array $paymentTransactionsHistory = []): array

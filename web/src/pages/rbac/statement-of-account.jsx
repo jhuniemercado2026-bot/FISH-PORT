@@ -27,6 +27,7 @@ import { useSidebar } from "../../store/sidebarStore";
 import { getStatementOfAccountDataQueryOptions, useStatementOfAccountDataQuery } from "../../hooks/useStatementOfAccountDataQuery";
 import { buildStatementOfAccountPdf } from "../../lib/pdfDocumentBoatStatement";
 import { buildOwnerStatementPdf } from "../../lib/pdfDocumentOwnerStatement";
+import { cacheTab, getCachedTab } from "../../utils/tabSession";
 
 const FONT = "'Montserrat', sans-serif";
 const PAGE_SIZE = 10;
@@ -60,9 +61,15 @@ const SOA_TABS = [
   { key: "owner-statement", label: "Owner Statement", icon: IoPeopleOutline },
   { key: "boat-statement", label: "Boat Statement", icon: IoDocumentTextOutline },
 ];
+const SOA_TAB_STORAGE_KEY = "opol:statement-of-account:active-tab";
+const SOA_TAB_KEYS = SOA_TABS.map((tab) => tab.key);
 
 const getStatementTabFromPathname = (pathname) =>
-  pathname === "/boat-statement" ? "boat-statement" : "owner-statement";
+  pathname === "/boat-statement"
+    ? "boat-statement"
+    : pathname === "/owner-statement"
+      ? getCachedTab(SOA_TAB_STORAGE_KEY, SOA_TAB_KEYS, "owner-statement")
+      : "owner-statement";
 
 const getStatementPathFromTab = (tab) =>
   tab === "boat-statement" ? "/boat-statement" : "/owner-statement";
@@ -341,11 +348,21 @@ const SuperStatementOfAccount = () => {
   }, []);
 
   useEffect(() => {
-    setActiveSoaTab(getStatementTabFromPathname(location.pathname));
-  }, [location.pathname]);
+    const nextTab = getStatementTabFromPathname(location.pathname);
+    setActiveSoaTab(nextTab);
+    cacheTab(SOA_TAB_STORAGE_KEY, nextTab, SOA_TAB_KEYS);
+
+    if (location.pathname === "/owner-statement" && nextTab !== "owner-statement") {
+      navigate(
+        { pathname: getStatementPathFromTab(nextTab), search: location.search },
+        { replace: true, state: location.state },
+      );
+    }
+  }, [location.pathname, location.search, location.state, navigate]);
 
   const handleStatementTabChange = (tab) => {
     setActiveSoaTab(tab);
+    cacheTab(SOA_TAB_STORAGE_KEY, tab, SOA_TAB_KEYS);
     navigate({
       pathname: getStatementPathFromTab(tab),
       search: location.search,

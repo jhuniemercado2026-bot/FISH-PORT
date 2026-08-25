@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityIndicator, ScrollView, StatusBar, Text, TextInput, View, Pressable } from "react-native";
+import NetInfo from "@react-native-community/netinfo";
+import { ScrollView, StatusBar, Text, View, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useEffect, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -8,13 +9,19 @@ import { buildApiHeaders, getApiBaseUrl } from "../../../api/axios";
 import { useToastStore } from "../../../store/toastStore";
 import { useHistoryStore } from "../../../store/historyStore";
 import EditModal from "../../../components/EditModal";
-import Modal, { VoidTransactionModal, getVoidReasonOptions } from "../../../components/VoidModal";
+import { VoidTransactionModal, getVoidReasonOptions } from "../../../components/VoidModal";
+import {
+  getOfflineTransactionDrafts,
+  OfflineTransactionDraft,
+} from "../../../utils/offlineTransactionQueue";
 
-type TransactionType = "docking" | "banyera" | "tickets";
+type TransactionType = "docking" | "banyera" | "tickets" | "remittance";
+type VoidableTransactionType = Exclude<TransactionType, "remittance">;
 
 type Params = {
   id: string;
   type?: string;
+  draft?: string;
 };
 
 type TransactionRecord = Record<string, any>;
@@ -22,6 +29,8 @@ type TransactionRecord = Record<string, any>;
 type TransactionLockState = {
   is_locked?: boolean | null;
   message?: string | null;
+  date?: string | null;
+  applies_to?: string | null;
   unlock_at?: string | null;
   remittance_reference_no?: string | null;
 };
@@ -34,6 +43,8 @@ const endpointForType = (type: TransactionType) => {
       return "/banyera-transactions";
     case "tickets":
       return "/vehicle-tickets";
+    case "remittance":
+      return "/remittances";
   }
 };
 
@@ -45,6 +56,8 @@ const idFieldForType = (type: TransactionType) => {
       return "banyera_id";
     case "tickets":
       return "ticket_id";
+    case "remittance":
+      return "remittance_id";
   }
 };
 
@@ -52,8 +65,39 @@ const parseIsoDateTime = (value?: string | null) => {
   if (!value) return null;
 
   const raw = String(value).trim();
-  const withoutZone = raw.replace(/([+-]\d{2}:\d{2})$/, "").replace(/Z$/, "");
-  const match = withoutZone.match(
+  const hasTimezone = /(Z|[+-]\d{2}:\d{2})$/i.test(raw);
+
+  if (hasTimezone) {
+    const normalizedValue = raw.replace(/\.(\d{3})\d+/, ".$1");
+    const parsedDate = new Date(normalizedValue);
+
+    if (Number.isNaN(parsedDate.getTime())) return null;
+
+    const parts = new Intl.DateTimeFormat("en-PH", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(parsedDate);
+
+    const getPart = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((part) => part.type === type)?.value ?? "0");
+
+    return {
+      year: getPart("year"),
+      month: getPart("month"),
+      day: getPart("day"),
+      hour: getPart("hour"),
+      minute: getPart("minute"),
+      second: getPart("second"),
+    };
+  }
+
+  const match = raw.match(
     /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?)?$/
   );
 
@@ -121,8 +165,248 @@ const isSamePhilippineDate = (value?: string | null) => {
   return parsed.year === today.year && parsed.month === today.month && parsed.day === today.day;
 };
 
+const getPhilippineDateKey = (value?: string | null) => {
+  const parsed = parseIsoDateTime(value);
+  if (!parsed) return "";
+
+  return `${parsed.year}-${String(parsed.month).padStart(2, "0")}-${String(parsed.day).padStart(2, "0")}`;
+};
+
+const getTransactionDateForStatus = (record: TransactionRecord | null | undefined, type?: TransactionType | null) => {
+  if (!record) return null;
+
+  if (type === "docking") return record.docking_date;
+  if (type === "banyera") return record.transaction_date || record.created_at || record.docking_date;
+  if (type === "tickets") return record.ticket_date || record.transaction_date || record.created_at;
+
+  return record.transaction_date || record.ticket_date || record.created_at || record.docking_date;
+};
+
 const isRecordBilled = (record: TransactionRecord | null | undefined) =>
   Boolean(record?.is_billed || record?.billed_at || record?.billing_id || record?.bill_id);
+
+const createDraftDetail = (draft: OfflineTransactionDraft): TransactionRecord => {
+  const payload = draft.payload ?? {};
+  const metadata = draft.metadata ?? {};
+
+  if (draft.type === "docking") {
+    return {
+      __isDraft: true,
+      local_id: draft.local_id,
+      created_at: draft.created_at,
+      boat: {
+        boat_name: metadata.boat_name || `Boat #${payload.boat_id ?? "-"}`,
+        boat_type_name: metadata.boat_type_name,
+        boat_type: {
+          type_name: metadata.boat_type_name,
+        },
+      },
+      docking_date: payload.docking_date ?? draft.created_at,
+      docking_fee: payload.docking_fee ?? 0,
+    };
+  }
+
+  if (draft.type === "banyera") {
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const totalFee = items.reduce(
+      (sum, item) => sum + Number(item?.subtotal ?? 0),
+      0
+    );
+
+    return {
+      __isDraft: true,
+      local_id: draft.local_id,
+      created_at: draft.created_at,
+      boat: {
+        boat_name: metadata.boat_name || `Boat #${payload.boat_id ?? "-"}`,
+        boat_type_name: metadata.boat_type_name,
+        boat_type: {
+          type_name: metadata.boat_type_name,
+        },
+      },
+      transaction_date: payload.transaction_date ?? draft.created_at,
+      items,
+      total_fee: totalFee,
+    };
+  }
+
+  if (draft.type === "remittance") {
+    return {
+      __isDraft: true,
+      local_id: draft.local_id,
+      created_at: draft.created_at,
+      date: payload.date ?? draft.created_at,
+      amount: payload.amount ?? 0,
+      surplus: payload.surplus ?? 0,
+      deficit: payload.deficit ?? 0,
+      remarks: payload.remarks ?? null,
+    };
+  }
+
+  return {
+    __isDraft: true,
+    local_id: draft.local_id,
+    created_at: draft.created_at,
+    plate_number: metadata.plate_number || payload.plate_number || null,
+    vehicle_type_name: metadata.vehicle_type_name || (payload.vehicle_type_id ? `Vehicle Type #${payload.vehicle_type_id}` : "Vehicle"),
+    ticket_date: payload.ticket_date ?? draft.created_at,
+    ticket_fee: payload.ticket_fee ?? payload.total_fee ?? 0,
+    daily_fee: payload.daily_fee,
+    banyera_fee: payload.banyera_fee,
+  };
+};
+
+function DetailSkeletonBlock({
+  className = "",
+}: {
+  className?: string;
+}) {
+  return <View className={className} style={{ backgroundColor: "#EEF2F7" }} />;
+}
+
+function DetailFieldSkeleton({
+  half = false,
+}: {
+  half?: boolean;
+}) {
+  return (
+    <View className={half ? "mb-4 flex-1" : "mb-4"}>
+      <DetailSkeletonBlock className="h-3 w-24 rounded-full" />
+      <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+        <DetailSkeletonBlock className="h-4 w-3/5 rounded-full" />
+      </View>
+    </View>
+  );
+}
+
+function DetailSectionSkeleton({
+  afterRows = 0,
+  backgroundClassName = "bg-white",
+  rows = 4,
+  splitRowCount = 1,
+  showSplitRow = true,
+}: {
+  afterRows?: number;
+  backgroundClassName?: string;
+  rows?: number;
+  splitRowCount?: number;
+  showSplitRow?: boolean;
+}) {
+  return (
+    <View className={`mb-4 -mx-5 rounded-[10px] border border-[#E8E1E6] px-5 py-5 shadow-sm shadow-black/5 ${backgroundClassName}`}>
+      <View className="flex-row items-center">
+        <DetailSkeletonBlock className="h-11 w-11 rounded-[10px]" />
+        <View className="ml-3 flex-1">
+          <DetailSkeletonBlock className="h-5 w-3/5 rounded-full" />
+          <DetailSkeletonBlock className="mt-2 h-3 w-4/5 rounded-full" />
+        </View>
+      </View>
+
+      <View className="-mx-5 mb-5 mt-4 h-px bg-[#E8E1E6]" />
+
+      {Array.from({ length: rows }).map((_, index) => (
+        <DetailFieldSkeleton key={`detail-field-skeleton-${index}`} />
+      ))}
+
+      {showSplitRow
+        ? Array.from({ length: splitRowCount }).map((_, index) => (
+            <View
+              key={`detail-split-row-skeleton-${index}`}
+              className="mb-4 flex-row gap-3"
+            >
+              <DetailFieldSkeleton half />
+              <DetailFieldSkeleton half />
+            </View>
+          ))
+        : null}
+
+      {Array.from({ length: afterRows }).map((_, index) => (
+        <DetailFieldSkeleton key={`detail-after-field-skeleton-${index}`} />
+      ))}
+    </View>
+  );
+}
+
+function FishItemsSkeleton() {
+  return (
+    <View className="mb-4 -mx-5 rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-5 py-5 shadow-sm shadow-black/5">
+      <View className="flex-row items-center">
+        <DetailSkeletonBlock className="h-11 w-11 rounded-[10px]" />
+        <View className="ml-3 flex-1">
+          <DetailSkeletonBlock className="h-5 w-2/5 rounded-full" />
+          <DetailSkeletonBlock className="mt-2 h-3 w-4/5 rounded-full" />
+        </View>
+      </View>
+
+      <View className="-mx-5 mb-5 mt-4 h-px bg-[#E8E1E6]" />
+
+      {Array.from({ length: 2 }).map((_, index) => (
+        <View
+          key={`detail-item-skeleton-${index}`}
+          className="mb-4 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-4 shadow-sm shadow-black/5"
+        >
+          <View className="mb-4 rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4 py-3">
+            <DetailSkeletonBlock className="h-4 w-1/2 rounded-full" />
+          </View>
+          <DetailFieldSkeleton />
+          <View className="flex-row gap-3">
+            <DetailFieldSkeleton half />
+            <DetailFieldSkeleton half />
+          </View>
+          <DetailFieldSkeleton />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function DetailActionsSkeleton() {
+  return (
+    <>
+      <DetailSkeletonBlock className="mb-4 -mx-5 h-12 rounded-[10px]" />
+      <View className="flex-row gap-3">
+        <DetailSkeletonBlock className="h-12 flex-1 rounded-[10px]" />
+        <DetailSkeletonBlock className="h-12 flex-1 rounded-[10px]" />
+      </View>
+    </>
+  );
+}
+
+function TransactionDetailSkeleton({ type }: { type?: TransactionType }) {
+  return (
+    <View className="px-5 pb-10">
+      <View className="rounded-[10px] bg-white p-5 shadow-sm shadow-black/10">
+        {type === "banyera" ? (
+          <>
+            <DetailSectionSkeleton rows={6} splitRowCount={1} />
+            <FishItemsSkeleton />
+          </>
+        ) : type === "tickets" ? (
+          <>
+            <DetailSectionSkeleton rows={5} showSplitRow={false} />
+            <DetailSectionSkeleton rows={3} showSplitRow={false} />
+          </>
+        ) : type === "docking" ? (
+          <DetailSectionSkeleton rows={7} showSplitRow={false} />
+        ) : (
+          <DetailSectionSkeleton rows={4} afterRows={1} />
+        )}
+
+        <DetailActionsSkeleton />
+      </View>
+    </View>
+  );
+}
+
+const isOfflineNetworkState = (state: {
+  isConnected: boolean | null;
+  isInternetReachable: boolean | null;
+} | null) => {
+  if (!state) return false;
+  return state.isConnected === false || state.isInternetReachable === false;
+};
+
+const detailCacheKey = (type: TransactionType, id: string | number) => `${type}:${id}`;
 
 export default function HistoryDetailScreen() {
   const router = useRouter();
@@ -130,6 +414,10 @@ export default function HistoryDetailScreen() {
   const authToken = getAuthToken();
   const showToast = useToastStore((state) => state.showToast);
   const triggerHistoryRefresh = useHistoryStore((state) => state.triggerRefresh);
+  const syncedTransactions = useHistoryStore((state) => state.syncedTransactions);
+  const cacheTransactionDetail = useHistoryStore((state) => state.cacheTransactionDetail);
+  const realtimeTransactionLock = useHistoryStore((state) => state.transactionLock);
+  const setRealtimeTransactionLock = useHistoryStore((state) => state.setTransactionLock);
   const [detail, setDetail] = useState<TransactionRecord | null>(null);
   const [type, setType] = useState<TransactionType | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
@@ -141,25 +429,38 @@ export default function HistoryDetailScreen() {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [transactionLock, setTransactionLock] = useState<TransactionLockState | null>(null);
+  const [isOfflineDetailUnavailable, setIsOfflineDetailUnavailable] = useState(false);
+  const isDraftDetail = Boolean(detail?.__isDraft) || params.draft === "true";
+
+  useEffect(() => {
+    setTransactionLock(realtimeTransactionLock ?? null);
+  }, [realtimeTransactionLock]);
 
   useEffect(() => {
     const id = params.id;
     const queryType = params.type;
+    const isDraftRoute = params.draft === "true";
     const parsedType =
-      queryType === "docking" || queryType === "banyera" || queryType === "tickets"
+      queryType === "docking" || queryType === "banyera" || queryType === "tickets" || queryType === "remittance"
         ? (queryType as TransactionType)
         : undefined;
 
     setType(parsedType);
 
     async function loadTransactionLockState() {
+      if (isDraftRoute) {
+        setTransactionLock(null);
+        return;
+      }
+
       if (!authToken) {
         setTransactionLock(null);
         return;
       }
 
       try {
-        const response = await fetch(`${getApiBaseUrl()}/transaction-lock`, {
+        const lockResourceQuery = parsedType === "tickets" ? "?resource=vehicle-tickets" : "";
+        const response = await fetch(`${getApiBaseUrl()}/transaction-lock${lockResourceQuery}`, {
           headers: buildApiHeaders(authToken),
         });
         const json = await response.json().catch(() => null);
@@ -167,8 +468,10 @@ export default function HistoryDetailScreen() {
 
         if (lock && (lock.is_locked || lock.message)) {
           setTransactionLock(lock);
+          setRealtimeTransactionLock(lock);
         } else {
           setTransactionLock(null);
+          setRealtimeTransactionLock(null);
         }
       } catch {
         setTransactionLock(null);
@@ -176,6 +479,54 @@ export default function HistoryDetailScreen() {
     }
 
     async function loadDetail() {
+      setIsOfflineDetailUnavailable(false);
+
+      if (isDraftRoute) {
+        const drafts = await getOfflineTransactionDrafts();
+        const draft = drafts.find((item) => item.local_id === id);
+
+        if (!draft) {
+          showToast("info", "Draft details not found.");
+          setDetail(null);
+          setIsLoading(false);
+          return;
+        }
+
+        setType(draft.type);
+        setDetail(createDraftDetail(draft));
+        setIsLoading(false);
+        return;
+      }
+
+      if (parsedType && id) {
+        const cachedDetail = useHistoryStore.getState().transactionDetailCache[detailCacheKey(parsedType, id)];
+        if (cachedDetail) {
+          setDetail(cachedDetail);
+          setIsLoading(false);
+        } else {
+          setIsLoading(true);
+        }
+      } else {
+        setIsLoading(true);
+      }
+
+      const networkState = await NetInfo.fetch().catch(() => null);
+      if (isOfflineNetworkState(networkState)) {
+        const cachedDetail =
+          parsedType && id
+            ? useHistoryStore.getState().transactionDetailCache[detailCacheKey(parsedType, id)]
+            : null;
+
+        if (cachedDetail) {
+          setDetail(cachedDetail);
+        } else {
+          setDetail(null);
+          setIsOfflineDetailUnavailable(true);
+        }
+        setIsLoading(false);
+        return;
+      }
+
       const authSession = getAuthSession();
       const currentUserId = authSession?.user?.user_id;
 
@@ -195,43 +546,50 @@ export default function HistoryDetailScreen() {
       try {
         const typesToCheck: TransactionType[] = parsedType
           ? [parsedType]
-          : ["docking", "banyera", "tickets"];
+          : ["docking", "banyera", "tickets", "remittance"];
 
         let found: TransactionRecord | null = null;
 
-        const authSession = getAuthSession();
-        const currentUserId = authSession?.user?.user_id;
-
         const isOwnedByCurrentUser = (record: TransactionRecord) => {
-          if (!currentUserId) return false;
-          if (record?.created_by === currentUserId) return true;
-          if (record?.created_by?.user_id === currentUserId) return true;
-          if (record?.createdBy?.user_id === currentUserId) return true;
-          return false;
+          const currentUserIdString = String(currentUserId);
+          const ownerCandidates = [
+            record?.created_by,
+            record?.created_by?.user_id,
+            record?.created_by?.id,
+            record?.created_by_id,
+            record?.createdBy?.user_id,
+            record?.createdBy?.id,
+            record?.createdBy,
+            record?.user_id,
+            record?.user?.user_id,
+            record?.user?.id,
+            record?.owner_id,
+            record?.submitted_by,
+            record?.submittedBy?.user_id,
+            record?.submittedBy?.id,
+          ];
+
+          return ownerCandidates.some(
+            (value) => value !== undefined && value !== null && String(value) === currentUserIdString
+          );
         };
 
         for (const typeToCheck of typesToCheck) {
-          const url = `${getApiBaseUrl()}${endpointForType(typeToCheck)}${
-            typeToCheck === "banyera" ? "?include_voided=true" : ""
-          }`;
-          const response = await fetch(url, {
+          const response = await fetch(`${getApiBaseUrl()}${endpointForType(typeToCheck)}/${idNumber}`, {
             headers: buildApiHeaders(authToken),
           });
-          const json = await response.json().catch(() => []);
-          const list = Array.isArray(json)
-            ? json
-            : Array.isArray(json.data)
-            ? json.data
-            : [];
 
-          const record = list.find(
-            (item: TransactionRecord) =>
-              item[idFieldForType(typeToCheck)] === idNumber && isOwnedByCurrentUser(item)
-          );
+          if (!response.ok) {
+            continue;
+          }
 
-          if (record) {
+          const json = await response.json().catch(() => null);
+          const record = resolveDetailFromResponse(json, null);
+
+          if (record && isOwnedByCurrentUser(record)) {
             found = record;
             setType(typeToCheck);
+            cacheTransactionDetail(typeToCheck, idNumber, record);
             break;
           }
         }
@@ -241,8 +599,13 @@ export default function HistoryDetailScreen() {
         }
 
         setDetail(found);
-      } catch (error) {
-        showToast("error", "Failed to load transaction details.");
+      } catch {
+        const latestNetworkState = await NetInfo.fetch().catch(() => null);
+        if (isOfflineNetworkState(latestNetworkState)) {
+          setIsOfflineDetailUnavailable(true);
+        } else {
+          showToast("error", "Failed to load transaction details.");
+        }
       } finally {
         setIsLoading(false);
       }
@@ -250,10 +613,50 @@ export default function HistoryDetailScreen() {
 
     loadDetail();
     loadTransactionLockState();
-  }, [authToken, params.id, params.type, showToast]);
+  }, [authToken, cacheTransactionDetail, params.draft, params.id, params.type, setRealtimeTransactionLock, showToast]);
+
+  useEffect(() => {
+    const id = params.id;
+    const queryType = params.type;
+    const parsedType =
+      queryType === "docking" || queryType === "banyera" || queryType === "tickets" || queryType === "remittance"
+        ? (queryType as TransactionType)
+        : undefined;
+
+    if (!id || !parsedType || params.draft === "true") return;
+
+    const latestSynced = [...syncedTransactions].reverse().find((transaction) => {
+      if (transaction.type !== parsedType) return false;
+      const transactionId = transaction.data?.[idFieldForType(parsedType)] ?? transaction.data?.id;
+      return transactionId !== undefined && transactionId !== null && String(transactionId) === String(id);
+    });
+
+    if (!latestSynced) return;
+
+    setType(parsedType);
+    setDetail(latestSynced.data);
+    cacheTransactionDetail(parsedType, id, latestSynced.data);
+  }, [cacheTransactionDetail, params.draft, params.id, params.type, syncedTransactions]);
+
+  const isDetailTransactionLocked = () => {
+    if (!detail || !type || type === "remittance" || !transactionLock?.is_locked) return false;
+
+    const lockDate = String(transactionLock.date || "").slice(0, 10);
+    if (!lockDate) return false;
+
+    if (transactionLock.applies_to === "transactions") {
+      return getPhilippineDateKey(getTransactionDateForStatus(detail, type)) === lockDate;
+    }
+
+    if (transactionLock.applies_to !== "vehicle-tickets" || type !== "tickets") {
+      return false;
+    }
+
+    return getPhilippineDateKey(getTransactionDateForStatus(detail, type)) === lockDate;
+  };
 
   const openVoidModal = () => {
-    if (transactionLock?.is_locked || isRecordBilled(detail)) return;
+    if (isDetailTransactionLocked() || isRecordBilled(detail)) return;
     setVoidReasonOption("");
     setVoidReasonCustom("");
     setVoidReasonError("");
@@ -274,7 +677,7 @@ export default function HistoryDetailScreen() {
   };
 
   const handleSaveBanyeraEdit = async (updatedItems: Record<string, any>[]) => {
-    if (!detail || transactionLock?.is_locked) return;
+    if (!detail || isDetailTransactionLocked()) return;
     const transactionId = detail.banyera_id ?? detail.banyeraId ?? detail.id;
     if (!transactionId) return;
 
@@ -320,14 +723,14 @@ export default function HistoryDetailScreen() {
       return fallback;
     }
 
-    const wrappedCandidates = [payload.data, payload.transaction, payload.ticket, payload.docking, payload.banyera, payload.record];
+    const wrappedCandidates = [payload.data, payload.transaction, payload.ticket, payload.docking, payload.banyera, payload.remittance, payload.record];
     for (const candidate of wrappedCandidates) {
       if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
         return { ...(fallback ?? {}), ...(candidate as TransactionRecord) };
       }
     }
 
-    if (payload.id || payload.ticket_id || payload.banyera_id || payload.docking_id || payload.plate_number || payload.boat_name || payload.total_fee != null || payload.ticket_fee != null) {
+    if (payload.id || payload.ticket_id || payload.banyera_id || payload.docking_id || payload.remittance_id || payload.plate_number || payload.boat_name || payload.total_fee != null || payload.ticket_fee != null) {
       return { ...(fallback ?? {}), ...(payload as TransactionRecord) };
     }
 
@@ -335,8 +738,9 @@ export default function HistoryDetailScreen() {
   };
 
   const handleVoidConfirm = async () => {
-    if (!detail || !type || transactionLock?.is_locked) return;
-    const transactionId = detail[idFieldForType(type)];
+    if (!detail || !type || type === "remittance" || isDetailTransactionLocked()) return;
+    const voidableType: VoidableTransactionType = type;
+    const transactionId = detail[idFieldForType(voidableType)];
     if (!transactionId) return;
     if (!voidReasonOption) {
       setVoidReasonError("Void reason is required.");
@@ -346,7 +750,7 @@ export default function HistoryDetailScreen() {
     const resolvedReason =
       voidReasonOption === "others"
         ? voidReasonCustom.trim()
-        : getVoidReasonOptions(type).find((option) => option.value === voidReasonOption)?.label ?? "";
+        : getVoidReasonOptions(voidableType).find((option) => option.value === voidReasonOption)?.label ?? "";
 
     if (!resolvedReason) {
       setVoidReasonError(
@@ -360,26 +764,28 @@ export default function HistoryDetailScreen() {
     setIsSavingVoidAction(true);
     try {
       const response = await fetch(
-        `${getApiBaseUrl()}${endpointForType(type)}/${transactionId}${type === "tickets" ? "/void" : "/void"}`,
+        `${getApiBaseUrl()}/void-requests`,
         {
-          method: "PATCH",
+          method: "POST",
           headers: {
             ...buildApiHeaders(authToken),
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ void_reason: resolvedReason }),
+          body: JSON.stringify({
+            transaction_type: type,
+            transaction_id: transactionId,
+            void_reason: resolvedReason,
+          }),
         }
       );
       const json = await response.json().catch(() => null);
 
       if (!response.ok) {
-        showToast("error", json?.message || "Unable to void this transaction.");
+        showToast("error", json?.message || "Unable to request voiding for this transaction.");
         return;
       }
 
-      showToast("success", "Transaction voided successfully.");
-      setDetail(resolveDetailFromResponse(json, detail));
-      triggerHistoryRefresh();
+      showToast("success", json?.message || "Void request sent to coordinators.");
       closeVoidModal();
     } catch {
       showToast("error", "Unable to reach the server.");
@@ -388,91 +794,55 @@ export default function HistoryDetailScreen() {
     }
   };
 
-  const handleRestore = async () => {
-    if (!detail || !type || transactionLock?.is_locked || isRecordBilled(detail)) return;
-    const transactionId = detail[idFieldForType(type)];
-    if (!transactionId) return;
-    setIsSavingVoidAction(true);
-    try {
-      const response = await fetch(
-        `${getApiBaseUrl()}${endpointForType(type)}/${transactionId}${type === "tickets" ? "/unvoid" : "/restore"}`,
-        {
-          method: "PATCH",
-          headers: buildApiHeaders(authToken),
-        }
-      );
-      const json = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        showToast("error", json?.message || "Unable to restore this transaction.");
-        return;
-      }
-
-      showToast("success", "Transaction restored successfully.");
-      setDetail(resolveDetailFromResponse(json, detail));
-      triggerHistoryRefresh();
-    } catch {
-      showToast("error", "Unable to reach the server.");
-    } finally {
-      setIsSavingVoidAction(false);
-    }
-  };
-
   const handleEditBanyera = () => {
-    if (!detail || transactionLock?.is_locked || isRecordBilled(detail)) return;
+    if (!detail || isDetailTransactionLocked() || isRecordBilled(detail)) return;
     setEditModalVisible(true);
   };
 
   const renderContent = () => {
     if (isLoading) {
-      return (
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#1A1F36" />
-        </View>
-      );
+      return <TransactionDetailSkeleton type={type} />;
     }
 
     if (!detail) {
       return (
-        <View className="px-5 py-8">
-          <Text className="text-[14px] text-[#6F6F82]" style={{ fontFamily: "Montserrat_400Regular" }}>
-            Transaction details are not available.
+        <View className="flex-1 items-center justify-center px-8 py-8">
+          <Ionicons
+            name={isOfflineDetailUnavailable ? "wifi-outline" : "document-text-outline"}
+            size={34}
+            color="#6F6F82"
+          />
+          <Text
+            className="mt-4 text-center text-[14px] leading-[21px] text-[#6F6F82]"
+            style={{ fontFamily: "Montserrat_400Regular" }}
+          >
+            {isOfflineDetailUnavailable
+              ? "Connect to the internet to see the details."
+              : "Transaction details are not available."}
           </Text>
         </View>
       );
     }
 
-    const isVoided = Boolean(detail.is_voided || detail.voided_at);
-    const transactionDateForTodayCheck =
-      type === "docking"
-        ? detail.docking_date
-        : type === "banyera"
-        ? detail.transaction_date || detail.created_at || detail.docking_date
-        : detail.transaction_date || detail.ticket_date || detail.created_at || detail.docking_date;
+    const isDraft = Boolean(detail.__isDraft);
+    const isVoided = !isDraft && Boolean(detail.is_voided || detail.voided_at);
+    const transactionDateForTodayCheck = getTransactionDateForStatus(detail, type);
     const isTodayRecord = isSamePhilippineDate(transactionDateForTodayCheck);
-    const statusButtonLabel = isVoided ? "Restore" : "Void";
-    const statusButtonClass = `bg-white border ${isVoided ? "border-[#22C55E]" : "border-[#F59E0B]"}`;
-    const statusButtonTextClass = isVoided ? "text-[#22C55E]" : "text-[#F59E0B]";
-    const statusButtonIconColor = isVoided ? "#22C55E" : "#F59E0B";
-    const isTransactionLocked = Boolean(transactionLock?.is_locked);
+    const statusButtonLabel = "Request to Void";
+    const statusButtonClass = "bg-white border border-[#F59E0B]";
+    const statusButtonTextClass = "text-[#F59E0B]";
+    const statusButtonIconColor = "#F59E0B";
+    const isTransactionLocked = isDetailTransactionLocked();
     const isBilled = isRecordBilled(detail);
     const transactionLockMessage = transactionLock?.message || "Transactions are view-only at the moment.";
-    const isStatusActionDisabled = isSavingVoidAction || !isTodayRecord || isTransactionLocked || isBilled;
+    const isStatusActionDisabled = isDraft || isSavingVoidAction || !isTodayRecord || isTransactionLocked || isBilled;
+    const statusLabel = isDraft ? "Draft" : isVoided ? "Voided" : "Active";
+    const statusIcon = isDraft ? "time-outline" : isVoided ? "close-circle" : "checkmark-circle";
+    const statusBg = isDraft || isVoided ? "bg-[#FEF3C7]" : "bg-[#DCFCE7]";
+    const statusColor = isDraft ? "#D97706" : isVoided ? "#F59E0B" : "#22C55E";
     const totalBanyeraQuantity = Array.isArray(detail.items)
       ? detail.items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
       : 0;
-    const firstBanyeraItem = Array.isArray(detail.items) && detail.items.length > 0 ? detail.items[0] : null;
-    const firstItemClassification =
-      firstBanyeraItem?.classification_name ||
-      firstBanyeraItem?.classification?.classification_name ||
-      firstBanyeraItem?.classification?.name ||
-      "Unknown Classification";
-    const firstItemQty = firstBanyeraItem ? Number(firstBanyeraItem.quantity || 0) : 0;
-    const firstItemSubtotal = firstBanyeraItem ? Number(firstBanyeraItem.subtotal || 0) : 0;
-    const firstItemDaug =
-      firstBanyeraItem?.daug !== undefined && firstBanyeraItem?.daug !== null
-        ? String(firstBanyeraItem.daug)
-        : "N/A";
     const ticketDisplayFee =
       Number(detail.total_fee && Number(detail.total_fee) > 0 ? detail.total_fee : detail.ticket_fee || 0);
 
@@ -508,6 +878,19 @@ export default function HistoryDetailScreen() {
     return (
       <View className="px-5 pb-10">
         <View className="rounded-[10px] bg-white p-5 shadow-sm shadow-black/10">
+          {isDraft ? (
+            <View className="mb-4 -mx-5 rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3">
+              <View className="flex-row items-center">
+                <Ionicons name="cloud-offline-outline" size={16} color="#D97706" />
+                <View className="ml-2 flex-1">
+                  <Text className="text-[12px] leading-4 text-[#92400E]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    This draft is saved on this device and will open as a normal transaction after it syncs.
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ) : null}
+
           {type === "docking" && (
             <>
               <View className="mb-4 -mx-5 rounded-[10px] border border-[#E8E1E6] bg-white px-5 py-5 shadow-sm shadow-black/5">
@@ -543,26 +926,21 @@ export default function HistoryDetailScreen() {
                     Status
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
-                    <View className={`w-full flex-row justify-center items-center gap-2 rounded-full px-2 py-1 ${
-                      isVoided ? "bg-[#FEF3C7]" : "bg-[#DCFCE7]"
-                    }`}>
+                    <View className={`w-full flex-row justify-center items-center gap-2 rounded-full px-2 py-1 ${statusBg}`}>
                       <Ionicons
-                        name={isVoided ? "close-circle" : "checkmark-circle"}
+                        name={statusIcon}
                         size={12}
-                        color={isVoided ? "#F59E0B" : "#22C55E"}
+                        color={statusColor}
                       />
                       <Text
-                        className={`text-[14px] ${
-                          isVoided ? "text-[#F59E0B]" : "text-[#22C55E]"
-                        }`}
-                        style={{ fontFamily: "Montserrat_400Regular" }}
+                        className="text-[14px]"
+                        style={{ fontFamily: "Montserrat_400Regular", color: statusColor }}
                       >
-                        {isVoided ? "Voided" : "Active"}
+                        {statusLabel}
                       </Text>
                     </View>
                   </View>
                 </View>
-
                 <View className="mb-4">
                   <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
                     Boat Type
@@ -585,26 +963,25 @@ export default function HistoryDetailScreen() {
                   </View>
                 </View>
 
-                <View className="mb-4 flex-row gap-3">
-                  <View className="flex-1">
-                    <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
-                      Docking Date
+                <View className="mb-4">
+                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Docking Date
+                  </Text>
+                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      {formatPhilippineDate(detail.docking_date)}
                     </Text>
-                    <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
-                      <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                        {formatPhilippineDate(detail.docking_date)}
-                      </Text>
-                    </View>
                   </View>
-                  <View className="flex-1">
-                    <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
-                      Docking Time
+                </View>
+
+                <View className="mb-4">
+                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Docking Time
+                  </Text>
+                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      {formatPhilippineTime(detail.docking_date)}
                     </Text>
-                    <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
-                      <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                        {formatPhilippineTime(detail.docking_date)}
-                      </Text>
-                    </View>
                   </View>
                 </View>
 
@@ -661,21 +1038,17 @@ export default function HistoryDetailScreen() {
                   Status
                 </Text>
                 <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
-                  <View className={`flex-row w-full justify-center items-center gap-2 rounded-full px-2 py-1 ${
-                    isVoided ? "bg-[#FEF3C7]" : "bg-[#DCFCE7]"
-                  }`}>
+                  <View className={`flex-row w-full justify-center items-center gap-2 rounded-full px-2 py-1 ${statusBg}`}>
                     <Ionicons
-                      name={isVoided ? "close-circle" : "checkmark-circle"}
+                      name={statusIcon}
                       size={12}
-                      color={isVoided ? "#F59E0B" : "#22C55E"}
+                      color={statusColor}
                     />
                     <Text
-                      className={`text-[14px] ${
-                        isVoided ? "text-[#F59E0B]" : "text-[#22C55E]"
-                      }`}
-                      style={{ fontFamily: "Montserrat_400Regular" }}
+                      className="text-[14px]"
+                      style={{ fontFamily: "Montserrat_400Regular", color: statusColor }}
                     >
-                      {isVoided ? "Voided" : "Active"}
+                      {statusLabel}
                     </Text>
                   </View>
                 </View>
@@ -703,26 +1076,25 @@ export default function HistoryDetailScreen() {
                 </View>
               </View>
 
-              <View className="mb-4 flex-row gap-3">
-                <View className="flex-1">
-                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
-                    Banyera Date
+              <View className="mb-4">
+                <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                  Banyera Date
+                </Text>
+                <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                  <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    {formatPhilippineDate(detail.transaction_date)}
                   </Text>
-                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
-                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      {formatPhilippineDate(detail.transaction_date)}
-                    </Text>
-                  </View>
                 </View>
-                <View className="flex-1">
-                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
-                    Banyera Time
+              </View>
+
+              <View className="mb-4">
+                <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                  Banyera Time
+                </Text>
+                <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                  <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    {formatPhilippineTime(detail.transaction_date)}
                   </Text>
-                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
-                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      {formatPhilippineTime(detail.transaction_date)}
-                    </Text>
-                  </View>
                 </View>
               </View>
 
@@ -859,6 +1231,127 @@ export default function HistoryDetailScreen() {
             </>
           )}
 
+          {type === "remittance" && (
+            <View className="mb-4 -mx-5 rounded-[10px] border border-[#E8E1E6] bg-white px-5 py-5 shadow-sm shadow-black/5">
+              <View className="flex-row items-center">
+                <View className="h-11 w-11 items-center justify-center rounded-[10px]" style={{ backgroundColor: "rgba(37,99,235,0.08)" }}>
+                  <Ionicons name="cash-outline" size={20} color="#2563EB" />
+                </View>
+                <View className="ml-3 flex-1">
+                  <Text className="text-[16px] leading-[22px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Remittance Information
+                  </Text>
+                  <Text className="mt-1 text-[11px] leading-[14px] text-[#8A94A3]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    Recorded details for this remittance entry
+                  </Text>
+                </View>
+              </View>
+
+              <View className="-mx-5 mt-4 mb-5 h-px bg-[#E8E1E6]" />
+
+              <View className="mb-4">
+                <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                  Remittance Ref. No.
+                </Text>
+                <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                  <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    {detail.remittance_reference_no || "-"}
+                  </Text>
+                </View>
+              </View>
+
+              <View className="mb-4">
+                <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                  Status
+                </Text>
+                <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                  <View className={`w-full flex-row justify-center items-center gap-2 rounded-full px-2 py-1 ${String(detail.status || "").toLowerCase() === "remitted" ? "bg-[#DCFCE7]" : "bg-[#FEF3C7]"}`}>
+                    <Ionicons
+                      name={String(detail.status || "").toLowerCase() === "remitted" ? "checkmark-circle" : "time-outline"}
+                      size={12}
+                      color={String(detail.status || "").toLowerCase() === "remitted" ? "#22C55E" : "#D97706"}
+                    />
+                    <Text
+                      className="text-[14px]"
+                      style={{
+                        fontFamily: "Montserrat_400Regular",
+                        color: String(detail.status || "").toLowerCase() === "remitted" ? "#22C55E" : "#D97706",
+                      }}
+                    >
+                      {String(detail.status || "").toLowerCase() === "remitted" ? "Checked" : "Unchecked"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View className="mb-4 flex-row gap-3">
+                <View className="flex-1">
+                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Date
+                  </Text>
+                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      {formatPhilippineDate(detail.date || detail.created_at)}
+                    </Text>
+                  </View>
+                </View>
+                <View className="flex-1">
+                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Amount
+                  </Text>
+                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      ₱{Number(detail.amount || 0).toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View className="mb-4 flex-row gap-3">
+                <View className="flex-1">
+                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Surplus
+                  </Text>
+                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      ₱{Number(detail.surplus || 0).toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </Text>
+                  </View>
+                </View>
+                <View className="flex-1">
+                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Deficit
+                  </Text>
+                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      ₱{Number(detail.deficit || 0).toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View>
+                <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                  Remarks
+                </Text>
+                <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                  <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    {detail.remarks || "-"}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
           {type === "tickets" && (
             <>
               <View className="mb-4 -mx-5 rounded-[10px] border border-[#E8E1E6] bg-white px-5 py-5 shadow-sm shadow-black/5">
@@ -894,21 +1387,17 @@ export default function HistoryDetailScreen() {
                     Status
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
-                    <View className={`w-full flex-row justify-center items-center gap-2 rounded-full px-2 py-1 ${
-                      isVoided ? "bg-[#FEF3C7]" : "bg-[#DCFCE7]"
-                    }`}>
+                    <View className={`w-full flex-row justify-center items-center gap-2 rounded-full px-2 py-1 ${statusBg}`}>
                       <Ionicons
-                        name={isVoided ? "close-circle" : "checkmark-circle"}
+                        name={statusIcon}
                         size={12}
-                        color={isVoided ? "#F59E0B" : "#22C55E"}
+                        color={statusColor}
                       />
                       <Text
-                        className={`text-[14px] ${
-                          isVoided ? "text-[#F59E0B]" : "text-[#22C55E]"
-                        }`}
-                        style={{ fontFamily: "Montserrat_400Regular" }}
+                        className="text-[14px]"
+                        style={{ fontFamily: "Montserrat_400Regular", color: statusColor }}
                       >
-                        {isVoided ? "Voided" : "Active"}
+                        {statusLabel}
                       </Text>
                     </View>
                   </View>
@@ -925,29 +1414,28 @@ export default function HistoryDetailScreen() {
                   </View>
                 </View>
 
-                <View className="mb-4 flex-row gap-3">
-                  <View className="flex-1">
-                    <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
-                      Ticket Date
+                <View className="mb-4">
+                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Ticket Date
+                  </Text>
+                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      {formatPhilippineDate(detail.transaction_date || detail.ticket_date || detail.created_at || detail.docking_date)}
                     </Text>
-                    <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
-                      <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                        {formatPhilippineDate(detail.transaction_date || detail.ticket_date || detail.created_at || detail.docking_date)}
-                      </Text>
-                    </View>
                   </View>
-                  <View className="flex-1">
-                    <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
-                      Ticket Fee
+                </View>
+
+                <View className="mb-4">
+                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Ticket Fee
+                  </Text>
+                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      ₱{ticketDisplayFee.toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </Text>
-                    <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
-                      <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                        ₱{ticketDisplayFee.toLocaleString("en-PH", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </Text>
-                    </View>
                   </View>
                 </View>
               </View>
@@ -1042,20 +1530,20 @@ export default function HistoryDetailScreen() {
             </>
           )}
 
-          {isBilled ? (
+          {!isDraft && isBilled ? (
             <View className="mb-4 -mx-5 rounded-[10px] border border-[#FDE68A] bg-[#FEFCE8] px-4 py-3">
               <View className="flex-row items-center">
                 <Ionicons name="cash-outline" size={16} color="#B45309" />
                 <View className="ml-2 flex-1">
                   <Text className="text-[12px] leading-4 text-[#92400E]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                    This transaction has been billed and can no longer be edited, voided, or restored.
+                    This transaction has been billed and can no longer be edited or requested for voiding.
                   </Text>
                 </View>
               </View>
             </View>
           ) : null}
 
-          {isTransactionLocked ? (
+          {!isDraft && isTransactionLocked ? (
             <View className="mb-4 -mx-5 rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3">
               <View className="flex-row items-center">
                 <Ionicons name="lock-closed-outline" size={16} color="#DC2626" />
@@ -1068,15 +1556,15 @@ export default function HistoryDetailScreen() {
             </View>
           ) : null}
 
-          {type === "docking" || type === "tickets" ? (
+          {!isDraft && !isVoided && (type === "docking" || type === "tickets") ? (
             <Pressable
-              onPress={isVoided ? handleRestore : openVoidModal}
+              onPress={openVoidModal}
               disabled={isStatusActionDisabled}
               className={`mt-0 mb-4 -mx-5 rounded-[10px] px-5 py-3 ${statusButtonClass} ${isStatusActionDisabled ? "opacity-40" : ""}`}
             >
               <View className="flex-row items-center justify-center gap-1.5">
                 <Ionicons
-                  name={isVoided ? "refresh-circle" : "close-circle"}
+                  name="close-circle"
                   size={18}
                   color={statusButtonIconColor}
                 />
@@ -1088,7 +1576,7 @@ export default function HistoryDetailScreen() {
                 </Text>
               </View>
             </Pressable>
-          ) : type === "banyera" ? (
+          ) : !isDraft && !isVoided && type === "banyera" ? (
             <View className="mt-0 mb-4 -mx-5 flex-row items-center gap-3">
               <Pressable
                 onPress={handleEditBanyera}
@@ -1105,12 +1593,12 @@ export default function HistoryDetailScreen() {
               </Pressable>
 
               <Pressable
-                onPress={isVoided ? handleRestore : openVoidModal}
+                onPress={openVoidModal}
                 disabled={isStatusActionDisabled}
                 className={`flex-1 flex-row items-center justify-center rounded-[10px] px-4 py-3 ${statusButtonClass} ${isStatusActionDisabled ? "opacity-40" : ""}`}
               >
                 <Ionicons
-                  name={isVoided ? "refresh-circle" : "close-circle"}
+                  name="close-circle"
                   size={16}
                   color={statusButtonIconColor}
                 />
@@ -1139,10 +1627,7 @@ export default function HistoryDetailScreen() {
         <View
           className="h-[66px] flex-row items-center justify-between overflow-hidden rounded-b-[20px] bg-[#1A1F36] px-5"
           style={{
-            shadowColor: "#000000",
-            shadowOpacity: 0.18,
-            shadowRadius: 12,
-            shadowOffset: { width: 0, height: 6 },
+            boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.18)",
             elevation: 18,
           }}
         >
@@ -1153,12 +1638,16 @@ export default function HistoryDetailScreen() {
             className="text-[18px] text-white"
             style={{ fontFamily: "Montserrat_400Regular" }}
           >
-            {type === "banyera"
+            {isDraftDetail
+              ? "Draft Details"
+              : type === "banyera"
               ? "Banyera Details"
               : type === "docking"
               ? "Docking Details"
               : type === "tickets"
               ? "Ticket Details"
+              : type === "remittance"
+              ? "Remittance Details"
               : "Transaction Details"}
           </Text>
           <View className="w-6" />
@@ -1182,7 +1671,7 @@ export default function HistoryDetailScreen() {
       />
       <VoidTransactionModal
         visible={voidModalVisible}
-        transactionType={type ?? "docking"}
+        transactionType={type === "remittance" ? "docking" : type ?? "docking"}
         transaction={detail}
         selectedReason={voidReasonOption}
         customReason={voidReasonCustom}

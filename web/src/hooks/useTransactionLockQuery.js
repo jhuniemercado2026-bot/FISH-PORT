@@ -1,14 +1,14 @@
 import { useMemo } from "react";
 import { useFiscalYearStore, isCurrentFiscalYear, getFiscalYearLockMessage } from "../store/fiscalYearStore";
 import { useTransactionLockOnlyQuery } from "./useTransactionLockOnlyQuery";
-import { getActiveTransactionLock, getTransactionLockMessage } from "../utils/transactionLock";
+import { getActiveTransactionLock, getTransactionLockMessage, isHeadRole } from "../utils/transactionLock";
 
-export const useTransactionLockQuery = () => {
-  const query = useTransactionLockOnlyQuery();
+export const useTransactionLockQuery = (resource = null) => {
+  const query = useTransactionLockOnlyQuery({ resource });
   const fiscalYear = useFiscalYearStore((state) => state.fiscalYear);
 
   const activeTransactionLock = useMemo(
-    () => getActiveTransactionLock(query.data?.transaction_lock ?? query.data),
+    () => (isHeadRole() ? null : getActiveTransactionLock(query.data?.transaction_lock ?? query.data)),
     [query.data],
   );
 

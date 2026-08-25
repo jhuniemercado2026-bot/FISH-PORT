@@ -42,6 +42,8 @@ import { useSidebar } from "../../store/sidebarStore";
 import { useFiscalYearStore } from "../../store/fiscalYearStore";
 import { useDockingCalendarQuery, useDockingLookupsQuery, useDockingsDataQuery } from "../../hooks/useDockingsDataQuery";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
+import { isHeadRole } from "../../utils/transactionLock";
+import { cacheTab, getCachedTab } from "../../utils/tabSession";
 import {
   hasDockingCalendarItemsForDate,
   syncDockingCalendarCache as syncDockingCalendarDataCache,
@@ -62,9 +64,15 @@ const DOCKING_VIEW_TABS = [
   { key: "records", label: "Docking", icon: IoLayersOutline },
   { key: "schedule", label: "Calendar", icon: IoCalendarOutline },
 ];
+const DOCKING_TAB_STORAGE_KEY = "opol:docking:active-tab";
+const DOCKING_TAB_KEYS = DOCKING_VIEW_TABS.map((tab) => tab.key);
 
 const getDockingViewFromPath = (pathname) =>
-  pathname.endsWith("docking-calendar") ? "schedule" : "records";
+  pathname.endsWith("docking-calendar")
+    ? "schedule"
+    : pathname.endsWith("docking")
+      ? getCachedTab(DOCKING_TAB_STORAGE_KEY, DOCKING_TAB_KEYS, "records")
+      : "records";
 
 const DOCK_COLORS = [
   { bg: "bg-blue-100",   text: "text-blue-700",   border: "bg-blue-500"   },
@@ -221,6 +229,13 @@ const formatTime = (value) => {
   hours = hours % 12 || 12;
 
   return `${hours}:${String(parsed.minute).padStart(2, "0")} ${meridiem}`;
+};
+
+const formatDateTime = (value) => {
+  const dateText = formatDate(value);
+  const timeText = formatTime(value);
+  if (dateText === "-") return "-";
+  return timeText === "-" ? dateText : `${dateText} at ${timeText}`;
 };
 
 const normalizeDateTimeString = (value) => {
@@ -614,18 +629,9 @@ const VoidDockingModal = ({
           inputStyle={{ color: "#475569" }}
         />
         <ModalInput
-          label="Date"
+          label="Docking Date & Time"
           icon={IoCalendarOutline}
-          value={formatDate(docking?.docking_date)}
-          readOnly
-          disabled
-          wrapperClassName="!bg-slate-100"
-          inputStyle={{ color: "#475569" }}
-        />
-        <ModalInput
-          label="Time"
-          icon={IoTimeOutline}
-          value={formatTime(docking?.docking_date)}
+          value={formatDateTime(docking?.docking_date)}
           readOnly
           disabled
           wrapperClassName="!bg-slate-100"
@@ -809,6 +815,7 @@ const CalendarDockingsDrawer = ({ open, dateLabel, dockings, onClose, onSelectDo
 const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefillDate, initialDocking, serverErrors = {}, fiscalYear, isLookupsLoading }) => {
   const [form, setForm] = useState(() => buildDockingFormState(prefillDate, initialDocking, fiscalYear));
   const [errors, setErrors] = useState({});
+  const hasManualTimeRef = useRef(false);
 
   // Convert error arrays to strings
   const normalizedServerErrors = useMemo(() => {
@@ -827,9 +834,39 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
 
   useEffect(() => {
     if (!open) return;
+    hasManualTimeRef.current = false;
     setForm(buildDockingFormState(prefillDate, initialDocking, fiscalYear));
     setErrors(normalizedServerErrors);
   }, [open, prefillDate, initialDocking, normalizedServerErrors, fiscalYear]);
+
+  useEffect(() => {
+    if (!open || initialDocking) return undefined;
+
+    const syncCurrentTime = () => {
+      if (hasManualTimeRef.current) return;
+      const currentTime = getManilaTimeParts();
+      setForm((current) => {
+        if (
+          current.docking_time_hour === currentTime.hour &&
+          current.docking_time_minute === currentTime.minute &&
+          current.docking_time_meridiem === currentTime.meridiem
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          docking_time_hour: currentTime.hour,
+          docking_time_minute: currentTime.minute,
+          docking_time_meridiem: currentTime.meridiem,
+        };
+      });
+    };
+
+    syncCurrentTime();
+    const intervalId = window.setInterval(syncCurrentTime, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [open, initialDocking]);
 
   const selectedBoat = boats.find((b) => String(b.boat_id) === String(form.boat_id));
   const selectedBoatTypeId = selectedBoat ? getBoatTypeId(selectedBoat) : "";
@@ -952,7 +989,7 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
           icon={IoLayersOutline}
           readOnly
           value={selectedBoat?.boat_type?.type_name || selectedBoat?.boatType?.type_name || ""}
-          placeholder="-"
+          placeholder="Auto-filled after selecting a boat"
           wrapperClassName="!bg-slate-100"
         />
 
@@ -961,7 +998,7 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
           icon={IoPersonOutline}
           readOnly
           value={selectedBoat?.owner?.full_name || selectedBoat?.owner_name || ""}
-          placeholder="-"
+          placeholder="Auto-filled after selecting a boat"
           wrapperClassName="!bg-slate-100"
         />
 
@@ -1004,6 +1041,7 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
           <TimePicker
             value={getTimeValueFromParts(form.docking_time_hour, form.docking_time_minute, form.docking_time_meridiem)}
             onChange={(_, currentTimeString) => {
+              hasManualTimeRef.current = true;
               setForm((current) => applyTimeValueToDockingForm(current, currentTimeString));
               setErrors((current) => ({ ...current, docking_time: "" }));
             }}
@@ -1347,6 +1385,7 @@ const SuperDocking = () => {
   const [hasLoadedCalendarOnce, setHasLoadedCalendarOnce] = useState(false);
   const didRunTableFilterResetRef = useRef(false);
   const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const isHeadViewOnly = isHeadRole();
   const debouncedSearch = useDebounce(search, SEARCH_DEBOUNCE_MS);
   const rawHighlightedDockingId = getDockingHighlightId({ highlightedSearchResult, search: location.search });
   const highlightToken = rawHighlightedDockingId
@@ -1382,8 +1421,14 @@ const SuperDocking = () => {
   }, [location.key]);
 
   useEffect(() => {
-    setActiveView(getDockingViewFromPath(location.pathname));
-  }, [location.pathname]);
+    const nextView = getDockingViewFromPath(location.pathname);
+    setActiveView(nextView);
+    cacheTab(DOCKING_TAB_STORAGE_KEY, nextView, DOCKING_TAB_KEYS);
+
+    if (location.pathname === "/docking" && nextView === "schedule") {
+      navigate("/docking-calendar", { replace: true, state: location.state });
+    }
+  }, [location.pathname, location.state, navigate]);
 
   // Calendar state
   const [calendarDate, setCalendarDate] = useState(() => getFiscalCalendarDate(fiscalYear));
@@ -1412,10 +1457,10 @@ const SuperDocking = () => {
     paginated: true,
     includeLookups: false,
   }, {
-    enabled: activeView === "records" || activeView === "schedule" || showAddModal || Boolean(editingDocking),
+    enabled: activeView === "records" || activeView === "schedule" || (!isHeadViewOnly && (showAddModal || Boolean(editingDocking))),
   });
   const { data: lookupsData, isLoading: isLookupsLoading } = useDockingLookupsQuery({
-    enabled: showAddModal || Boolean(editingDocking),
+    enabled: !isHeadViewOnly && (showAddModal || Boolean(editingDocking)),
   });
   const {
     data: calendarDockings = [],
@@ -1501,6 +1546,7 @@ const SuperDocking = () => {
 
   const handleViewChange = (nextView) => {
     setActiveView(nextView);
+    cacheTab(DOCKING_TAB_STORAGE_KEY, nextView, DOCKING_TAB_KEYS);
 
     const nextPath = nextView === "schedule" ? "/docking-calendar" : "/docking";
 
@@ -1641,6 +1687,9 @@ const SuperDocking = () => {
 
   const voidDockingMutation = useMutation({
     mutationFn: async ({ dockingId, void_reason }) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked) {
         throw new Error(transactionLockMessage);
       }
@@ -1672,6 +1721,9 @@ const SuperDocking = () => {
 
   const restoreDockingMutation = useMutation({
     mutationFn: async (dockingId) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked) {
         throw new Error(transactionLockMessage);
       }
@@ -1698,6 +1750,8 @@ const SuperDocking = () => {
   });
 
   const handleSaveDocking = async (payload) => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked || isLockedDockingDate(payload?.docking_date)) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -1761,6 +1815,8 @@ const SuperDocking = () => {
   };
 
   const openVoidDocking = (docking) => {
+    if (isHeadViewOnly) return;
+
     if (isLockedDockingDate(docking?.docking_date)) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -1785,6 +1841,8 @@ const SuperDocking = () => {
   };
 
   const restoreDocking = (docking) => {
+    if (isHeadViewOnly) return;
+
     if (isLockedDockingDate(docking?.docking_date)) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -1923,7 +1981,7 @@ const SuperDocking = () => {
             <div className="mb-5 overflow-hidden border border-gray-200 bg-white">
 
               {/* Clean white header */}
-              <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 bg-white">
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center border-b border-slate-200 px-6 py-4 bg-white">
                 {showCalendarSkeleton ? (
                   <>
                     <div className="flex items-center gap-2">
@@ -1933,7 +1991,9 @@ const SuperDocking = () => {
 
                     <div className="h-[18px] w-28 animate-pulse rounded bg-slate-200" />
 
-                    <div className="h-[42px] w-32 animate-pulse rounded-[10px] bg-slate-200" />
+                    <div className="flex justify-end">
+                      {!isHeadViewOnly ? <div className="h-[42px] w-32 animate-pulse rounded-[10px] bg-slate-200" /> : null}
+                    </div>
                   </>
                 ) : (
                   <>
@@ -1973,26 +2033,29 @@ const SuperDocking = () => {
                   {MONTHS[calMonth]} {calYear}
                 </p>
 
-                {/* Right: Add Docking */}
-                <Tooltip title={isTransactionLocked ? transactionLockMessage : isTodayDateLocked ? transactionLockMessage : "Add Docking"}>
-                  <button
-                    onClick={() => {
-                      clearUniversalHighlight();
-                      if (isTransactionLocked || isTodayDateLocked) return;
-                      setEditingDocking(null);
-                      setPrefillDate(null);
-                      setShowAddModal(true);
-                    }}
-                    disabled={isTransactionLocked || isTodayDateLocked}
-                    className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none px-5 text-[13px] font-semibold text-white cursor-pointer transition-colors"
-                    style={{ backgroundColor: isTransactionLocked || isTodayDateLocked ? "#94a3b8" : "#1a1f36" }}
-                    onMouseEnter={e => { if (!isTransactionLocked && !isTodayDateLocked) e.currentTarget.style.backgroundColor = "#2d3561"; }}
-                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = isTransactionLocked || isTodayDateLocked ? "#94a3b8" : "#1a1f36"; }}
-                  >
-                    <IoAddOutline style={{ fontSize: 16 }} />
-                    Add Docking
-                  </button>
-                </Tooltip>
+                <div className="flex justify-end">
+                  {!isHeadViewOnly ? (
+                    <Tooltip title={isTransactionLocked ? transactionLockMessage : isTodayDateLocked ? transactionLockMessage : "Add Docking"}>
+                      <button
+                        onClick={() => {
+                          clearUniversalHighlight();
+                          if (isTransactionLocked || isTodayDateLocked) return;
+                          setEditingDocking(null);
+                          setPrefillDate(null);
+                          setShowAddModal(true);
+                        }}
+                        disabled={isTransactionLocked || isTodayDateLocked}
+                        className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none px-5 text-[13px] font-semibold text-white cursor-pointer transition-colors"
+                        style={{ backgroundColor: isTransactionLocked || isTodayDateLocked ? "#94a3b8" : "#1a1f36" }}
+                        onMouseEnter={e => { if (!isTransactionLocked && !isTodayDateLocked) e.currentTarget.style.backgroundColor = "#2d3561"; }}
+                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = isTransactionLocked || isTodayDateLocked ? "#94a3b8" : "#1a1f36"; }}
+                      >
+                        <IoAddOutline style={{ fontSize: 16 }} />
+                        Add Docking
+                      </button>
+                    </Tooltip>
+                  ) : null}
+                </div>
                   </>
                 )}
               </div>
@@ -2132,7 +2195,7 @@ const SuperDocking = () => {
               title="Docking Records"
               subtitle="All docking records in the system"
               loading={showInitialSkeleton}
-              headerActionsSkeletonCount={4}
+              headerActionsSkeletonCount={isHeadViewOnly ? 3 : 4}
               className="mt-[-1px]"
               actions={
                 <>
@@ -2184,20 +2247,22 @@ const SuperDocking = () => {
                     height={42}
                     options={STATUS_OPTIONS}
                   />
-                  <button
-                    onClick={() => {
-                      clearUniversalHighlight();
-                      if (isTransactionLocked || isTodayDateLocked) return;
-                      setEditingDocking(null);
-                      setPrefillDate(null);
-                      setShowAddModal(true);
-                    }}
-                    disabled={isTransactionLocked || isTodayDateLocked}
-                    className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none px-5 text-[13px] font-semibold text-white cursor-pointer disabled:cursor-not-allowed"
-                    style={{ backgroundColor: isTransactionLocked || isTodayDateLocked ? "#94a3b8" : "#1a1f36" }}
-                  >
-                    <IoAddOutline className="text-[16px]" />Add Docking
-                  </button>
+                  {!isHeadViewOnly ? (
+                    <button
+                      onClick={() => {
+                        clearUniversalHighlight();
+                        if (isTransactionLocked || isTodayDateLocked) return;
+                        setEditingDocking(null);
+                        setPrefillDate(null);
+                        setShowAddModal(true);
+                      }}
+                      disabled={isTransactionLocked || isTodayDateLocked}
+                      className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none px-5 text-[13px] font-semibold text-white cursor-pointer disabled:cursor-not-allowed"
+                      style={{ backgroundColor: isTransactionLocked || isTodayDateLocked ? "#94a3b8" : "#1a1f36" }}
+                    >
+                      <IoAddOutline className="text-[16px]" />Add Docking
+                    </button>
+                  ) : null}
                 </>
               }
               bodyClassName="overflow-x-auto"
@@ -2221,7 +2286,7 @@ const SuperDocking = () => {
                       <TH>Docking Time</TH>
                       <TH><div className="text-right">{`Fee (${PESO})`}</div></TH>
                       <TH>Voided Reason</TH>
-                      <TH>Action</TH>
+                      {!isHeadViewOnly ? <TH>Action</TH> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -2240,18 +2305,20 @@ const SuperDocking = () => {
                           <td className="px-4 py-3">
                             <div className="h-3 w-32 rounded bg-slate-100" />
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="h-8 w-8 rounded-lg bg-slate-100" />
-                            </div>
-                          </td>
+                          {!isHeadViewOnly ? (
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="h-8 w-8 rounded-lg bg-slate-100" />
+                              </div>
+                            </td>
+                          ) : null}
                         </tr>
                       ))
                     ) : isError ? (
-                      <tr><td colSpan={7} className="px-5 py-8 text-center text-[13px] font-normal text-red-500">Unable to load docking records right now.</td></tr>
+                      <tr><td colSpan={isHeadViewOnly ? 6 : 7} className="px-5 py-8 text-center text-[13px] font-normal text-red-500">Unable to load docking records right now.</td></tr>
                     ) : paginated.length === 0 ? (
                       <tr>
-                        <td colSpan={7}>
+                        <td colSpan={isHeadViewOnly ? 6 : 7}>
                           {search ? <NoDataFound title="No results found" /> : <NoDataFound />}
                         </td>
                       </tr>
@@ -2300,57 +2367,58 @@ const SuperDocking = () => {
                               {docking?.void_reason || "-"}
                             </span>
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              {(() => {
-                                const isLocked = isLockedDockingDate(docking.docking_date);
-                                const isTodayRecord = isDockingEditableToday(docking);
-                                const isBilled = Boolean(docking?.is_billed);
-                                const isBusy = voidingDockingId === docking.docking_id;
-                                const voidDisabled = isTransactionLocked || isLocked || !isTodayRecord || isBilled;
-                                const voidTooltip = isTransactionLocked || isLocked
-                                  ? transactionLockMessage
-                                  : isBilled
-                                    ? (isVoided ? "Cannot restore - this docking record has been billed" : "Cannot void - this docking record has been billed")
-                                    : !isTodayRecord
-                                      ? (isVoided ? "Cannot restore - only today's docking records can be restored" : "Cannot void - only today's docking records can be voided")
-                                      : isVoided
-                                        ? "Restore"
-                                        : "Void";
+                          {!isHeadViewOnly ? (
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                {(() => {
+                                  const isLocked = isLockedDockingDate(docking.docking_date);
+                                  const isTodayRecord = isDockingEditableToday(docking);
+                                  const isBilled = Boolean(docking?.is_billed);
+                                  const voidDisabled = isTransactionLocked || isLocked || !isTodayRecord || isBilled;
+                                  const voidTooltip = isTransactionLocked || isLocked
+                                    ? transactionLockMessage
+                                    : isBilled
+                                      ? (isVoided ? "Cannot restore - this docking record has been billed" : "Cannot void - this docking record has been billed")
+                                      : !isTodayRecord
+                                        ? (isVoided ? "Cannot restore - only today's docking records can be restored" : "Cannot void - only today's docking records can be voided")
+                                        : isVoided
+                                          ? "Restore"
+                                          : "Void";
 
-                                return (
-                                  <Tooltip title={voidTooltip}>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (voidDisabled) return;
-                                        if (isVoided) {
-                                          restoreDocking(docking);
-                                          return;
-                                        }
-                                        openVoidDocking(docking);
-                                      }}
-                                      disabled={voidDisabled}
-                                      className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
-                                        voidDisabled
-                                          ? "cursor-not-allowed border-slate-200"
-                                          : isVoided
-                                            ? "cursor-pointer hover:bg-emerald-50"
-                                            : "cursor-pointer hover:bg-amber-50"
-                                      }`}
-                                      style={{ borderColor: voidDisabled ? undefined : isVoided ? "#10b981" : "#f59e0b" }}
-                                    >
-                                      {isVoided ? (
-                                        <IoReloadOutline style={{ fontSize: "16px", color: "#10b981" }} />
-                                      ) : (
-                                        <IoCloseOutline style={{ fontSize: "16px", color: "#f59e0b" }} />
-                                      )}
-                                    </button>
-                                  </Tooltip>
-                                );
-                              })()}
-                            </div>
-                          </td>
+                                  return (
+                                    <Tooltip title={voidTooltip}>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (voidDisabled) return;
+                                          if (isVoided) {
+                                            restoreDocking(docking);
+                                            return;
+                                          }
+                                          openVoidDocking(docking);
+                                        }}
+                                        disabled={voidDisabled}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
+                                          voidDisabled
+                                            ? "cursor-not-allowed border-slate-200"
+                                            : isVoided
+                                              ? "cursor-pointer hover:bg-emerald-50"
+                                              : "cursor-pointer hover:bg-amber-50"
+                                        }`}
+                                        style={{ borderColor: voidDisabled ? undefined : isVoided ? "#10b981" : "#f59e0b" }}
+                                      >
+                                        {isVoided ? (
+                                          <IoReloadOutline style={{ fontSize: "16px", color: "#10b981" }} />
+                                        ) : (
+                                          <IoCloseOutline style={{ fontSize: "16px", color: "#f59e0b" }} />
+                                        )}
+                                      </button>
+                                    </Tooltip>
+                                  );
+                                })()}
+                              </div>
+                            </td>
+                          ) : null}
                         </tr>
                           );
                         })()
@@ -2368,7 +2436,7 @@ const SuperDocking = () => {
         </div>
       </div>
 
-      <AddDockingModal
+      {!isHeadViewOnly ? <AddDockingModal
         open={showAddModal || !!editingDocking}
         boats={boats}
         fees={fees}
@@ -2380,7 +2448,7 @@ const SuperDocking = () => {
         serverErrors={serverErrors}
         fiscalYear={fiscalYear}
         isLookupsLoading={isLookupsLoading}
-      />
+      /> : null}
       <CalendarDockingsDrawer
         open={!!selectedCalendarDate && !selectedDocking}
         dateLabel={selectedCalendarDateLabel}
@@ -2399,7 +2467,7 @@ const SuperDocking = () => {
         }}
         onBack={selectedCalendarDate ? () => setSelectedDocking(null) : null}
       />
-      <VoidDockingModal
+      {!isHeadViewOnly ? <VoidDockingModal
         open={Boolean(pendingVoidDocking)}
         docking={pendingVoidDocking}
         selectedReason={voidReasonOption}
@@ -2446,9 +2514,9 @@ const SuperDocking = () => {
           voidDockingMutation.mutate({
             dockingId: pendingVoidDocking.docking_id,
             void_reason: resolvedReason,
-          });
-        }}
-      />
+            });
+          }}
+      /> : null}
     </ConfigProvider>
   );
 };

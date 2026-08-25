@@ -474,7 +474,7 @@ const App = () => {
           path="/manage-accounts"
           element={
             <AuthenticatedHistoryGuard>
-              <RequireAuth allowedRoles={["head"]}>
+              <RequireAuth allowedRoles={["head", "coordinator"]}>
                 <SuperManageAccounts />
               </RequireAuth>
             </AuthenticatedHistoryGuard>
@@ -528,9 +528,9 @@ const App = () => {
         <Route path="/admin/fish-classification" element={<Navigate to="/fish-classification" replace />} />
         <Route path="/admin-fish-classification" element={<Navigate to="/fish-classification" replace />} />
         <Route path="/admin_fish_classification" element={<Navigate to="/fish-classification" replace />} />
-        <Route path="/admin/vehicle-tickets" element={<Navigate to="/daily-vehicle-tickets" replace />} />
-        <Route path="/admin-vehicle-tickets" element={<Navigate to="/daily-vehicle-tickets" replace />} />
-        <Route path="/admin_vehicle_tickets" element={<Navigate to="/daily-vehicle-tickets" replace />} />
+        <Route path="/admin/vehicle-tickets" element={<Navigate to="/vehicle-tickets" replace />} />
+        <Route path="/admin-vehicle-tickets" element={<Navigate to="/vehicle-tickets" replace />} />
+        <Route path="/admin_vehicle_tickets" element={<Navigate to="/vehicle-tickets" replace />} />
         <Route path="/admin/daily-vehicle-tickets" element={<Navigate to="/daily-vehicle-tickets" replace />} />
         <Route path="/admin-daily-vehicle-tickets" element={<Navigate to="/daily-vehicle-tickets" replace />} />
         <Route path="/admin_daily_vehicle_tickets" element={<Navigate to="/daily-vehicle-tickets" replace />} />
@@ -589,8 +589,8 @@ const App = () => {
         <Route path="/super_banyera" element={<Navigate to="/banyera" replace />} />
         <Route path="/super-fish-classification" element={<Navigate to="/fish-classification" replace />} />
         <Route path="/super_fish_classification" element={<Navigate to="/fish-classification" replace />} />
-        <Route path="/super-vehicle-tickets" element={<Navigate to="/daily-vehicle-tickets" replace />} />
-        <Route path="/super_vehicle_tickets" element={<Navigate to="/daily-vehicle-tickets" replace />} />
+        <Route path="/super-vehicle-tickets" element={<Navigate to="/vehicle-tickets" replace />} />
+        <Route path="/super_vehicle_tickets" element={<Navigate to="/vehicle-tickets" replace />} />
         <Route path="/super-daily-vehicle-tickets" element={<Navigate to="/daily-vehicle-tickets" replace />} />
         <Route path="/super_daily_vehicle_tickets" element={<Navigate to="/daily-vehicle-tickets" replace />} />
         <Route path="/super-annual-vehicle-tickets" element={<Navigate to="/annual-vehicle-tickets" replace />} />

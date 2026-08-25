@@ -62,9 +62,9 @@ export function GlobalToast() {
           padding: 0,
         },
         innerWrap: {
-          width: 280,
-          minWidth: 280,
-          maxWidth: 280,
+          width: 330,
+          minWidth: 330,
+          maxWidth: 330,
           borderRadius: 16,
           backgroundColor: theme.backgroundColor,
           borderWidth: 1,
@@ -72,15 +72,12 @@ export function GlobalToast() {
           paddingHorizontal: 0,
           paddingVertical: 0,
           overflow: "hidden",
-          shadowColor: "#000",
-          shadowOpacity: 0.08,
-          shadowRadius: 16,
-          shadowOffset: { width: 0, height: 10 },
+          boxShadow: "0px 10px 16px rgba(0, 0, 0, 0.08)",
         },
         textToast: {
-          width: 280,
-          minWidth: 280,
-          maxWidth: 280,
+          width: 330,
+          minWidth: 330,
+          maxWidth: 330,
           borderRadius: 16,
           backgroundColor: theme.backgroundColor,
           borderWidth: 1,
@@ -100,9 +97,9 @@ export function GlobalToast() {
           style={{
             flexDirection: "row",
             alignItems: "center",
-            width: 280,
+            width: 330,
             paddingHorizontal: 18,
-            paddingVertical: 18,
+            paddingVertical: 20,
           }}
         >
           <View
@@ -126,7 +123,7 @@ export function GlobalToast() {
               fontFamily: "Montserrat_600SemiBold",
               flex: 1,
             }}
-            numberOfLines={3}
+            numberOfLines={4}
           >
             {toast.message}
           </Text>

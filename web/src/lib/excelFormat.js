@@ -15,6 +15,91 @@ const isNumericColumn = (column) => {
 const formatColumnHeader = (column) =>
   Array.isArray(column.label) ? column.label.join(" ") : column.label;
 
+const A4_MARGIN_INCHES = 1 / 2.54;
+const MAX_A4_LANDSCAPE_WIDTH = 132;
+
+const getHeaderLogoBuffer = async () => {
+  try {
+    const response = await fetch("/images/header.png");
+    if (!response.ok) return null;
+    return await response.arrayBuffer();
+  } catch {
+    return null;
+  }
+};
+
+const excelColumnWidthToPixels = (width = 8.43) => Math.floor(width * 7 + 5);
+
+const getCenteredImageTopLeftColumn = (worksheet, startColumn, endColumn, imageWidth) => {
+  const columnWidths = Array.from({ length: endColumn - startColumn + 1 }, (_, index) =>
+    excelColumnWidthToPixels(worksheet.getColumn(startColumn + index).width),
+  );
+  const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+  let offset = Math.max(0, (totalWidth - imageWidth) / 2);
+
+  for (let index = 0; index < columnWidths.length; index += 1) {
+    const columnWidth = columnWidths[index] || 1;
+    if (offset <= columnWidth) {
+      return startColumn - 1 + index + offset / columnWidth;
+    }
+    offset -= columnWidth;
+  }
+
+  return startColumn - 1;
+};
+
+const getCenteredImageTopLeftRow = (rowHeight, imageHeight) => {
+  const rowHeightPx = rowHeight * (96 / 72);
+  return Math.max(0, (rowHeightPx - imageHeight) / 2 / rowHeightPx);
+};
+
+const getValueLength = (value) => {
+  if (value === undefined || value === null) return 0;
+  return String(value)
+    .split(/\r?\n/)
+    .reduce((longest, part) => Math.max(longest, part.trim().length), 0);
+};
+
+const getColumnWidth = (column, rows) => {
+  if (typeof column.width === "number") return column.width;
+
+  const headerLength = getValueLength(formatColumnHeader(column));
+  const contentLength = Array.isArray(rows)
+    ? rows.reduce(
+        (longest, row) => Math.max(longest, getValueLength(getExportValue(row?.[column.key]))),
+        0,
+      )
+    : 0;
+  const baseWidth = Math.max(headerLength, contentLength) + 4;
+
+  if (isNumericColumn(column)) {
+    return Math.min(18, Math.max(11, baseWidth));
+  }
+
+  return Math.min(28, Math.max(12, baseWidth));
+};
+
+const fitColumnWidthsForA4 = (columns, rows) => {
+  const widths = columns.map((column) => getColumnWidth(column, rows));
+  const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+  if (!totalWidth) return widths;
+
+  const scale = MAX_A4_LANDSCAPE_WIDTH / totalWidth;
+  const fittedWidths = widths.map((width) => Math.max(8, Math.floor(width * scale)));
+  const fittedTotal = fittedWidths.reduce((sum, width) => sum + width, 0);
+  const remainingWidth = MAX_A4_LANDSCAPE_WIDTH - fittedTotal;
+
+  if (remainingWidth > 0 && fittedWidths.length > 0) {
+    const widestColumnIndex = fittedWidths.reduce(
+      (widestIndex, width, index) => (width > fittedWidths[widestIndex] ? index : widestIndex),
+      0,
+    );
+    fittedWidths[widestColumnIndex] += remainingWidth;
+  }
+
+  return fittedWidths;
+};
+
 export const createExcelExportBlob = async ({
   rows,
   columns,
@@ -31,24 +116,32 @@ export const createExcelExportBlob = async ({
       fitToPage: true,
       fitToWidth: 1,
       fitToHeight: 0,
+      margins: {
+        left: A4_MARGIN_INCHES,
+        right: A4_MARGIN_INCHES,
+        top: A4_MARGIN_INCHES,
+        bottom: A4_MARGIN_INCHES,
+        header: 0,
+        footer: 0,
+      },
     },
   });
 
-  const defaultFont = { name: "Calibri", size: 11 };
-  const bodyFont = { name: "Calibri", size: 10 };
+  const defaultFont = { name: "Calibri", size: 11, color: { argb: "FF444444" } };
+  const bodyFont = { name: "Calibri", size: 10, color: { argb: "FF444444" } };
   const borderStyle = {
-    top: { style: "thin" },
-    bottom: { style: "thin" },
-    left: { style: "thin" },
-    right: { style: "thin" },
+    top: { style: "thin", color: { argb: "FF080616" } },
+    bottom: { style: "thin", color: { argb: "FF080616" } },
+    left: { style: "thin", color: { argb: "FF080616" } },
+    right: { style: "thin", color: { argb: "FF080616" } },
   };
 
-  worksheet.columns = columns.map((column) => ({
+  const fittedColumnWidths = fitColumnWidthsForA4(columns, rows);
+
+  worksheet.columns = columns.map((column, index) => ({
     header: formatColumnHeader(column),
     key: column.key,
-    width: typeof column.width === "number"
-      ? column.width
-      : Math.max(14, String(formatColumnHeader(column)).length + 6),
+    width: fittedColumnWidths[index],
   }));
 
   const formatCurrency = (value) =>
@@ -59,26 +152,75 @@ export const createExcelExportBlob = async ({
 
   const formattedTotalValue = reportSummary?.totalValue ?? "";
   const totalLabel = reportSummary?.totalLabel ?? "";
+  const spacerRow = Array(columns.length).fill("");
 
-  const topHeaderText = [
-    "MUNICIPALITY OF OPOL",
-    "MUNICIPAL ECONOMIC ENTERPRISE OFFICE",
-    "OPOL FISH PORT",
-  ].join("\n");
+  const topHeaderRichText = [
+    {
+      text: "MUNICIPALITY OF OPOL\n",
+      font: { ...defaultFont, size: 14, bold: true },
+    },
+    {
+      text: "MUNICIPAL ECONOMIC ENTERPRISE OFFICE\n",
+      font: { ...defaultFont, size: 12, bold: false },
+    },
+    {
+      text: "OPOL FISH PORT",
+      font: { ...defaultFont, size: 14, bold: true },
+    },
+  ];
+  const logoSize = { width: 190, height: 73 };
 
-  worksheet.spliceRows(1, 0, [topHeaderText]);
-  worksheet.mergeCells(1, 1, 1, columns.length);
+  worksheet.spliceRows(1, 0, spacerRow);
   const mergedHeaderRow = worksheet.getRow(1);
-  mergedHeaderRow.height = 45;
-  mergedHeaderRow.getCell(1).font = { ...defaultFont, size: 12, bold: true };
-  mergedHeaderRow.getCell(1).alignment = {
+  mergedHeaderRow.height = 76;
+
+  const headerLogoBuffer = await getHeaderLogoBuffer();
+  const logoEndColumn = Math.min(
+    Math.max(1, Math.ceil(columns.length * 0.45)),
+    Math.max(1, columns.length - 1),
+  );
+  const textStartColumn = columns.length > 1 ? logoEndColumn + 1 : 1;
+
+  if (columns.length > 1) {
+    worksheet.mergeCells(1, 1, 1, logoEndColumn);
+    worksheet.mergeCells(1, textStartColumn, 1, columns.length);
+  } else {
+    worksheet.mergeCells(1, 1, 1, columns.length);
+  }
+
+  if (headerLogoBuffer) {
+    const logoImageId = workbook.addImage({
+      buffer: headerLogoBuffer,
+      extension: "png",
+    });
+
+    worksheet.addImage(logoImageId, {
+      tl: {
+        col: getCenteredImageTopLeftColumn(worksheet, 1, logoEndColumn, logoSize.width),
+        row: getCenteredImageTopLeftRow(mergedHeaderRow.height, logoSize.height),
+      },
+      ext: logoSize,
+    });
+  }
+
+  for (let columnIndex = 1; columnIndex <= columns.length; columnIndex += 1) {
+    const cell = mergedHeaderRow.getCell(columnIndex);
+    cell.border = borderStyle;
+    cell.alignment = {
+      horizontal: columnIndex >= textStartColumn ? "center" : "center",
+      vertical: "middle",
+      wrapText: true,
+    };
+  }
+
+  const headerTextCell = mergedHeaderRow.getCell(textStartColumn);
+  headerTextCell.value = { richText: topHeaderRichText };
+  headerTextCell.alignment = {
     horizontal: "center",
     vertical: "middle",
     wrapText: true,
   };
-  mergedHeaderRow.getCell(1).border = borderStyle;
 
-  const spacerRow = Array(columns.length).fill("");
   worksheet.spliceRows(2, 0, spacerRow);
 
   const metadataStart = 3;
@@ -87,12 +229,12 @@ export const createExcelExportBlob = async ({
   const secondThird = Math.floor((columns.length * 2) / 3);
 
   const metadataLabels = [
-    "Report Type:",
+    "Report:",
     reportHeader?.useGeneratedOn ? "Generated On:" : reportHeader?.coverageLabel || "Coverage:",
     totalLabel,
   ];
   const metadataValues = [
-    reportHeader?.reportTypeLabel || "",
+    reportHeader?.reportTitle || reportHeader?.reportTypeLabel || "",
     reportHeader?.useGeneratedOn
       ? new Date().toLocaleDateString("en-PH", {
           month: "long",
@@ -114,21 +256,21 @@ export const createExcelExportBlob = async ({
 
     const leftCell = row.getCell(1);
     leftCell.value = values[0];
-    leftCell.font = { ...defaultFont, size: 10, bold: rowOffset === 0 };
+    leftCell.font = { ...defaultFont, size: 11, bold: rowOffset === 0 };
     leftCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
     leftCell.fill = rowOffset === 0 ? { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } } : undefined;
     leftCell.border = borderStyle;
 
     const centerCell = row.getCell(firstThird + 1);
     centerCell.value = values[1];
-    centerCell.font = { ...defaultFont, size: 10, bold: rowOffset === 0 };
+    centerCell.font = { ...defaultFont, size: 11, bold: rowOffset === 0 };
     centerCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
     centerCell.fill = rowOffset === 0 ? { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } } : undefined;
     centerCell.border = borderStyle;
 
     const rightCell = row.getCell(secondThird + 1);
     rightCell.value = values[2];
-    rightCell.font = { ...defaultFont, size: 10, bold: rowOffset === 0 };
+    rightCell.font = { ...defaultFont, size: 11, bold: rowOffset === 0 };
     rightCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
     rightCell.fill = rowOffset === 0 ? { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } } : undefined;
     rightCell.border = borderStyle;
@@ -163,6 +305,7 @@ export const createExcelExportBlob = async ({
   let totalFound = false;
   rows.forEach((rowData) => {
     columns.forEach((column) => {
+      if (!isNumericColumn(column)) return;
       const raw = rowData[column.key];
       const numeric = typeof raw === "number" ? raw : Number(raw);
       if (Number.isFinite(numeric)) {

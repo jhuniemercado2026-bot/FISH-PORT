@@ -20,7 +20,6 @@ import {
   IoLayersOutline,
   IoPersonOutline,
   IoReceiptOutline,
-  IoRefreshOutline,
   IoSearchOutline,
 } from "react-icons/io5";
 import Sidebar from "../../layout/Sidebar";
@@ -45,10 +44,13 @@ import { useBillingBoatsQuery, useBillingDataQuery, useBillingFormLookupsQuery, 
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { usePaymentFormLookupsQuery, usePaymentsDataQuery } from "../../hooks/usePaymentsDataQuery";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
+import { isHeadRole } from "../../utils/transactionLock";
+import { cacheTab, getCachedTab } from "../../utils/tabSession";
 import { buildBillingStatementPdf } from "../../lib/pdfDocumentBill";
+import { getEcho } from "../../lib/realtime";
 import Spinner from "../../components/Spinner";
 import NoDataFound from "../../components/NoDataFound";
-import { adjustTodaySystemCashReceived, invalidateTodaySystemCashReceived } from "../../utils/remittanceCashCache";
+import { adjustTodayCollection, invalidateTodayCollection } from "../../utils/remittanceCollectionCache";
 
 const FONT = "'Montserrat', sans-serif";
 const PAGE_SIZE = 10;
@@ -78,12 +80,22 @@ const BILLING_PATH_TABS = {
   "/billing-payments": "payments",
 };
 const BILLING_TABS = new Set(["records", "payments"]);
+const BILLING_TAB_KEYS = Array.from(BILLING_TABS);
+const BILLING_TAB_STORAGE_KEY = "opol:billing:active-tab";
 const getBillingTabPath = (tab) => BILLING_PATH_TABS[tab] ? tab : BILLING_TAB_PATHS[tab] ?? BILLING_TAB_PATHS.records;
 const getBillingTabFromLocation = ({ pathname, search }) => {
   const tab = new URLSearchParams(search).get("tab");
   if (BILLING_TABS.has(tab)) return getBillingTabPath(tab);
 
-  return BILLING_PATH_TABS[pathname] ? pathname : BILLING_TAB_PATHS.records;
+  if (BILLING_PATH_TABS[pathname]) {
+    if (pathname === BILLING_TAB_PATHS.records) {
+      const cachedTab = getCachedTab(BILLING_TAB_STORAGE_KEY, BILLING_TAB_KEYS, "records");
+      return getBillingTabPath(cachedTab);
+    }
+    return pathname;
+  }
+
+  return BILLING_TAB_PATHS.records;
 };
 
 const PERIOD_FILTER_OPTIONS = [
@@ -205,6 +217,37 @@ const getDatePartsFromValue = (value) => {
   if (!value) return null;
 
   const raw = String(value).trim();
+  const timezoneMatch = raw.match(/[zZ]$|[+-]\d{2}:?\d{2}$/);
+
+  if (timezoneMatch) {
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })
+      .formatToParts(date)
+      .reduce((acc, part) => {
+        if (part.type !== "literal") acc[part.type] = part.value;
+        return acc;
+      }, {});
+
+    return {
+      year: Number(parts.year),
+      month: Number(parts.month),
+      day: Number(parts.day),
+      hour: Number(parts.hour === "24" ? "0" : parts.hour),
+      minute: Number(parts.minute),
+      second: Number(parts.second),
+    };
+  }
+
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
   if (match) {
     const [, year, month, day, hour = "00", minute = "00", second = "00"] = match;
@@ -621,6 +664,27 @@ const EditBillingModal = ({
       closeButtonWidth="140px"
       maxWidth="920px"
       minimumSavingMs={0}
+      footerLeftContent={
+        <div>
+          <p
+            className="m-0 text-[11px] font-semibold uppercase"
+            style={{ color: "#6F6F82", fontFamily: FONT }}
+          >
+            Total Billing
+          </p>
+          <p
+            className="m-0 text-[28px] font-bold leading-tight text-[#1a1f36]"
+            style={{ fontVariantNumeric: "tabular-nums" }}
+          >
+            {Number(totalAmount || 0).toLocaleString("en-PH", {
+              style: "currency",
+              currency: "PHP",
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+        </div>
+      }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div>
@@ -628,17 +692,9 @@ const EditBillingModal = ({
           <Input value={formatReferenceNumber(bill.bill_reference_no) || ""} readOnly />
         </div>
         <div>
-          <Label>Total Amount</Label>
-          <Input value={formatAccountingMoney(totalAmount)} readOnly />
-        </div>
-        <div className="md:col-span-2">
           <Label>Boat Name</Label>
           <Input value={previewBoat?.boat_name || ""} readOnly />
           {fieldErrors.boat_id ? <ErrorMessage>{fieldErrors.boat_id}</ErrorMessage> : null}
-        </div>
-        <div>
-          <Label>Boat Owner</Label>
-          <Input value={previewBoat?.owner?.full_name || ""} readOnly />
         </div>
         <div>
           <Label>Boat Type</Label>
@@ -650,6 +706,10 @@ const EditBillingModal = ({
             }
             readOnly
           />
+        </div>
+        <div>
+          <Label>Boat Owner</Label>
+          <Input value={previewBoat?.owner?.full_name || ""} readOnly />
         </div>
         <div>
           <div className="mb-2 flex min-h-[20px] items-center justify-between gap-3">
@@ -1505,6 +1565,29 @@ const bumpBillingTodayPaymentStats = (queryClient, paymentDate, paymentCount = 1
   });
 };
 
+const patchBillingRecordInCache = (queryClient, nextBill) => {
+  if (!nextBill?.bill_id) return;
+
+  queryClient.setQueriesData({ queryKey: ["billing-data"] }, (current) => {
+    if (!current?.bills) return current;
+
+    const nextBillId = String(nextBill.bill_id);
+    const hasBill = current.bills.some((bill) => String(bill.bill_id) === nextBillId);
+    const bills = hasBill
+      ? current.bills.map((bill) =>
+          String(bill.bill_id) === nextBillId
+            ? { ...bill, ...nextBill }
+            : bill,
+        )
+      : [nextBill, ...current.bills];
+
+    return {
+      ...current,
+      bills,
+    };
+  });
+};
+
 const getInitialPaymentModalForm = (bill = null) => ({
   bill_id: bill?.bill_id ? String(bill.bill_id) : "",
   boat_id: bill?.boat_id ? String(bill.boat_id) : "",
@@ -1519,12 +1602,12 @@ const getInitialPaymentModalForm = (bill = null) => ({
 });
 
 const normalizeOfficialReceiptNo = (value) =>
-  String(value ?? "").replace(/\D/g, "").slice(0, 6);
+  String(value ?? "").replace(/\D/g, "").slice(0, 7);
 
 const validateOfficialReceiptNo = (value) => {
   const normalized = normalizeOfficialReceiptNo(value);
   if (!normalized) return "Official Receipt No. is required.";
-  if (normalized.length !== 6) return "Official Receipt No. must be exactly 6 digits.";
+  if (normalized.length !== 7) return "Official Receipt No. must be exactly 7 digits.";
   return "";
 };
 
@@ -1796,10 +1879,10 @@ const SuperBilling = () => {
   const [editPaymentForm, setEditPaymentForm] = useState({ official_receipt_no: "", remarks: "" });
   const [editPaymentErrors, setEditPaymentErrors] = useState({});
   const [showPayBillPrompt, setShowPayBillPrompt] = useState(false);
-  const [isRefreshingUnbilledTransactions, setIsRefreshingUnbilledTransactions] = useState(false);
 
   const navigateBillingTab = React.useCallback((nextTab, options = {}) => {
     const nextPath = getBillingTabPath(nextTab);
+    cacheTab(BILLING_TAB_STORAGE_KEY, BILLING_PATH_TABS[nextPath] ?? nextTab, BILLING_TAB_KEYS);
 
     if (location.pathname !== nextPath || location.search) {
       navigate(nextPath, {
@@ -1809,11 +1892,22 @@ const SuperBilling = () => {
     }
   }, [location.pathname, location.search, navigate]);
   const activeTabKey = BILLING_PATH_TABS[activeTab] ?? "records";
+  useEffect(() => {
+    cacheTab(BILLING_TAB_STORAGE_KEY, activeTabKey, BILLING_TAB_KEYS);
+
+    if (location.pathname === BILLING_TAB_PATHS.records && activeTab !== location.pathname) {
+      navigate(activeTab, { replace: true, state: location.state });
+    }
+  }, [activeTab, activeTabKey, location.pathname, location.state, navigate]);
   const isRecordsTab = activeTabKey === "records";
   const isPaymentsTab = activeTabKey === "payments";
   const isCreateBillingActive = showCreateBillingModal;
+  const isEditBillingActive = Boolean(editingBillId);
+  const isBillingFormActive = isCreateBillingActive || isEditBillingActive;
   const breadcrumbLabel = isPaymentsTab ? "Payments" : "Billing";
   const selectedBillingBoatId = String(billingForm.boat_id || "");
+  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const isHeadViewOnly = isHeadRole();
 
   const { data, isLoading, isFetching, isError, refetch } = useBillingDataQuery({
     page: currentPage,
@@ -1831,7 +1925,7 @@ const SuperBilling = () => {
   const formLookupsQuery = useBillingFormLookupsQuery(
     { boatId: selectedBillingBoatId },
     {
-      enabled: isCreateBillingActive && Boolean(selectedBillingBoatId),
+      enabled: !isHeadViewOnly && isBillingFormActive && Boolean(selectedBillingBoatId),
       placeholderData: undefined,
     },
   );
@@ -1844,7 +1938,7 @@ const SuperBilling = () => {
     includeBoats: false,
     compact: true,
   }, {
-    enabled: isCreateBillingActive && Boolean(selectedBillingBoatId),
+    enabled: !isHeadViewOnly && isBillingFormActive && Boolean(selectedBillingBoatId),
     placeholderData: undefined,
   });
   const paymentsQuery = useBillingPaymentsQuery(
@@ -1870,9 +1964,8 @@ const SuperBilling = () => {
     },
   );
   const paymentFormLookupsQuery = usePaymentFormLookupsQuery({
-    enabled: Boolean(paymentModalBill),
+    enabled: !isHeadViewOnly && Boolean(paymentModalBill),
   });
-  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
 
   const bills = data?.bills ?? [];
   const billsMeta = data?.billsMeta ?? {
@@ -2030,6 +2123,7 @@ const SuperBilling = () => {
   };
 
   const openPaymentModalForBill = (bill) => {
+    if (isHeadViewOnly) return;
     if (!bill?.bill_id) return;
     const sourceBill = {
       ...bill,
@@ -2045,6 +2139,8 @@ const SuperBilling = () => {
   };
 
   const openRecordPaymentModal = () => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -2058,6 +2154,8 @@ const SuperBilling = () => {
   };
 
   const openCreateBillingModal = () => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -2197,6 +2295,45 @@ const SuperBilling = () => {
         : null,
     [bills, editingBillId],
   );
+
+  useEffect(() => {
+    if (!editingBillId) return undefined;
+
+    const echo = getEcho();
+    if (!echo) return undefined;
+
+    let cancelled = false;
+    const channel = echo.channel("transactions");
+
+    const syncEditedBillingRecord = async (payload) => {
+      if (payload?.type !== "billing") return;
+
+      const eventRecord = payload.record ?? {};
+      if (String(eventRecord.bill_id ?? "") !== String(editingBillId)) return;
+
+      try {
+        const nextBill = Array.isArray(eventRecord.items)
+          ? eventRecord
+          : (await api.get(`/bills/${editingBillId}`)).data;
+
+        if (cancelled || !nextBill?.bill_id) return;
+
+        patchBillingRecordInCache(queryClient, nextBill);
+        setBillingForm(buildFormFromBill(nextBill));
+        setFieldErrors({});
+        setFormError("");
+      } catch (error) {
+        console.error("Failed to sync edited billing record from Reverb:", error);
+      }
+    };
+
+    channel.listen(".updated", syncEditedBillingRecord);
+
+    return () => {
+      cancelled = true;
+      channel.stopListening(".updated", syncEditedBillingRecord);
+    };
+  }, [editingBillId, queryClient]);
 
   const isActiveBillingLookupRecord = (record) => {
     const status = String(record?.status ?? "").toLowerCase();
@@ -2394,6 +2531,9 @@ const SuperBilling = () => {
 
   const createMutation = useMutation({
     mutationFn: async ({ payload }) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked) {
         throw new Error(transactionLockMessage);
       }
@@ -2452,6 +2592,9 @@ const SuperBilling = () => {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, payload }) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       const response = await api.put(`/bills/${id}`, payload, {
         params: { minimal: 1 },
       });
@@ -2506,6 +2649,9 @@ const SuperBilling = () => {
 
   const createPaymentMutation = useMutation({
     mutationFn: async (payload) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked) {
         throw new Error(transactionLockMessage);
       }
@@ -2520,7 +2666,7 @@ const SuperBilling = () => {
         ? response.payments.reduce((sum, payment) => sum + Number(payment?.amount_paid || payment?.amount || 0), 0)
         : Number(response?.payment?.amount_paid || response?.amount_paid || variables?.amount_paid || 0);
       bumpBillingTodayPaymentStats(queryClient, variables?.payment_date, createdPaymentCount);
-      adjustTodaySystemCashReceived(queryClient, variables?.payment_date, createdPaymentTotal);
+      adjustTodayCollection(queryClient, variables?.payment_date, createdPaymentTotal);
       showAddedToast("Payment", "payment record");
       setPaymentModalBill(null);
       setPaymentModalForm(getInitialPaymentModalForm());
@@ -2532,7 +2678,7 @@ const SuperBilling = () => {
       void queryClient.invalidateQueries({ queryKey: ["billing-payments"], refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: ["payments-data"], refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: ["payments-form-lookups"], refetchType: "active" });
-      invalidateTodaySystemCashReceived(queryClient, variables?.payment_date);
+      invalidateTodayCollection(queryClient, variables?.payment_date);
       navigateBillingTab("payments", { replace: true });
     },
     onError: (error) => {
@@ -2553,6 +2699,9 @@ const SuperBilling = () => {
 
   const updatePaymentMutation = useMutation({
     mutationFn: async ({ id, payload }) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked) {
         throw new Error(transactionLockMessage);
       }
@@ -2605,6 +2754,8 @@ const SuperBilling = () => {
   };
 
   const openEditPayment = (payment) => {
+    if (isHeadViewOnly) return;
+
     setEditingPayment(payment);
     setEditPaymentForm({
       official_receipt_no: normalizeOfficialReceiptNo(payment?.official_receipt_no || ""),
@@ -2632,6 +2783,8 @@ const SuperBilling = () => {
   };
 
   const handleSavePaymentEdit = () => {
+    if (isHeadViewOnly) return;
+
     if (!editingPayment?.payment_id) return;
 
     const officialReceiptNo = normalizeOfficialReceiptNo(editPaymentForm.official_receipt_no);
@@ -2794,6 +2947,8 @@ const SuperBilling = () => {
   };
 
   const handleCreatePaymentFromModal = () => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -3068,65 +3223,6 @@ const SuperBilling = () => {
     showCreateBillingSection(billedTransactionsHistoryRef);
   };
 
-  const handleRefreshUnbilledTransactions = async () => {
-    if (!isCreateBillingActive) return;
-
-    setFormError("");
-    setFieldErrors((current) => ({ ...current, boat_id: "" }));
-    setSubmitMode(null);
-    setIsRefreshingUnbilledTransactions(true);
-
-    try {
-      if (selectedBillingBoatId) {
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ["billing-form-lookups"], refetchType: "active" }),
-          queryClient.invalidateQueries({ queryKey: ["billing-data"], refetchType: "active" }),
-        ]);
-
-        const freshLookups = await formLookupsQuery.refetch();
-        const freshRecordsByType = buildLookupRecordsByType(freshLookups?.data ?? formLookupsQuery.data ?? {});
-        const freshBilledRecordIds = buildBilledRecordIds(freshRecordsByType, editingBillRecord);
-
-        setBillingForm((current) => ({
-          ...current,
-          items: buildBoatBillingItems(
-            current.boat_id,
-            current.date_from,
-            current.date_to,
-            {
-              preserveCurrentSelection: Boolean(editingBillId),
-              selectedRecordIds: current.items
-                .filter((item) => item.record_id)
-                .map((item) => String(item.record_id)),
-              recordsByType: freshRecordsByType,
-              billedIds: freshBilledRecordIds,
-            },
-          ),
-        }));
-        return;
-      }
-
-      setBillingForm((current) => ({
-        ...current,
-        items: buildBoatBillingItems(
-          current.boat_id,
-          current.date_from,
-          current.date_to,
-          {
-            preserveCurrentSelection: Boolean(editingBillId),
-            selectedRecordIds: current.items
-              .filter((item) => item.record_id)
-              .map((item) => String(item.record_id)),
-          },
-        ),
-      }));
-    } catch (error) {
-      console.error("Error refreshing unbilled transactions", error);
-    } finally {
-      setIsRefreshingUnbilledTransactions(false);
-    }
-  };
-
   const updateBillingBoat = (boatId, { scrollToUnbilled = false } = {}) => {
     const nextBoatId = boatId ?? "";
     pendingCreateBillingScrollRef.current =
@@ -3322,6 +3418,8 @@ const SuperBilling = () => {
   };
 
   const handleEditBill = (bill) => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -3406,6 +3504,8 @@ const SuperBilling = () => {
   };
 
   const submitBill = (proceedToPayment = false) => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       setSubmitMode(null);
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
@@ -3459,6 +3559,8 @@ const SuperBilling = () => {
   };
 
   const handleSaveBill = () => {
+    if (isHeadViewOnly) return;
+
     setShowPayBillPrompt(true);
   };
 
@@ -3714,7 +3816,7 @@ const SuperBilling = () => {
                       title="Billing Records"
                       subtitle="All billing records in the system."
                       loading={showInitialSkeleton}
-                      headerActionsSkeletonCount={3}
+                      headerActionsSkeletonCount={isHeadViewOnly ? 2 : 3}
                       className=""
                       bodyClassName="overflow-x-auto"
                       footerClassName="flex items-center justify-between"
@@ -3755,16 +3857,18 @@ const SuperBilling = () => {
                             }}
                             options={PERIOD_FILTER_OPTIONS}
                           />
-                          <button
-                            type="button"
-                            onClick={openCreateBillingModal}
-                            disabled={isTransactionLocked}
-                            className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:hover:bg-[#1a1f36]"
-                            style={{ fontFamily: FONT, opacity: isTransactionLocked ? 0.55 : 1 }}
-                          >
-                            <IoAddOutline className="text-[16px]" />
-                            <span>Create Billing</span>
-                          </button>
+                          {!isHeadViewOnly ? (
+                            <button
+                              type="button"
+                              onClick={openCreateBillingModal}
+                              disabled={isTransactionLocked}
+                              className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:hover:bg-[#1a1f36]"
+                              style={{ fontFamily: FONT, opacity: isTransactionLocked ? 0.55 : 1 }}
+                            >
+                              <IoAddOutline className="text-[16px]" />
+                              <span>Create Billing</span>
+                            </button>
+                          ) : null}
                         </>
                       }
                       pagination={{
@@ -3792,7 +3896,7 @@ const SuperBilling = () => {
                             <TH>
                               <div className="text-right">Amount (₱)</div>
                             </TH>
-                            <TH>Action</TH>
+                            {!isHeadViewOnly ? <TH>Action</TH> : null}
                           </tr>
                         </thead>
                         <tbody>
@@ -3803,9 +3907,9 @@ const SuperBilling = () => {
                                 className="animate-pulse"
                                 style={{ borderBottom: "1px solid #f1f5f9" }}
                               >
-                                {Array.from({ length: 8 }).map((__, column) => (
+                                {Array.from({ length: isHeadViewOnly ? 7 : 8 }).map((__, column) => (
                                   <td key={column} className="px-4 py-3">
-                                    {column === 7 ? (
+                                    {!isHeadViewOnly && column === 7 ? (
                                       <div className="h-8 w-8 rounded-[10px] bg-slate-100" />
                                     ) : (
                                       <div
@@ -3819,7 +3923,7 @@ const SuperBilling = () => {
                             ))
                           ) : isError ? (
                             <tr>
-                              <td colSpan={8} className="px-4 py-8 text-center">
+                              <td colSpan={isHeadViewOnly ? 7 : 8} className="px-4 py-8 text-center">
                                 <p className="m-0 text-[13px] text-red-500">
                                   Unable to load billing records.
                                 </p>
@@ -3834,7 +3938,7 @@ const SuperBilling = () => {
                               </tr>
                           ) : showBillsEmptyState ? (
                             <tr>
-                              <td colSpan={8}>
+                              <td colSpan={isHeadViewOnly ? 7 : 8}>
                                 <NoDataFound title={hasActiveTableFilters ? "No results found" : "No Data Found"} />
                                </td>
                               </tr>
@@ -3900,32 +4004,34 @@ const SuperBilling = () => {
                                     })}
                                   </span>
                                  </td>
-                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                  <div className="flex items-center gap-2">
-                                    <Tooltip title={isTransactionLocked ? transactionLockMessage : hasPayments ? "Cannot edit - this billing record has payments" : "Edit"}>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          if (!hasPayments && !isTransactionLocked) handleEditBill(record);
-                                        }}
-                                        disabled={hasPayments || isTransactionLocked}
-                                        className={`flex h-8 w-8 items-center justify-center rounded-[10px] border bg-white transition-colors ${
-                                          hasPayments || isTransactionLocked
-                                            ? "cursor-not-allowed border-slate-200"
-                                            : "cursor-pointer hover:bg-blue-50"
-                                        }`}
-                                        style={{ borderColor: hasPayments || isTransactionLocked ? undefined : "#1a1f36" }}
-                                      >
-                                        <IoCreateOutline
-                                          style={{
-                                            fontSize: "15px",
-                                            color: hasPayments || isTransactionLocked ? "#94a3b8" : "#1a1f36",
+                                {!isHeadViewOnly ? (
+                                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                    <div className="flex items-center gap-2">
+                                      <Tooltip title={isTransactionLocked ? transactionLockMessage : hasPayments ? "Cannot edit - this billing record has payments" : "Edit"}>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (!hasPayments && !isTransactionLocked) handleEditBill(record);
                                           }}
-                                        />
-                                      </button>
-                                    </Tooltip>
-                                  </div>
-                                 </td>
+                                          disabled={hasPayments || isTransactionLocked}
+                                          className={`flex h-8 w-8 items-center justify-center rounded-[10px] border bg-white transition-colors ${
+                                            hasPayments || isTransactionLocked
+                                              ? "cursor-not-allowed border-slate-200"
+                                              : "cursor-pointer hover:bg-blue-50"
+                                          }`}
+                                          style={{ borderColor: hasPayments || isTransactionLocked ? undefined : "#1a1f36" }}
+                                        >
+                                          <IoCreateOutline
+                                            style={{
+                                              fontSize: "15px",
+                                              color: hasPayments || isTransactionLocked ? "#94a3b8" : "#1a1f36",
+                                            }}
+                                          />
+                                        </button>
+                                      </Tooltip>
+                                    </div>
+                                   </td>
+                                ) : null}
                                 </tr>
                             )})
                                                         
@@ -3938,10 +4044,10 @@ const SuperBilling = () => {
                   </>
               ) : isPaymentsTab ? (
                 <TableCard
-                  title="Payment Records"
-                  subtitle="All payment records in the system."
+                  title="Payment History"
+                  subtitle="All payment history from the billing."
                   loading={showPaymentRecordsSkeleton}
-                  headerActionsSkeletonCount={4}
+                  headerActionsSkeletonCount={isHeadViewOnly ? 3 : 4}
                   className=""
                   bodyClassName="overflow-x-auto"
                   footerClassName="flex items-center justify-between"
@@ -3993,16 +4099,18 @@ const SuperBilling = () => {
                         }}
                         options={PAYMENT_STATUS_FILTER_OPTIONS}
                       />
-                      <button
-                        type="button"
-                        onClick={openRecordPaymentModal}
-                        disabled={isTransactionLocked}
-                        className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
-                        style={{ fontFamily: FONT }}
-                      >
-                        <IoCashOutline className="text-[16px]" />
-                        <span>Record Payment</span>
-                      </button>
+                      {!isHeadViewOnly ? (
+                        <button
+                          type="button"
+                          onClick={openRecordPaymentModal}
+                          disabled={isTransactionLocked}
+                          className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
+                          style={{ fontFamily: FONT }}
+                        >
+                          <IoCashOutline className="text-[16px]" />
+                          <span>Record Payment</span>
+                        </button>
+                      ) : null}
                     </>
                   }
                   pagination={{
@@ -4031,7 +4139,7 @@ const SuperBilling = () => {
                             <div className="text-right">Balance Due(₱)</div>
                           </TH>
                           <TH><div className="min-w-[220px]">Remarks</div></TH>
-                          <TH>Action</TH>
+                          {!isHeadViewOnly ? <TH>Action</TH> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -4042,9 +4150,9 @@ const SuperBilling = () => {
                               className="animate-pulse"
                               style={{ borderBottom: "1px solid #f1f5f9" }}
                             >
-                              {Array.from({ length: 9 }).map((__, column) => (
+                              {Array.from({ length: isHeadViewOnly ? 8 : 9 }).map((__, column) => (
                                 <td key={column} className="px-4 py-3">
-                                  {column === 8 ? (
+                                  {!isHeadViewOnly && column === 8 ? (
                                     <div className="h-8 w-8 rounded-[10px] bg-slate-100" />
                                   ) : (
                                     <div
@@ -4058,7 +4166,7 @@ const SuperBilling = () => {
                           ))
                         ) : paymentRecordsQuery.isError ? (
                           <tr>
-                            <td colSpan={9} className="px-4 py-10 text-center">
+                            <td colSpan={isHeadViewOnly ? 8 : 9} className="px-4 py-10 text-center">
                               <div className="flex flex-col items-center gap-3">
                                 <IoAlertCircleOutline className="text-[32px] text-red-400" />
                                 <p className="m-0 text-[13px] font-normal text-red-500">
@@ -4077,7 +4185,7 @@ const SuperBilling = () => {
                           </tr>
                         ) : showPaymentRecordsEmptyState ? (
                           <tr>
-                            <td colSpan={9}>
+                            <td colSpan={isHeadViewOnly ? 8 : 9}>
                               <NoDataFound title={hasActivePaymentTableFilters ? "No results found" : "No Data Found"} />
                             </td>
                           </tr>
@@ -4150,32 +4258,34 @@ const SuperBilling = () => {
                                   </span>
                                 </td>
                                 <td className="min-w-[220px] px-4 py-3 text-[13px] text-slate-700">{record.remarks || "-"}</td>
-                                <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
-                                  <div className="flex items-center gap-2">
-                                    <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          if (!isTransactionLocked) openEditPayment(record);
-                                        }}
-                                        disabled={isTransactionLocked}
-                                        className={`flex h-8 w-8 items-center justify-center rounded-[10px] border bg-white transition-colors ${
-                                          isTransactionLocked
-                                            ? "cursor-not-allowed border-slate-200"
-                                            : "cursor-pointer hover:bg-blue-50"
-                                        }`}
-                                        style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}
-                                      >
-                                        <IoCreateOutline
-                                          style={{
-                                            fontSize: "15px",
-                                            color: isTransactionLocked ? "#94a3b8" : "#1a1f36",
+                                {!isHeadViewOnly ? (
+                                  <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                                    <div className="flex items-center gap-2">
+                                      <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (!isTransactionLocked) openEditPayment(record);
                                           }}
-                                        />
-                                      </button>
-                                    </Tooltip>
-                                  </div>
-                                </td>
+                                          disabled={isTransactionLocked}
+                                          className={`flex h-8 w-8 items-center justify-center rounded-[10px] border bg-white transition-colors ${
+                                            isTransactionLocked
+                                              ? "cursor-not-allowed border-slate-200"
+                                              : "cursor-pointer hover:bg-blue-50"
+                                          }`}
+                                          style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}
+                                        >
+                                          <IoCreateOutline
+                                            style={{
+                                              fontSize: "15px",
+                                              color: isTransactionLocked ? "#94a3b8" : "#1a1f36",
+                                            }}
+                                          />
+                                        </button>
+                                      </Tooltip>
+                                    </div>
+                                  </td>
+                                ) : null}
                               </tr>
                             );
                           })
@@ -4197,7 +4307,7 @@ const SuperBilling = () => {
         open={Boolean(selectedBillId) && Boolean(selectedBillRecord) && isRecordsTab}
         onClose={closeBillingDetails}
       />
-      {showCreateBillingModal ? (
+      {!isHeadViewOnly && showCreateBillingModal ? (
         <Modal
           title="Create Billing"
           onClose={closeCreateBillingModal}
@@ -4261,11 +4371,6 @@ const SuperBilling = () => {
                   </div>
 
                   <div>
-                    <Label>Boat Owner</Label>
-                    <Input value={previewBoat?.owner?.full_name || ""} readOnly />
-                  </div>
-
-                  <div>
                     <Label>Boat Type</Label>
                     <Input
                       value={
@@ -4275,6 +4380,11 @@ const SuperBilling = () => {
                       }
                       readOnly
                     />
+                  </div>
+
+                  <div>
+                    <Label>Boat Owner</Label>
+                    <Input value={previewBoat?.owner?.full_name || ""} readOnly />
                   </div>
 
                   <div>
@@ -4337,21 +4447,9 @@ const SuperBilling = () => {
                   icon={IoReceiptOutline}
                   title="UNBILLED TRANSACTIONS"
                   subtitle="Review all unpaid transactions."
-                  loading={Boolean(billingForm.boat_id && (isBoatBillingDataLoading || isRefreshingUnbilledTransactions))}
-                  loadingBodyOnly={Boolean(billingForm.boat_id && (isBoatBillingDataLoading || isRefreshingUnbilledTransactions))}
+                  loading={Boolean(billingForm.boat_id && isBoatBillingDataLoading)}
+                  loadingBodyOnly={Boolean(billingForm.boat_id && isBoatBillingDataLoading)}
                   skeletonLayout={[{ type: "table", columns: 3, rows: 4 }]}
-                  headerAction={
-                    <button
-                      type="button"
-                      aria-label="Refresh unbilled transactions"
-                      onClick={handleRefreshUnbilledTransactions}
-                      disabled={isRefreshingUnbilledTransactions}
-                      className="flex items-center gap-2 rounded-[10px] border border-slate-200 bg-white px-3 py-2 text-[13px] font-normal text-slate-600 transition hover:border-slate-300 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      <IoRefreshOutline className="text-[15px]" />
-                      <span>Refresh</span>
-                    </button>
-                  }
                 >
                   {!billingForm.boat_id ? (
                     <div className="flex min-h-[228px] items-center justify-center rounded-[10px] border border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-[13px] text-slate-500">
@@ -4488,7 +4586,7 @@ const SuperBilling = () => {
           </div>
         </Modal>
       ) : null}
-      <RecordPaymentModal
+      {!isHeadViewOnly ? <RecordPaymentModal
         open={Boolean(paymentModalBill)}
         bill={paymentModalBill}
         form={paymentModalForm}
@@ -4507,8 +4605,8 @@ const SuperBilling = () => {
         onShowAllBills={handlePaymentModalShowAllBills}
         onDateFilterChange={handlePaymentModalDateFilterChange}
         onSave={handleCreatePaymentFromModal}
-      />
-      <EditPaymentModal
+      /> : null}
+      {!isHeadViewOnly ? <EditPaymentModal
         open={Boolean(editingPayment)}
         payment={editingPayment}
         form={editPaymentForm}
@@ -4517,13 +4615,13 @@ const SuperBilling = () => {
         onClose={closeEditPayment}
         onChange={updateEditPaymentForm}
         onSave={handleSavePaymentEdit}
-      />
+      /> : null}
       <PaymentDetailsDrawer
         open={Boolean(detailPayment)}
         payment={detailPayment}
         onClose={() => setDetailPayment(null)}
       />
-      <PayBillPromptModal
+      {!isHeadViewOnly ? <PayBillPromptModal
         open={showPayBillPrompt}
         saving={isSaving}
         onClose={() => {
@@ -4532,7 +4630,7 @@ const SuperBilling = () => {
         }}
         onYes={handleGenerateBillAndPay}
         onNo={handleGenerateBillOnly}
-      />
+      /> : null}
       {selectedBillPdfFile ? (
         <iframe
           key={selectedBillPdfFile.url}
@@ -4544,7 +4642,7 @@ const SuperBilling = () => {
           className="fixed bottom-0 right-0 h-0 w-0 border-0"
         />
       ) : null}
-      <EditBillingModal
+      {!isHeadViewOnly ? <EditBillingModal
         open={Boolean(editingBillId) && isRecordsTab}
         bill={editingBillRecord}
         form={billingForm}
@@ -4563,7 +4661,7 @@ const SuperBilling = () => {
         onDateRangeChange={handleEditDateRangeChange}
         onShowAll={handleShowAll}
         onSave={handleGenerateBillOnly}
-      />
+      /> : null}
     </ConfigProvider>
   );
 };

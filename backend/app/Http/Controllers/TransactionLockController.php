@@ -13,8 +13,17 @@ class TransactionLockController extends Controller
 
     public function index(Request $request)
     {
+        if (strtolower(trim((string) ($request->user()?->role ?? ''))) === 'head') {
+            return response()->json([
+                'transaction_lock' => null,
+            ]);
+        }
+
         return response()->json([
-            'transaction_lock' => $this->transactionLockService->getActiveLock(),
+            'transaction_lock' => $this->transactionLockService->getActiveLock(
+                $request->user(),
+                $request->query('resource')
+            ),
         ]);
     }
 }

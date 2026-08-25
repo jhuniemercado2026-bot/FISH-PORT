@@ -7,7 +7,6 @@ import {
   IoAddOutline,
   IoCheckmarkOutline,
   IoCashOutline,
-  IoCreateOutline,
   IoDocumentTextOutline,
   IoLayersOutline,
   IoRefreshOutline,
@@ -25,20 +24,21 @@ import Breadcrumbs from "../../components/Breadcrumbs";
 import TitlePage from "../../components/TitlePage";
 import NoDataFound from "../../components/NoDataFound";
 import Card from "../../components/Card";
-import Modal, { ModalFieldError, ModalTextInput } from "../../components/Modal";
+import Modal, { ModalFieldError } from "../../components/Modal";
 import Spinner from "../../components/Spinner";
 import { useSidebar } from "../../store/sidebarStore";
-import { showBottomToast, showNoChangesToast, showUpdatedToast } from "../../store/bottomToastStore";
+import { showBottomToast } from "../../store/bottomToastStore";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { useCollectionsDataQuery } from "../../hooks/useCollectionsDataQuery";
 import { useRemittanceDataQuery } from "../../hooks/useRemittanceDataQuery";
-import { useTodaySystemCashReceivedQuery } from "../../hooks/useTodaySystemCashReceivedQuery";
+import { useTodayCollectionQuery } from "../../hooks/useTodayCollectionQuery";
 import { useRemittanceReportDataQuery } from "../../hooks/useRemittanceReportDataQuery";
 import { buildRemittanceReportPdf } from "../../lib/pdfDocumentRemittanceReport";
 import api from "../../api/axios";
 import { getNormalizedRole } from "../../utils/transactionLock";
-import { invalidateTodaySystemCashReceived } from "../../utils/remittanceCashCache";
+import { invalidateTodayCollection } from "../../utils/remittanceCollectionCache";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
+import { cacheTab, getCachedTab } from "../../utils/tabSession";
 
 const FONT = "'Montserrat', sans-serif";
 const PAGE_SIZE = 10;
@@ -48,6 +48,8 @@ const COLLECTION_TABS = [
   { key: "collections", label: "Collections", icon: IoCashOutline },
   { key: "remittance", label: "Remittance", icon: IoDocumentTextOutline },
 ];
+const COLLECTION_TAB_STORAGE_KEY = "opol:collections:active-tab";
+const COLLECTION_TAB_KEYS = COLLECTION_TABS.map((tab) => tab.key);
 
 const PERIOD_OPTIONS = [
   { value: "all", label: "All Time" },
@@ -58,21 +60,21 @@ const PERIOD_OPTIONS = [
 
 const REMITTANCE_STATUS_OPTIONS = [
   { value: "all", label: "All Status" },
-  { value: "remitted", label: "Remitted" },
-  { value: "pending", label: "Pending" },
+  { value: "remitted", label: "Checked" },
+  { value: "pending", label: "Unchecked" },
 ];
 
 const REMITTANCE_STATUS_LEGEND = [
   {
     key: "remitted",
-    label: "Remitted",
-    meaning: "Submitted remittance record",
+    label: "Checked",
+    meaning: "Checked remittance record",
     color: "#16a34a",
   },
   {
     key: "pending",
-    label: "Pending",
-    meaning: "Awaiting remittance processing",
+    label: "Unchecked",
+    meaning: "Awaiting remittance check",
     color: "#f59e0b",
   },
 ];
@@ -189,11 +191,8 @@ const formatDisplayDate = (value) => {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
-  return date.toLocaleDateString("en-PH", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
+  const months = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
+  return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
 };
 
 const SuperCollections = ({ initialTab }) => {
@@ -207,7 +206,9 @@ const SuperCollections = ({ initialTab }) => {
   const [search, setSearch] = useState("");
   const [periodFilter, setPeriodFilter] = useState("all");
   const [activeCollectionTab, setActiveCollectionTab] = useState(() =>
-    initialTab === "remittance" || window.location.pathname === "/remittance" ? "remittance" : "collections"
+    initialTab === "remittance" || window.location.pathname === "/remittance"
+      ? "remittance"
+      : getCachedTab(COLLECTION_TAB_STORAGE_KEY, COLLECTION_TAB_KEYS, "collections")
   );
   const [requestedPage, setRequestedPage] = useState(1);
   const [remittanceSearch, setRemittanceSearch] = useState("");
@@ -221,14 +222,10 @@ const SuperCollections = ({ initialTab }) => {
   const [selectedRemittanceReportPdfLoading, setSelectedRemittanceReportPdfLoading] = useState(false);
   const [remittingRemittanceId, setRemittingRemittanceId] = useState(null);
   const [unremittingRemittanceId, setUnremittingRemittanceId] = useState(null);
-  const [editingRemittance, setEditingRemittance] = useState(null);
-  const [editRemittanceForm, setEditRemittanceForm] = useState({ remarks: "" });
-  const [editRemittanceErrors, setEditRemittanceErrors] = useState({});
   const [showCreateRemittanceModal, setShowCreateRemittanceModal] = useState(false);
   const [createRemittanceForm, setCreateRemittanceForm] = useState(getDefaultCreateRemittanceForm);
   const [createRemittanceErrors, setCreateRemittanceErrors] = useState({});
   const [submitRemittanceLoading, setSubmitRemittanceLoading] = useState(false);
-  const [isRefreshingTodayCash, setIsRefreshingTodayCash] = useState(false);
   const debouncedSearch = useDebouncedValue(search, 350);
   const debouncedRemittanceSearch = useDebouncedValue(remittanceSearch, 350);
   const rawHighlightedRemittanceId = getRemittanceHighlightId({ highlightedSearchResult, search: location.search });
@@ -252,9 +249,13 @@ const SuperCollections = ({ initialTab }) => {
     search: "",
     period: "all",
   });
-  const { data: todayCashData, refetch: refetchTodayCash } = useTodaySystemCashReceivedQuery(
+  const { data: todayCollectionData } = useTodayCollectionQuery(
     { date: todayDateString },
-    { enabled: shouldLoadRemittanceData || showCreateRemittanceModal },
+    {
+      enabled: shouldLoadRemittanceData || showCreateRemittanceModal,
+      staleTime: 0,
+      refetchOnMount: "always",
+    },
   );
   const {
     data: remittanceData,
@@ -309,6 +310,14 @@ const SuperCollections = ({ initialTab }) => {
   const normalizedRole = getNormalizedRole();
   const isHead = normalizedRole === "head";
   const isCoordinator = normalizedRole === "coordinator";
+  const canManageRemittanceRow = (row) => {
+    const submitterRole = String(row?.submitted_by_role || "").trim().toLowerCase();
+
+    if (isCoordinator) return submitterRole === "inspector";
+    if (isHead) return submitterRole === "coordinator";
+
+    return false;
+  };
   const collections = data?.collections ?? [];
   const meta = data?.meta ?? {
     current_page: 1,
@@ -344,14 +353,35 @@ const SuperCollections = ({ initialTab }) => {
     shouldLoadRemittanceData &&
     (isRemittancePending || isRemittanceLoading || (isRemittanceFetching && !remittanceData));
   const isActiveTabLoading = activeCollectionTab === "remittance" ? showRemittanceSkeleton : showInitialSkeleton;
+  const currentUserId = currentUser?.user_id ?? currentUser?.id ?? null;
   const hasTodayDailyRemittance = useMemo(
-    () => remittances.some((row) => String(row.date || "").slice(0, 10) === todayDateString),
-    [remittances, todayDateString],
+    () =>
+      remittances.some((row) => {
+        const submittedBy = row.submitted_by ?? row.submittedBy?.user_id ?? row.submittedBy?.id ?? null;
+        return (
+          String(row.date || "").slice(0, 10) === todayDateString &&
+          submittedBy !== null &&
+          currentUserId !== null &&
+          String(submittedBy) === String(currentUserId)
+        );
+      }),
+    [currentUserId, remittances, todayDateString],
   );
   const previewRemittanceAmount = useMemo(() => {
     if (hasTodayDailyRemittance) return 0;
-    return Number(todayCashData?.amount ?? 0);
-  }, [hasTodayDailyRemittance, todayCashData?.amount]);
+    return Number(todayCollectionData?.amount ?? 0);
+  }, [hasTodayDailyRemittance, todayCollectionData?.amount]);
+  const remittanceProgress = todayCollectionData?.remittance_progress ?? {};
+  const remittanceProgressPercentage = Math.min(
+    Math.max(Number(remittanceProgress?.percentage ?? 0), 0),
+    100,
+  );
+  const remittedUsersCount = Number(remittanceProgress?.remitted_users ?? 0);
+  const eligibleUsersCount = Number(remittanceProgress?.eligible_users ?? 0);
+  const pendingRemittanceUsers = Array.isArray(remittanceProgress?.users)
+    ? remittanceProgress.users.filter((user) => !user?.has_remitted)
+    : [];
+  const hasPendingInspectorRemittances = pendingRemittanceUsers.length > 0;
   const confirmedRemittanceAmount = Number(createRemittanceForm.confirmedAmount || 0);
   const totalAmountToRemit = createRemittanceForm.confirmedAmount === "" ? 0 : confirmedRemittanceAmount;
   const surplusAmount = createRemittanceForm.confirmedAmount === ""
@@ -368,13 +398,22 @@ const SuperCollections = ({ initialTab }) => {
   useEffect(() => {
     if (initialTab === "remittance" || location.pathname === "/remittance") {
       setActiveCollectionTab("remittance");
+      cacheTab(COLLECTION_TAB_STORAGE_KEY, "remittance", COLLECTION_TAB_KEYS);
       return;
     }
 
     if (location.pathname === "/collections" || location.pathname === "/payments") {
-      setActiveCollectionTab("collections");
+      const nextTab = location.pathname === "/collections"
+        ? getCachedTab(COLLECTION_TAB_STORAGE_KEY, COLLECTION_TAB_KEYS, "collections")
+        : "collections";
+      setActiveCollectionTab(nextTab);
+      cacheTab(COLLECTION_TAB_STORAGE_KEY, nextTab, COLLECTION_TAB_KEYS);
+
+      if (location.pathname === "/collections" && nextTab === "remittance") {
+        navigate("/remittance", { replace: true, state: location.state });
+      }
     }
-  }, [initialTab, location.pathname]);
+  }, [initialTab, location.pathname, location.state, navigate]);
 
   const clearUniversalHighlight = React.useCallback(() => {
     const params = new URLSearchParams(location.search);
@@ -412,6 +451,7 @@ const SuperCollections = ({ initialTab }) => {
   const handleCollectionTabChange = (nextTab) => {
     clearUniversalHighlight();
     setActiveCollectionTab(nextTab);
+    cacheTab(COLLECTION_TAB_STORAGE_KEY, nextTab, COLLECTION_TAB_KEYS);
     const nextPath = nextTab === "remittance" ? "/remittance" : "/collections";
 
     if (location.pathname !== nextPath) {
@@ -448,20 +488,6 @@ const SuperCollections = ({ initialTab }) => {
       setRemittanceCurrentPage(resolvedPage);
     }
   }, [highlightedRemittanceId, remittanceRequestedPage, remittancesMeta.current_page]);
-
-  useEffect(() => {
-    if (!showCreateRemittanceModal) return;
-    void refetchTodayCash();
-  }, [refetchTodayCash, showCreateRemittanceModal]);
-
-  const handleRefreshTodayCash = async () => {
-    setIsRefreshingTodayCash(true);
-    try {
-      await refetchTodayCash();
-    } finally {
-      setIsRefreshingTodayCash(false);
-    }
-  };
 
   useEffect(() => {
     let isActive = true;
@@ -569,7 +595,7 @@ const SuperCollections = ({ initialTab }) => {
       setRemittingRemittanceId(id);
     },
     onSuccess: (data) => {
-      showBottomToast("success", "Remittance Accepted", "The remittance was marked as remitted.");
+      showBottomToast("success", "Remittance Checked", "The remittance was marked as checked.");
       try {
         const lockObj = data?.transaction_lock ?? null;
         queryClient.setQueryData(["transaction-lock"], () => ({
@@ -587,7 +613,7 @@ const SuperCollections = ({ initialTab }) => {
     },
     onError: (error) => {
       const response = error?.response?.data;
-      showBottomToast("error", "Update Failed", response?.message || "Unable to mark the remittance as remitted right now.");
+      showBottomToast("error", "Update Failed", response?.message || "Unable to mark the remittance as checked right now.");
     },
     onSettled: () => {
       setRemittingRemittanceId(null);
@@ -603,7 +629,7 @@ const SuperCollections = ({ initialTab }) => {
       setUnremittingRemittanceId(id);
     },
     onSuccess: (data) => {
-      showBottomToast("success", "Remittance Reverted", "The remittance was returned to pending.");
+      showBottomToast("success", "Remittance Unchecked", "The remittance was returned to unchecked.");
       try {
         const lockObj = data?.transaction_lock ?? null;
         queryClient.setQueryData(["transaction-lock"], () => ({
@@ -625,34 +651,6 @@ const SuperCollections = ({ initialTab }) => {
     },
     onSettled: () => {
       setUnremittingRemittanceId(null);
-    },
-  });
-
-  const updateRemittanceMutation = useMutation({
-    mutationFn: async ({ id, payload }) => {
-      const res = await api.put(`/remittances/${id}`, payload);
-      return res.data;
-    },
-    onSuccess: () => {
-      showUpdatedToast("Remittance");
-      setEditingRemittance(null);
-      setEditRemittanceForm({ remarks: "" });
-      setEditRemittanceErrors({});
-      void queryClient.invalidateQueries({ queryKey: ["remittances-data"], refetchType: "active" });
-      void queryClient.invalidateQueries({ queryKey: ["remittance-report"], refetchType: "active" });
-      void queryClient.invalidateQueries({ queryKey: ["dashboard-data"], refetchType: "active" });
-      void queryClient.invalidateQueries({ queryKey: ["notifications-data"], refetchType: "active" });
-    },
-    onError: (error) => {
-      const response = error?.response?.data;
-      const nextErrors = {};
-
-      Object.entries(response?.errors ?? {}).forEach(([key, value]) => {
-        nextErrors[key] = Array.isArray(value) ? value[0] : value;
-      });
-
-      setEditRemittanceErrors(nextErrors);
-      showBottomToast("error", "Update Failed", response?.message || "Unable to update remittance right now.");
     },
   });
 
@@ -685,7 +683,7 @@ const SuperCollections = ({ initialTab }) => {
       void queryClient.invalidateQueries({ queryKey: ["remittance-report"], refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: ["dashboard-data"], refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: ["notifications-data"], refetchType: "active" });
-      invalidateTodaySystemCashReceived(queryClient, todayDateString);
+      invalidateTodayCollection(queryClient, todayDateString);
     },
     onError: (error) => {
       setSubmitRemittanceLoading(false);
@@ -715,6 +713,10 @@ const SuperCollections = ({ initialTab }) => {
 
     if (!todayDateString) nextErrors.date = "Date is required.";
     if (previewRemittanceAmount <= 0) nextErrors.date = "No cash collections were found for today.";
+    if (hasPendingInspectorRemittances) {
+      nextErrors.remittance_progress =
+        "All inspectors with vehicle ticket collections must submit their remittance first.";
+    }
     if (!String(createRemittanceForm.confirmedAmount || "").trim()) {
       nextErrors.confirmedAmount = "Amount to remit is required.";
     }
@@ -760,47 +762,6 @@ const SuperCollections = ({ initialTab }) => {
     unremitMutation.mutate(row.remittance_id);
   };
 
-  const closeEditRemittanceModal = () => {
-    setEditingRemittance(null);
-    setEditRemittanceForm({ remarks: "" });
-    setEditRemittanceErrors({});
-  };
-
-  const handleEditRemittance = (row) => {
-    if (isTransactionLocked) {
-      showBottomToast("error", "Transactions Locked", transactionLockMessage);
-      return;
-    }
-
-    setEditingRemittance(row);
-    setEditRemittanceForm({ remarks: row?.remarks || "" });
-    setEditRemittanceErrors({});
-  };
-
-  const handleSaveEditRemittance = () => {
-    if (!editingRemittance) return;
-
-    const trimmedRemarks = String(editRemittanceForm.remarks || "").trim();
-    const currentRemarks = String(editingRemittance.remarks || "").trim();
-
-    if (trimmedRemarks === currentRemarks) {
-      showNoChangesToast();
-      closeEditRemittanceModal();
-      return;
-    }
-
-    updateRemittanceMutation.mutate({
-      id: editingRemittance.remittance_id,
-      payload: {
-        date: String(editingRemittance.date || "").slice(0, 10),
-        amount: Number(editingRemittance.amount || 0),
-        surplus: Number(editingRemittance.surplus || 0),
-        deficit: Number(editingRemittance.deficit || 0),
-        remarks: trimmedRemarks || null,
-      },
-    });
-  };
-
   const renderRemittanceStatusAction = (row) => {
     const isUnremitting = unremitMutation.isPending && unremittingRemittanceId === row.remittance_id;
     const isRemitting = remitMutation.isPending && remittingRemittanceId === row.remittance_id;
@@ -808,7 +769,7 @@ const SuperCollections = ({ initialTab }) => {
 
     if (isUnremitting) {
       return (
-        <Tooltip title="Undo remitted status">
+        <Tooltip title="Undo checked">
           <button
             type="button"
             onClick={(event) => {
@@ -829,7 +790,7 @@ const SuperCollections = ({ initialTab }) => {
 
     if (isRemitting) {
       return (
-        <Tooltip title="Mark as remitted">
+        <Tooltip title="Mark as checked">
           <button
             type="button"
             onClick={(event) => {
@@ -850,7 +811,7 @@ const SuperCollections = ({ initialTab }) => {
 
     if (isRowRemitted) {
       return (
-        <Tooltip title="Undo remitted status">
+        <Tooltip title="Undo checked">
           <button
             type="button"
             onClick={(event) => {
@@ -870,7 +831,7 @@ const SuperCollections = ({ initialTab }) => {
     }
 
     return (
-      <Tooltip title="Mark as remitted">
+      <Tooltip title="Mark as checked">
         <button
           type="button"
           onClick={(event) => {
@@ -888,32 +849,6 @@ const SuperCollections = ({ initialTab }) => {
       </Tooltip>
     );
   };
-
-  const renderEditRemittanceAction = (row) => (
-    <Tooltip
-      title={
-        isTransactionLocked
-          ? transactionLockMessage
-          : String(row.status || "").toLowerCase() === "remitted"
-            ? "Remitted records can no longer be edited"
-            : "Edit"
-      }
-    >
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          handleEditRemittance(row);
-        }}
-        disabled={isTransactionLocked}
-        className="flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-        style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}
-        title={isTransactionLocked ? transactionLockMessage : "Edit"}
-      >
-        <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
-      </button>
-    </Tooltip>
-  );
 
   const closeRemittanceReport = () => {
     setSelectedRemittanceReportDate("");
@@ -1105,7 +1040,7 @@ const SuperCollections = ({ initialTab }) => {
                     loading={showRemittanceSkeleton}
                     headerActionsSkeletonCount={4}
                     className=""
-                    bodyClassName="overflow-x-auto"
+                    bodyClassName="overflow-hidden"
                     footerClassName="flex items-center justify-between"
                     actions={
                       <>
@@ -1159,26 +1094,24 @@ const SuperCollections = ({ initialTab }) => {
                         width={150}
                       />
                       {isCoordinator ? (
-                        <Tooltip title={isTransactionLocked ? transactionLockMessage : "Create Remittance"}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (isTransactionLocked) {
-                                showBottomToast("error", "Transactions Locked", transactionLockMessage);
-                                return;
-                              }
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isTransactionLocked) {
+                              showBottomToast("error", "Transactions Locked", transactionLockMessage);
+                              return;
+                            }
 
-                              setCreateRemittanceErrors({});
-                              setShowCreateRemittanceModal(true);
-                            }}
-                            disabled={isTransactionLocked}
-                            className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:hover:bg-[#1a1f36]"
-                            style={{ fontFamily: FONT, opacity: isTransactionLocked ? 0.55 : 1 }}
-                          >
-                            <IoAddOutline className="text-[16px]" />
-                            <span>Create Remittance</span>
-                          </button>
-                        </Tooltip>
+                            setCreateRemittanceErrors({});
+                            setShowCreateRemittanceModal(true);
+                          }}
+                          disabled={isTransactionLocked}
+                          className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:hover:bg-[#1a1f36]"
+                          style={{ fontFamily: FONT, opacity: isTransactionLocked ? 0.55 : 1 }}
+                        >
+                          <IoAddOutline className="text-[16px]" />
+                          <span>Create Remittance</span>
+                        </button>
                       ) : null}
                       </>
                     }
@@ -1191,30 +1124,31 @@ const SuperCollections = ({ initialTab }) => {
                       onPageChange: requestRemittancePage,
                     }}
                   >
-                  <div className={showRemittanceSkeleton ? "overflow-hidden" : "relative overflow-x-auto"}>
-                    <table className="w-full border-collapse" style={{ minWidth: 1320 }}>
+                  <div className={showRemittanceSkeleton ? "overflow-hidden" : "relative overflow-hidden"}>
+                    <table className="w-full table-fixed border-collapse">
                       <thead>
                         <tr>
-                          <TH>Remittance Reference No.</TH>
-                          <TH>Date</TH>
-                          <TH className="w-[188px] max-w-[188px] text-right whitespace-normal leading-tight">Today's Cash Received (₱)</TH>
-                          <TH className="w-[142px] max-w-[142px] text-right whitespace-normal leading-tight">Amount to Remit (₱)</TH>
-                          <TH className="w-[124px] max-w-[124px] text-right">Surplus (₱)</TH>
-                          <TH className="w-[124px] max-w-[124px] text-right">Deficit (₱)</TH>
-                          <TH className="min-w-[220px]">Remarks</TH>
-                          <TH className="w-[92px]">Action</TH>
+                          <TH className="w-[13%] whitespace-normal px-3 leading-tight">Remittance Ref. No.</TH>
+                          <TH className="w-[10%] px-3">Date</TH>
+                          <TH className="w-[15%] px-3">Submitted By</TH>
+                          <TH className="w-[13%] whitespace-normal px-3 text-right leading-tight">Today's Collection (₱)</TH>
+                          <TH className="w-[12%] whitespace-normal px-3 text-right leading-tight">Amount to Remit (₱)</TH>
+                          <TH className="w-[9%] px-3 text-right">Surplus (₱)</TH>
+                          <TH className="w-[9%] px-3 text-right">Deficit (₱)</TH>
+                          <TH className="w-[13%] px-3">Remarks</TH>
+                          <TH className="w-[6%] px-3 text-center">Action</TH>
                         </tr>
                       </thead>
                       <tbody>
                         {showRemittanceSkeleton ? (
                           Array.from({ length: PAGE_SIZE }).map((_, index) => (
                             <tr key={`collection-remittance-skeleton-${index}`} className="animate-pulse" style={{ borderBottom: "1px solid #f1f5f9" }}>
-                              {Array.from({ length: 8 }).map((__, column) => (
-                                <td key={column} className="px-4 py-3">
-                                  {column === 7 ? (
-                                    <div className="h-8 w-8 rounded-lg bg-slate-100" />
+                              {Array.from({ length: 9 }).map((__, column) => (
+                                <td key={column} className="px-3 py-3">
+                                  {column === 8 ? (
+                                    <div className="mx-auto h-8 w-8 rounded-lg bg-slate-100" />
                                   ) : (
-                                    <div className="h-3 rounded bg-slate-100" style={{ width: column === 4 ? 90 : 120 }} />
+                                    <div className="h-3 rounded bg-slate-100" style={{ width: column === 4 ? 76 : "100%" }} />
                                   )}
                                 </td>
                               ))}
@@ -1222,7 +1156,7 @@ const SuperCollections = ({ initialTab }) => {
                           ))
                         ) : remittances.length === 0 ? (
                           <tr>
-                            <td colSpan={8}>
+                            <td colSpan={9}>
                               <NoDataFound title={debouncedRemittanceSearch ? "No results found" : "No Data Found"} />
                             </td>
                           </tr>
@@ -1236,8 +1170,8 @@ const SuperCollections = ({ initialTab }) => {
                               } ${String(highlightedRemittanceId) === String(row.remittance_id) ? "universal-search-highlight" : ""}`.trim()}
                               style={{ borderBottom: "1px solid #f1f5f9" }}
                             >
-                              <td className="px-4 py-3">
-                                <div className="flex w-fit items-center gap-2">
+                              <td className="px-3 py-3">
+                                <div className="flex min-w-0 items-center gap-2">
                                   <span
                                     className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
                                     style={{
@@ -1246,21 +1180,32 @@ const SuperCollections = ({ initialTab }) => {
                                       minHeight: 10,
                                     }}
                                   />
-                                  <span className="text-[13px] font-semibold text-[#1a1f36]">
+                                  <span className="min-w-0 truncate text-[13px] font-semibold text-[#1a1f36]" title={row.remittance_reference_no || "-"}>
                                     {row.remittance_reference_no || "-"}
                                   </span>
                                 </div>
                               </td>
-                              <td className="px-4 py-3 text-[13px] text-[#1a1f36]">{formatDisplayDate(row.date)}</td>
-                              <td className="w-[188px] max-w-[188px] px-4 py-3 text-right text-[13px] font-semibold text-[#1a1f36]">{formatMoney(getRemittanceTodayCashReceived(row))}</td>
-                              <td className="w-[142px] max-w-[142px] px-4 py-3 text-right text-[13px] font-semibold text-[#1a1f36]">{formatMoney(row.amount)}</td>
-                              <td className="w-[124px] max-w-[124px] px-4 py-3 text-right text-[13px] font-semibold text-[#1a1f36]">{formatMoney(row.surplus)}</td>
-                              <td className="w-[124px] max-w-[124px] px-4 py-3 text-right text-[13px] font-semibold text-[#1a1f36]">{formatMoney(row.deficit)}</td>
-                              <td className="min-w-[220px] px-4 py-3 text-[13px] text-[#1a1f36]">{row.remarks || "-"}</td>
-                              <td className="w-[92px] px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  {isHead ? renderRemittanceStatusAction(row) : null}
-                                  {!isHead ? renderEditRemittanceAction(row) : null}
+                              <td className="px-3 py-3 text-[13px] text-[#1a1f36]">{formatDisplayDate(row.date)}</td>
+                              <td className="px-3 py-3">
+                                <div className="truncate text-[13px] font-semibold text-[#1a1f36]" title={row.submitted_by_name || row.submitted_by_email || "-"}>
+                                  {row.submitted_by_name || row.submitted_by_email || "-"}
+                                </div>
+                                <div className="mt-1 truncate text-[11px] capitalize text-[#6F6F82]" title={row.submitted_by_role || "-"}>
+                                  {row.submitted_by_role || "-"}
+                                </div>
+                              </td>
+                              <td className="px-3 py-3 text-right text-[13px] font-semibold text-[#1a1f36]">{formatMoney(getRemittanceTodayCashReceived(row))}</td>
+                              <td className="px-3 py-3 text-right text-[13px] font-semibold text-[#1a1f36]">{formatMoney(row.amount)}</td>
+                              <td className="px-3 py-3 text-right text-[13px] font-semibold text-[#1a1f36]">{formatMoney(row.surplus)}</td>
+                              <td className="px-3 py-3 text-right text-[13px] font-semibold text-[#1a1f36]">{formatMoney(row.deficit)}</td>
+                              <td className="px-3 py-3 text-[13px] text-[#1a1f36]">
+                                <span className="block truncate" title={row.remarks || "-"}>
+                                  {row.remarks || "-"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3">
+                                <div className="flex items-center justify-center gap-2">
+                                  {canManageRemittanceRow(row) ? renderRemittanceStatusAction(row) : null}
                                 </div>
                               </td>
                             </tr>
@@ -1280,7 +1225,12 @@ const SuperCollections = ({ initialTab }) => {
                 onCancel={closeCreateRemittanceModal}
                 onSave={handleSubmitCreateRemittance}
                 saving={submitRemittanceLoading || createRemittanceMutation.isPending}
-                saveDisabled={submitRemittanceLoading || createRemittanceMutation.isPending || isTransactionLocked}
+                saveDisabled={
+                  submitRemittanceLoading ||
+                  createRemittanceMutation.isPending ||
+                  isTransactionLocked ||
+                  hasPendingInspectorRemittances
+                }
                 saveLabel="Save"
                 closeOnBackdrop={false}
                 maxWidth="680px"
@@ -1307,22 +1257,10 @@ const SuperCollections = ({ initialTab }) => {
                     icon={IoLayersOutline}
                     title="REMITTANCE DETAILS"
                     subtitle="Review today's remittance details before submitting to head."
-                    headerAction={
-                      <button
-                        type="button"
-                        aria-label="Refresh today's cash received"
-                        onClick={handleRefreshTodayCash}
-                        disabled={isRefreshingTodayCash}
-                        className="flex items-center gap-2 rounded-[10px] border border-gray-200 bg-white px-3 py-2 text-[13px] font-normal text-slate-600 transition hover:border-slate-300 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        <IoRefreshOutline className="text-[15px]" />
-                        <span>Refresh</span>
-                      </button>
-                    }
                   >
                     <div className="space-y-4">
                       <div>
-                        <RemittanceFormLabel>Today's Cash Received</RemittanceFormLabel>
+                        <RemittanceFormLabel>Today's Collection</RemittanceFormLabel>
                         <input
                           type="text"
                           value={formatPeso(previewRemittanceAmount)}
@@ -1385,6 +1323,54 @@ const SuperCollections = ({ initialTab }) => {
                         />
                         <ModalFieldError message={createRemittanceErrors.remarks} />
                       </div>
+
+                      <div className="rounded-[12px] border border-slate-200 bg-slate-50 p-4">
+                        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="m-0 text-[11px] font-semibold uppercase text-[#6F6F82]">
+                              Remittance Progress
+                            </p>
+                          </div>
+                          <p
+                            className="m-0 text-[24px] font-bold text-[#2563eb]"
+                            style={{ fontVariantNumeric: "tabular-nums" }}
+                          >
+                            {`${remittanceProgressPercentage}%`}
+                          </p>
+                        </div>
+                        <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
+                          <div
+                            className="h-full rounded-full bg-[#2563eb] transition-all"
+                            style={{ width: `${remittanceProgressPercentage}%` }}
+                          />
+                        </div>
+                        {pendingRemittanceUsers.length > 0 ? (
+                          <div className="mt-3">
+                            <div className="mb-1 flex items-center justify-between gap-3">
+                              <p className="m-0 text-[11px] font-semibold uppercase text-[#6F6F82]">
+                                Pending:
+                              </p>
+                              <p className="m-0 text-right text-[11px] font-semibold uppercase text-[#6F6F82]">
+                                {`${remittedUsersCount} of ${eligibleUsersCount} users remitted`}
+                              </p>
+                            </div>
+                            <ol className="m-0 mt-1 list-decimal space-y-1 pl-5 text-[12px] leading-5 text-slate-600">
+                              {pendingRemittanceUsers.map((user, index) => {
+                                const displayName = String(user?.name || "").trim();
+                                const displayEmail = String(user?.email || "").trim();
+                                const label = displayName || displayEmail || "Unknown user";
+
+                                return <li key={user?.user_id ?? user?.email ?? index}>{label}</li>;
+                              })}
+                            </ol>
+                          </div>
+                        ) : (
+                          <p className="m-0 mt-2 text-right text-[11px] font-semibold uppercase text-[#6F6F82]">
+                            {`${remittedUsersCount} of ${eligibleUsersCount} users remitted`}
+                          </p>
+                        )}
+                        <ModalFieldError message={createRemittanceErrors.remittance_progress} />
+                      </div>
                     </div>
                   </Card>
                 </div>
@@ -1400,54 +1386,6 @@ const SuperCollections = ({ initialTab }) => {
               }
               onClose={closeRemittanceReport}
             />
-            {editingRemittance ? (
-              <Modal
-                title="Edit Remittance"
-                onClose={closeEditRemittanceModal}
-                onSave={handleSaveEditRemittance}
-                saving={updateRemittanceMutation.isPending}
-                saveLabel="Save"
-                savingLabel=""
-                saveDisabled={updateRemittanceMutation.isPending}
-                closeOnBackdrop={false}
-              >
-                <div className="grid gap-5">
-                  <ModalTextInput
-                    label="Today's Cash Received"
-                    value={formatMoney(getRemittanceTodayCashReceived(editingRemittance))}
-                    readOnly
-                    placeholder="-"
-                    wrapperClassName="!bg-slate-100"
-                    inputClassName="cursor-default text-[#0d1117]"
-                  />
-                  <ModalTextInput
-                    label="Date"
-                    value={formatDisplayDate(editingRemittance?.date)}
-                    readOnly
-                    placeholder="-"
-                    wrapperClassName="!bg-slate-100"
-                    inputClassName="cursor-default text-[#0d1117]"
-                  />
-                  <div>
-                    <p className="m-0 mb-2 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>
-                      Remarks
-                    </p>
-                    <textarea
-                      value={editRemittanceForm.remarks}
-                      onChange={(event) => {
-                        setEditRemittanceForm((current) => ({ ...current, remarks: event.target.value }));
-                        setEditRemittanceErrors((current) => ({ ...current, remarks: "" }));
-                      }}
-                      rows={4}
-                      placeholder="Add remittance remarks"
-                      className={`min-h-[96px] w-full resize-none rounded-xl border px-3.5 py-3 text-[13px] outline-none ${editRemittanceErrors.remarks ? "border-red-300" : "border-slate-200 focus:border-[#4096ff]"}`}
-                      style={{ fontFamily: FONT, color: "#0d1117" }}
-                    />
-                    <ModalFieldError message={editRemittanceErrors.remarks} />
-                  </div>
-                </div>
-              </Modal>
-            ) : null}
           </div>
         </main>
       </div>

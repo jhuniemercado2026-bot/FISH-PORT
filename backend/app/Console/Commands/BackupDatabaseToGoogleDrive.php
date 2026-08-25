@@ -23,6 +23,7 @@ class BackupDatabaseToGoogleDrive extends Command
         $prefix = config('backup.database.filename_prefix', 'database_backup');
         $folderId = config('backup.google_drive.folder_id');
         $credentialsPath = $this->absolutePath(config('backup.google_drive.credentials_path'));
+        $localBackupPath = null;
         $hasOAuthCredentials = config('backup.google_drive.client_id')
             && config('backup.google_drive.client_secret')
             && config('backup.google_drive.refresh_token');
@@ -48,30 +49,39 @@ class BackupDatabaseToGoogleDrive extends Command
             $this->info("Creating SQL backup: {$filename}");
             $this->writeDatabaseDump($connectionName, $backupPath);
 
+            if ($keepLocal) {
+                File::ensureDirectoryExists($localPath);
+
+                $localBackupPath = rtrim($localPath, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$filename;
+
+                if (! File::copy($backupPath, $localBackupPath)) {
+                    throw new RuntimeException("Unable to save local backup: {$localBackupPath}");
+                }
+
+                $this->info("Local backup saved: {$localBackupPath}");
+            }
+
             $this->info('Uploading backup to Google Drive...');
             $uploaded = $this->uploadToGoogleDrive($credentialsPath, $folderId, $backupPath, $filename);
 
             $this->info('Backup uploaded to Google Drive.');
             $this->line('File ID: '.$uploaded['id']);
 
-            if ($keepLocal) {
-                File::ensureDirectoryExists($localPath);
-
-                $localBackupPath = rtrim($localPath, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$filename;
-                File::move($backupPath, $localBackupPath);
-                $this->info("Local backup saved: {$localBackupPath}");
-            } else {
-                File::delete($backupPath);
-                $this->info('Temporary local backup deleted.');
-            }
+            File::delete($backupPath);
+            $this->info('Temporary local backup deleted.');
 
             return self::SUCCESS;
         } catch (\Throwable $exception) {
-            if (! $keepLocal && File::exists($backupPath)) {
+            if (File::exists($backupPath)) {
                 File::delete($backupPath);
             }
 
             report($exception);
+
+            if ($localBackupPath && File::exists($localBackupPath)) {
+                $this->warn("Local backup was saved, but Google Drive upload failed: {$localBackupPath}");
+            }
+
             $this->error($exception->getMessage());
 
             return self::FAILURE;
@@ -203,9 +213,12 @@ class BackupDatabaseToGoogleDrive extends Command
         $body .= "--{$boundary}--";
 
         $response = Http::withToken($accessToken)
+            ->connectTimeout(15)
+            ->timeout(120)
+            ->retry(2, 1000)
             ->withHeaders(['Content-Type' => "multipart/related; boundary={$boundary}"])
             ->withBody($body, "multipart/related; boundary={$boundary}")
-            ->post('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink');
+            ->post('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,webViewLink');
 
         if (! $response->successful()) {
             throw new RuntimeException('Google Drive upload failed: '.$response->body());
@@ -221,7 +234,17 @@ class BackupDatabaseToGoogleDrive extends Command
             && config('backup.google_drive.client_secret')
             && config('backup.google_drive.refresh_token')
         ) {
-            return $this->getGoogleAccessTokenFromRefreshToken();
+            try {
+                return $this->getGoogleAccessTokenFromRefreshToken();
+            } catch (\Throwable $exception) {
+                if ($credentialsPath && File::exists($credentialsPath)) {
+                    $this->warn('Google Drive OAuth refresh failed; trying service account credentials.');
+
+                    return $this->getGoogleAccessTokenFromServiceAccount($credentialsPath);
+                }
+
+                throw $exception;
+            }
         }
 
         if (! $credentialsPath) {
@@ -233,12 +256,15 @@ class BackupDatabaseToGoogleDrive extends Command
 
     private function getGoogleAccessTokenFromRefreshToken(): string
     {
-        $response = Http::asForm()->post('https://oauth2.googleapis.com/token', [
-            'client_id' => config('backup.google_drive.client_id'),
-            'client_secret' => config('backup.google_drive.client_secret'),
-            'refresh_token' => config('backup.google_drive.refresh_token'),
-            'grant_type' => 'refresh_token',
-        ]);
+        $response = Http::asForm()
+            ->connectTimeout(15)
+            ->timeout(60)
+            ->post('https://oauth2.googleapis.com/token', [
+                'client_id' => config('backup.google_drive.client_id'),
+                'client_secret' => config('backup.google_drive.client_secret'),
+                'refresh_token' => config('backup.google_drive.refresh_token'),
+                'grant_type' => 'refresh_token',
+            ]);
 
         if (! $response->successful()) {
             throw new RuntimeException('Google Drive OAuth refresh failed: '.$response->body());
@@ -282,10 +308,13 @@ class BackupDatabaseToGoogleDrive extends Command
 
         $jwt = $unsignedJwt.'.'.$this->base64UrlEncode($signature);
 
-        $response = Http::asForm()->post($tokenUri, [
-            'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-            'assertion' => $jwt,
-        ]);
+        $response = Http::asForm()
+            ->connectTimeout(15)
+            ->timeout(60)
+            ->post($tokenUri, [
+                'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                'assertion' => $jwt,
+            ]);
 
         if (! $response->successful()) {
             throw new RuntimeException('Google Drive authentication failed: '.$response->body());

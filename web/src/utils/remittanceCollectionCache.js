@@ -3,24 +3,24 @@ const normalizeDateOnly = (value) => {
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
 };
 
-export const invalidateTodaySystemCashReceived = (queryClient, date) => {
+export const invalidateTodayCollection = (queryClient, date) => {
   const normalizedDate = normalizeDateOnly(date);
 
   void queryClient.invalidateQueries({
     queryKey: normalizedDate
-      ? ["today-system-cash-received", { date: normalizedDate }]
-      : ["today-system-cash-received"],
+      ? ["today-collection", { date: normalizedDate }]
+      : ["today-collection"],
     refetchType: "active",
   });
 };
 
-export const adjustTodaySystemCashReceived = (queryClient, date, delta) => {
+export const adjustTodayCollection = (queryClient, date, delta) => {
   const normalizedDate = normalizeDateOnly(date);
   const numericDelta = Number(delta || 0);
 
   if (!normalizedDate || !numericDelta) return;
 
-  queryClient.setQueryData(["today-system-cash-received", { date: normalizedDate }], (previous) => ({
+  queryClient.setQueryData(["today-collection", { date: normalizedDate }], (previous) => ({
     ...(previous ?? {}),
     date: normalizedDate,
     amount: Number(previous?.amount || 0) + numericDelta,

@@ -11,5 +11,11 @@ export const getActiveTransactionLock = (transactionLock) => {
   return transactionLock;
 };
 
+const normalizeTransactionLockMessage = (message) =>
+  String(message || "")
+    .replace(/\s+for coordinators and inspectors(?=\s+until)/i, "")
+    .trim();
+
 export const getTransactionLockMessage = (transactionLock) =>
-  getActiveTransactionLock(transactionLock)?.message || "Transactions are temporarily view-only.";
+  normalizeTransactionLockMessage(getActiveTransactionLock(transactionLock)?.message) ||
+  "Transactions are view-only.";

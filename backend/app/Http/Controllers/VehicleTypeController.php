@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MasterDataUpdated;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -203,12 +204,16 @@ class VehicleTypeController extends Controller
             user: Auth::user()
         );
 
-        return response()->json($this->transformVehicleType($vehicleType), 201);
+        $payload = $this->transformVehicleType($vehicleType);
+        broadcast(new MasterDataUpdated('vehicle_types', 'created', $payload));
+
+        return response()->json($payload, 201);
     }
 
     public function update(Request $request, $id)
     {
         $vehicleType = VehicleType::findOrFail($id);
+        $previousTypeName = $vehicleType->type_name;
 
         $validated = $request->validate([
             'type_name' => 'required|string|max:100|unique:vehicle_types,type_name,' . $id . ',vehicle_type_id',
@@ -237,11 +242,14 @@ class VehicleTypeController extends Controller
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Vehicle Tickets',
-            details: 'Updated vehicle type "' . $vehicleType->type_name . '".',
+            details: 'Updated vehicle type "' . $vehicleType->type_name . '" in type name from "' . $previousTypeName . '" to "' . $vehicleType->type_name . '".',
             user: Auth::user()
         );
 
-        return response()->json($this->transformVehicleType($vehicleType));
+        $payload = $this->transformVehicleType($vehicleType);
+        broadcast(new MasterDataUpdated('vehicle_types', 'updated', $payload));
+
+        return response()->json($payload);
     }
 
     public function destroy($id)
@@ -256,6 +264,8 @@ class VehicleTypeController extends Controller
             details: 'Archived vehicle type "' . $vehicleType->type_name . '".',
             user: Auth::user()
         );
+
+        broadcast(new MasterDataUpdated('vehicle_types', 'archived', ['vehicle_type_id' => $vehicleType->vehicle_type_id]));
 
         return response()->json(['message' => 'Vehicle type archived successfully.']);
     }
@@ -276,9 +286,12 @@ class VehicleTypeController extends Controller
             user: Auth::user()
         );
 
+        $payload = $this->transformVehicleType($vehicleType);
+        broadcast(new MasterDataUpdated('vehicle_types', 'restored', $payload));
+
         return response()->json([
             'message' => 'Vehicle type restored successfully.',
-            'vehicle_type' => $this->transformVehicleType($vehicleType),
+            'vehicle_type' => $payload,
         ]);
     }
 }

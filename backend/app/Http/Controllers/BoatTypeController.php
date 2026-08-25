@@ -100,7 +100,7 @@ class BoatTypeController extends Controller
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Boat Management',
-            details: 'Updated boat type "' . $previousTypeName . '" to "' . $boatType->type_name . '".',
+            details: 'Updated boat type "' . $boatType->type_name . '" in type name from "' . $previousTypeName . '" to "' . $boatType->type_name . '".',
             user: Auth::user()
         );
 

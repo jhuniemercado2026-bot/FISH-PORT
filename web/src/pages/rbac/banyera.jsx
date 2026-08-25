@@ -43,6 +43,8 @@ import api from "../../api/axios";
 import { useBanyeraDataQuery, useBanyeraLookupsQuery, useFishClassificationsDataQuery } from "../../hooks/useBanyeraDataQuery";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
+import { isHeadRole } from "../../utils/transactionLock";
+import { cacheTab, getCachedTab } from "../../utils/tabSession";
 import {
   removeBanyeraFishClassificationFromCache,
   updateBanyeraStatsInCache,
@@ -65,6 +67,8 @@ const BANYERA_TABS = [
   { key: "transactions",     label: "Banyera Transactions", icon: IoFishOutline    },
   { key: "classifications",  label: "Fish Classifications",  icon: IoListOutline   },
 ];
+const BANYERA_TAB_STORAGE_KEY = "opol:banyera:active-tab";
+const BANYERA_TAB_KEYS = BANYERA_TABS.map((tab) => tab.key);
 
 const MONTH_OPTIONS = [
   { value: "01", label: "January" },
@@ -112,7 +116,7 @@ const BANYERA_STATUS_LEGEND = [
 const VOID_REASON_OPTIONS = [
   { value: "duplicate-entry", label: "Entered by mistake" },
   { value: "wrong-boat", label: "Wrong boat selected" },
-  { value: "wrong-date", label: "Wrong date" },
+  { value: "wrong-date", label: "Wrong date or time" },
   { value: "others", label: "Others" },
 ];
 
@@ -481,7 +485,14 @@ const formatTime = (value) => {
   return new Date(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute).toLocaleTimeString("en-PH", {
     hour: "numeric",
     minute: "2-digit",
-  });
+  }).replace(/\b(am|pm)\b/i, (value) => value.toUpperCase());
+};
+
+const formatDateTime = (value) => {
+  const dateText = formatDate(value);
+  const timeText = formatTime(value);
+  if (dateText === "-") return "-";
+  return timeText === "-" ? dateText : `${dateText} at ${timeText}`;
 };
 
 const getManilaDateFromValue = (value) => {
@@ -682,25 +693,16 @@ const VoidBanyeraModal = ({
           inputStyle={{ color: "#475569" }}
         />
         <ModalInput
-          label="Date"
+          label="Banyera Date & Time"
           icon={IoCalendarOutline}
-          value={formatDate(tx.transaction_date)}
+          value={formatDateTime(tx.transaction_date)}
           readOnly
           disabled
           wrapperClassName="!bg-slate-100"
           inputStyle={{ color: "#475569" }}
         />
         <ModalInput
-          label="Time"
-          icon={IoCalendarOutline}
-          value={formatTime(tx.transaction_date)}
-          readOnly
-          disabled
-          wrapperClassName="!bg-slate-100"
-          inputStyle={{ color: "#475569" }}
-        />
-        <ModalInput
-          label="Total"
+          label="Total Fee"
           icon={IoCashOutline}
           value={`${PESO}${formatAmount(getTransactionTotalFee(tx))}`}
           readOnly
@@ -738,6 +740,7 @@ const VoidBanyeraModal = ({
 // AddBanyeraModal
 const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [], classifications = [], isLookupsLoading = false }) => {
   const todayStr = getManilaDateString();
+  const hasManualTimeRef = useRef(false);
   const buildInitialFormState = useCallback(() => {
     const sourceDate = getManilaDateString();
     const sourceTimeParts = getTimePartsFromTwentyFourHourValue(getManilaTimeString());
@@ -789,10 +792,40 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
 
   useEffect(() => {
     if (!open) return;
+    hasManualTimeRef.current = false;
     setForm(buildInitialFormState());
     setItems([{ classification_id: "", quantity: "", daug: "" }]);
     setErrors({});
   }, [open, buildInitialFormState]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const syncCurrentTime = () => {
+      if (hasManualTimeRef.current) return;
+      const currentTime = getTimePartsFromTwentyFourHourValue(getManilaTimeString());
+      setForm((current) => {
+        if (
+          current.banyera_time_hour === currentTime.hour &&
+          current.banyera_time_minute === currentTime.minute &&
+          current.banyera_time_meridiem === currentTime.meridiem
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          banyera_time_hour: currentTime.hour,
+          banyera_time_minute: currentTime.minute,
+          banyera_time_meridiem: currentTime.meridiem,
+        };
+      });
+    };
+
+    syncCurrentTime();
+    const intervalId = window.setInterval(syncCurrentTime, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [open]);
 
   useEffect(() => {
     if (!selectedBoat) {
@@ -932,7 +965,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
             icon={IoLayersOutline}
             readOnly
             value={selectedBoat?.boat_type?.type_name || selectedBoat?.boatType?.type_name || ""}
-            placeholder="-"
+            placeholder="Auto-filled after selecting a boat"
             wrapperClassName="!bg-slate-100"
           />
         </div>
@@ -943,7 +976,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
             icon={IoPersonOutline}
             readOnly
             value={selectedBoat?.owner?.full_name || selectedBoat?.owner_name || ""}
-            placeholder="-"
+            placeholder="Auto-filled after selecting a boat"
             wrapperClassName="!bg-slate-100"
           />
 
@@ -984,6 +1017,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
             <TimePicker
               value={getTimeValueFromParts(form.banyera_time_hour, form.banyera_time_minute, form.banyera_time_meridiem)}
               onChange={(_, timeValue) => {
+                hasManualTimeRef.current = true;
                 setForm((current) => applyTimeValueToBanyeraForm(current, timeValue));
                 setErrors((current) => ({ ...current, banyera_time: "" }));
               }}
@@ -1304,7 +1338,9 @@ const SuperBanyera = () => {
     dismissedClassificationHighlightToken === classificationHighlightToken ? "" : rawHighlightedClassificationId;
   const activeTab = location.pathname === "/fish-classification" || queryTab === "classifications"
     ? "classifications"
-    : "transactions";
+    : location.pathname === "/banyera"
+      ? getCachedTab(BANYERA_TAB_STORAGE_KEY, BANYERA_TAB_KEYS, "transactions")
+      : "transactions";
   const getBanyeraTabPath = (key) => (key === "classifications" ? "/fish-classification" : "/banyera");
   const getBanyeraBreadcrumbLabel = (tab) => (tab === "classifications" ? "Fish Classifications" : "Banyera");
   const clearUniversalHighlight = useCallback(() => {
@@ -1351,6 +1387,17 @@ const SuperBanyera = () => {
     }
   }, [location.search, location.state, navigate, queryTab]);
 
+  useEffect(() => {
+    cacheTab(BANYERA_TAB_STORAGE_KEY, activeTab, BANYERA_TAB_KEYS);
+
+    if (location.pathname === "/banyera" && activeTab === "classifications") {
+      navigate(
+        { pathname: "/fish-classification", search: location.search },
+        { replace: true, state: location.state }
+      );
+    }
+  }, [activeTab, location.pathname, location.search, location.state, navigate]);
+
   const [activeItem, setActiveItem]   = useState("Banyera");
   const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 1024 ? 256 : 0));
   const [showAddModal, setShowAddModal]   = useState(false);
@@ -1377,6 +1424,7 @@ const SuperBanyera = () => {
   const [voidReasonError, setVoidReasonError] = useState("");
   const didRunTransactionFilterResetRef = useRef(false);
   const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const isHeadViewOnly = isHeadRole();
   const debouncedSearch = useDebouncedValue(search, 350);
   const debouncedPage = useDebouncedValue(currentPage, 180);
 
@@ -1439,7 +1487,7 @@ const SuperBanyera = () => {
     enabled: activeTab === "classifications",
   });
 
-  const { data: lookupData, isLoading: isLookupsLoading } = useBanyeraLookupsQuery({ enabled: showAddModal || Boolean(editingTx) });
+  const { data: lookupData, isLoading: isLookupsLoading } = useBanyeraLookupsQuery({ enabled: !isHeadViewOnly && (showAddModal || Boolean(editingTx)) });
 
   const transactions    = data?.transactions    ?? [];
   const transactionsMeta = data?.transactionsMeta ?? {
@@ -1492,6 +1540,9 @@ const SuperBanyera = () => {
   // Create mutation
   const createMutation = useMutation({
     mutationFn: async ({ payload }) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked || isDateLocked(payload?.transaction_date ?? getManilaDateString())) {
         throw new Error(transactionLockMessage);
       }
@@ -1517,6 +1568,7 @@ const SuperBanyera = () => {
   });
 
   const updateTransaction = async ({ payload }) => {
+    if (isHeadViewOnly) return;
     if (!editingTx?.banyera_id) return;
     if (isTransactionLocked || isDateLocked(payload?.transaction_date ?? editingTx?.transaction_date)) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
@@ -1589,6 +1641,9 @@ const SuperBanyera = () => {
 
   const voidTransactionMutation = useMutation({
     mutationFn: async ({ transactionId, void_reason }) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked) {
         throw new Error(transactionLockMessage);
       }
@@ -1620,6 +1675,9 @@ const SuperBanyera = () => {
 
   const restoreTransactionMutation = useMutation({
     mutationFn: async (transactionId) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked) {
         throw new Error(transactionLockMessage);
       }
@@ -1646,7 +1704,12 @@ const SuperBanyera = () => {
   });
 
   const addFishMutation = useMutation({
-    mutationFn: (payload) => api.post("/fish-classifications", payload),
+    mutationFn: (payload) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
+      return api.post("/fish-classifications", payload);
+    },
     onSuccess: (response) => {
       upsertBanyeraFishClassificationInCache(queryClient, response?.data);
       setShowAddFishModal(false);
@@ -1666,7 +1729,12 @@ const SuperBanyera = () => {
   });
 
   const updateFishMutation = useMutation({
-    mutationFn: ({ id, payload }) => api.put(`/fish-classifications/${id}`, payload),
+    mutationFn: ({ id, payload }) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
+      return api.put(`/fish-classifications/${id}`, payload);
+    },
     onSuccess: (response) => {
       upsertBanyeraFishClassificationInCache(queryClient, response?.data);
       setShowAddFishModal(false);
@@ -1687,7 +1755,12 @@ const SuperBanyera = () => {
   });
 
   const deleteFishMutation = useMutation({
-    mutationFn: (id) => api.delete(`/fish-classifications/${id}`),
+    mutationFn: (id) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
+      return api.delete(`/fish-classifications/${id}`);
+    },
     onMutate: (id) => setDeletingFishId(id),
     onSuccess: (_response, id) => {
       removeBanyeraFishClassificationFromCache(queryClient, id);
@@ -1801,6 +1874,8 @@ const SuperBanyera = () => {
   }, [currentPage, totalPages]);
 
   const openVoidTransaction = (tx) => {
+    if (isHeadViewOnly) return;
+
     if (isDateLocked(tx?.transaction_date)) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -1870,6 +1945,8 @@ const SuperBanyera = () => {
     ));
 
   const handleAddFish = () => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -2015,6 +2092,7 @@ const SuperBanyera = () => {
                 tabs={BANYERA_TABS}
                 activeKey={activeTab}
                 onTabChange={(key) => {
+                  cacheTab(BANYERA_TAB_STORAGE_KEY, key, BANYERA_TAB_KEYS);
                   navigate(getBanyeraTabPath(key));
                   setCurrentPage(1);
                   setSearch("");
@@ -2031,7 +2109,7 @@ const SuperBanyera = () => {
                   title="Banyera Records"
                   subtitle="All banyera records in the system"
                   loading={showTransactionSkeleton}
-                  headerActionsSkeletonCount={4}
+                  headerActionsSkeletonCount={isHeadViewOnly ? 3 : 4}
                   bodyClassName="overflow-x-auto"
                   style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}
                   actions={
@@ -2082,14 +2160,16 @@ const SuperBanyera = () => {
                         options={STATUS_OPTIONS}
                         height={42}
                       />
-                      <button
-                        onClick={() => { if (!isTransactionLocked) setShowAddModal(true); }}
-                        disabled={isTransactionLocked}
-                        className="flex h-[42px] items-center gap-2 rounded-xl border-none px-5 text-[13px] font-semibold text-white cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
-                        style={{ fontFamily: FONT, backgroundColor: "#1a1f36" }}
-                      >
-                        <IoAddOutline className="text-[16px]" /> Add Banyera
-                      </button>
+                      {!isHeadViewOnly ? (
+                        <button
+                          onClick={() => { if (!isTransactionLocked) setShowAddModal(true); }}
+                          disabled={isTransactionLocked}
+                          className="flex h-[42px] items-center gap-2 rounded-xl border-none px-5 text-[13px] font-semibold text-white cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
+                          style={{ fontFamily: FONT, backgroundColor: "#1a1f36" }}
+                        >
+                          <IoAddOutline className="text-[16px]" /> Add Banyera
+                        </button>
+                      ) : null}
                     </>
                   }
                   pagination={{
@@ -2115,7 +2195,7 @@ const SuperBanyera = () => {
                           <TH>Total Quantity</TH>
                           <TH><div className="text-right">Total(₱)</div></TH>
                           <TH>Voided Reason</TH>
-                          <TH>Action</TH>
+                          {!isHeadViewOnly ? <TH>Action</TH> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -2130,13 +2210,12 @@ const SuperBanyera = () => {
                               <td className="px-4 py-3"><div className="h-3 w-16 rounded bg-slate-100" /></td>
                               <td className="px-4 py-3"><div className="h-3 w-20 rounded bg-slate-100" /></td>
                               <td className="px-4 py-3"><div className="h-3 w-20 rounded bg-slate-100" /></td>
-                              <td className="px-4 py-3"><div className="h-3 w-28 rounded bg-slate-100" /></td>
-                              <td className="px-4 py-3"><div className="flex gap-2"><div className="h-8 w-8 rounded-lg bg-slate-100" /><div className="h-8 w-8 rounded-lg bg-slate-100" /></div></td>
+                              {!isHeadViewOnly ? <td className="px-4 py-3"><div className="flex gap-2"><div className="h-8 w-8 rounded-lg bg-slate-100" /><div className="h-8 w-8 rounded-lg bg-slate-100" /></div></td> : null}
                             </tr>
                           ))
                         ) : isError ? (
                           <tr>
-                            <td colSpan={9} className="px-4 py-10 text-center">
+                            <td colSpan={isHeadViewOnly ? 8 : 9} className="px-4 py-10 text-center">
                               <div className="flex flex-col items-center gap-3">
                                 <IoWarningOutline className="text-[32px] text-red-400" />
                                 <p className="m-0 text-[13px] font-normal text-red-500">Unable to load banyera transactions.</p>
@@ -2152,7 +2231,7 @@ const SuperBanyera = () => {
                           </tr>
                         ) : showTransactionEmptyState ? (
                           <tr>
-                            <td colSpan={9}>
+                            <td colSpan={isHeadViewOnly ? 8 : 9}>
                               <NoDataFound title={search ? "No results found" : "No Data Found"} />
                             </td>
                           </tr>
@@ -2246,55 +2325,57 @@ const SuperBanyera = () => {
                                     {tx?.void_reason || "-"}
                                   </span>
                                 </td>
-                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                  <div className="flex items-center gap-2">
-                                    {!isVoided ? (
-                                      <Tooltip title={isTransactionLocked || isLocked ? transactionLockMessage : "Edit"}>
+                                {!isHeadViewOnly ? (
+                                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                    <div className="flex items-center gap-2">
+                                      {!isVoided ? (
+                                        <Tooltip title={isTransactionLocked || isLocked ? transactionLockMessage : "Edit"}>
+                                          <button
+                                            onClick={() => {
+                                              if (!isTransactionLocked && !isLocked) setEditingTx(tx);
+                                            }}
+                                            disabled={isTransactionLocked || isLocked}
+                                            className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
+                                              isTransactionLocked || isLocked
+                                                ? "cursor-not-allowed border-slate-200"
+                                                : "cursor-pointer hover:bg-blue-50"
+                                            }`}
+                                            style={{ borderColor: isTransactionLocked || isLocked ? undefined : "#1a1f36" }}
+                                          >
+                                            <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked || isLocked ? "#94a3b8" : "#1a1f36" }} />
+                                          </button>
+                                        </Tooltip>
+                                      ) : null}
+                                      <Tooltip title={voidTooltip}>
                                         <button
                                           onClick={() => {
-                                            if (!isTransactionLocked && !isLocked) setEditingTx(tx);
+                                            if (voidDisabled) return;
+                                            if (isVoided) {
+                                              restoreTransactionMutation.mutate(tx.banyera_id);
+                                              return;
+                                            }
+                                            openVoidTransaction(tx);
                                           }}
-                                          disabled={isTransactionLocked || isLocked}
+                                          disabled={voidDisabled}
                                           className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
-                                            isTransactionLocked || isLocked
+                                            voidDisabled
                                               ? "cursor-not-allowed border-slate-200"
-                                              : "cursor-pointer hover:bg-blue-50"
+                                              : isVoided
+                                                ? "cursor-pointer hover:bg-emerald-50"
+                                                : "cursor-pointer hover:bg-amber-50"
                                           }`}
-                                          style={{ borderColor: isTransactionLocked || isLocked ? undefined : "#1a1f36" }}
+                                          style={{ borderColor: voidDisabled ? undefined : isVoided ? "#10b981" : "#f59e0b" }}
                                         >
-                                          <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked || isLocked ? "#94a3b8" : "#1a1f36" }} />
+                                          {isVoided ? (
+                                            <IoReloadOutline style={{ fontSize: "16px", color: "#10b981" }} />
+                                          ) : (
+                                            <IoCloseOutline style={{ fontSize: "16px", color: "#f59e0b" }} />
+                                          )}
                                         </button>
                                       </Tooltip>
-                                    ) : null}
-                                    <Tooltip title={voidTooltip}>
-                                      <button
-                                        onClick={() => {
-                                          if (voidDisabled) return;
-                                          if (isVoided) {
-                                            restoreTransactionMutation.mutate(tx.banyera_id);
-                                            return;
-                                          }
-                                          openVoidTransaction(tx);
-                                        }}
-                                        disabled={voidDisabled}
-                                        className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
-                                          voidDisabled
-                                            ? "cursor-not-allowed border-slate-200"
-                                            : isVoided
-                                              ? "cursor-pointer hover:bg-emerald-50"
-                                              : "cursor-pointer hover:bg-amber-50"
-                                        }`}
-                                        style={{ borderColor: voidDisabled ? undefined : isVoided ? "#10b981" : "#f59e0b" }}
-                                      >
-                                        {isVoided ? (
-                                          <IoReloadOutline style={{ fontSize: "16px", color: "#10b981" }} />
-                                        ) : (
-                                          <IoCloseOutline style={{ fontSize: "16px", color: "#f59e0b" }} />
-                                        )}
-                                      </button>
-                                    </Tooltip>
-                                  </div>
-                                </td>
+                                    </div>
+                                  </td>
+                                ) : null}
                               </tr>
                             );
                           })
@@ -2312,7 +2393,7 @@ const SuperBanyera = () => {
                   title="Fish Classifications"
                   subtitle="Manage fish names and monitor where they are used."
                   loading={showClassificationSkeleton}
-                  headerActionsSkeletonCount={3}
+                  headerActionsSkeletonCount={isHeadViewOnly ? 2 : 3}
                   bodyClassName="overflow-x-auto"
                   style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}
                   actions={
@@ -2353,20 +2434,22 @@ const SuperBanyera = () => {
                         options={FISH_STATUS_OPTIONS}
                         height={42}
                       />
-                      <button
-                        onClick={() => {
-                          if (isTransactionLocked) return;
-                          setEditingFish(null);
-                          setFishName("");
-                          setFishNameError("");
-                          setShowAddFishModal(true);
-                        }}
-                        disabled={isTransactionLocked}
-                        className="flex h-[42px] items-center justify-center gap-2 rounded-xl border-none bg-[#1a1f36] px-5 text-[13px] font-semibold text-white cursor-pointer hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
-                        style={{ fontFamily: FONT }}
-                      >
-                        <IoAddOutline className="text-[16px]" /> Add Fish
-                      </button>
+                      {!isHeadViewOnly ? (
+                        <button
+                          onClick={() => {
+                            if (isTransactionLocked) return;
+                            setEditingFish(null);
+                            setFishName("");
+                            setFishNameError("");
+                            setShowAddFishModal(true);
+                          }}
+                          disabled={isTransactionLocked}
+                          className="flex h-[42px] items-center justify-center gap-2 rounded-xl border-none bg-[#1a1f36] px-5 text-[13px] font-semibold text-white cursor-pointer hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
+                          style={{ fontFamily: FONT }}
+                        >
+                          <IoAddOutline className="text-[16px]" /> Add Fish
+                        </button>
+                      ) : null}
                     </>
                   }
                   pagination={{
@@ -2381,12 +2464,17 @@ const SuperBanyera = () => {
                   }}
                 >
                   <div className="overflow-x-auto">
-                    <table className="w-full border-collapse" style={{ minWidth: 540 }}>
+                    <table className="w-full border-collapse" style={{ minWidth: isHeadViewOnly ? 440 : 540 }}>
+                      <colgroup>
+                        <col style={{ width: isHeadViewOnly ? "68%" : "56%" }} />
+                        <col style={{ width: isHeadViewOnly ? "32%" : "24%" }} />
+                        {!isHeadViewOnly ? <col style={{ width: "20%" }} /> : null}
+                      </colgroup>
                       <thead>
                         <tr style={{ backgroundColor: "#ffffff" }}>
                           <TH>Fish Name</TH>
-                          <TH>Usage Count</TH>
-                          <TH>Action</TH>
+                          <TH><div className="text-center">Usage Count</div></TH>
+                          {!isHeadViewOnly ? <TH>Action</TH> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -2394,13 +2482,13 @@ const SuperBanyera = () => {
                           Array.from({ length: PAGE_SIZE }).map((_, index) => (
                             <tr key={index} className="animate-pulse" style={{ borderBottom: "1px solid #f1f5f9" }}>
                               <td className="px-4 py-3"><div className="h-3 w-32 rounded bg-slate-100" /></td>
-                              <td className="px-4 py-3"><div className="h-6 w-20 rounded-full bg-slate-100" /></td>
-                              <td className="px-4 py-3"><div className="flex gap-2"><div className="h-8 w-8 rounded-lg bg-slate-100" /><div className="h-8 w-8 rounded-lg bg-slate-100" /></div></td>
+                              <td className="px-4 py-3"><div className="mx-auto h-6 w-20 rounded-full bg-slate-100" /></td>
+                              {!isHeadViewOnly ? <td className="px-4 py-3"><div className="flex gap-2"><div className="h-8 w-8 rounded-lg bg-slate-100" /><div className="h-8 w-8 rounded-lg bg-slate-100" /></div></td> : null}
                             </tr>
                           ))
                         ) : isClassificationsError ? (
                           <tr>
-                            <td colSpan={3} className="px-4 py-10 text-center">
+                            <td colSpan={isHeadViewOnly ? 2 : 3} className="px-4 py-10 text-center">
                               <div className="flex flex-col items-center gap-3">
                                 <IoWarningOutline className="text-[32px] text-red-400" />
                                 <p className="m-0 text-[13px] font-normal text-red-500">Unable to load classifications.</p>
@@ -2416,7 +2504,7 @@ const SuperBanyera = () => {
                           </tr>
                         ) : showClassificationEmptyState ? (
                           <tr>
-                            <td colSpan={3}>
+                            <td colSpan={isHeadViewOnly ? 2 : 3}>
                               <NoDataFound title={search || fishStatusFilter !== "all" ? "No results found" : "No Data Found"} />
                             </td>
                           </tr>
@@ -2432,52 +2520,54 @@ const SuperBanyera = () => {
                               }}
                             >
                               <td className="px-4 py-3 text-[13px] font-normal text-slate-800">{cls.classification_name}</td>
-                              <td className="px-4 py-3">
+                              <td className="px-4 py-3 text-center">
                                 <StatusPill
                                   status={(cls.fish_using_count ?? 0) > 0 ? "enabled" : "disabled"}
                                   label={`${cls.fish_using_count ?? 0} ${(cls.fish_using_count ?? 0) <= 1 ? "count" : "counts"}`}
                                   className="text-[13px]"
                                 />
                               </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (isTransactionLocked) return;
-                                        setEditingFish(cls);
-                                        setFishName(cls.classification_name ?? "");
-                                        setFishNameError("");
-                                        setShowAddFishModal(true);
-                                      }}
-                                      disabled={isTransactionLocked}
-                                      className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${isTransactionLocked ? "cursor-not-allowed border-slate-200" : "hover:bg-blue-50"}`}
-                                      style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}
+                              {!isHeadViewOnly ? (
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (isTransactionLocked) return;
+                                          setEditingFish(cls);
+                                          setFishName(cls.classification_name ?? "");
+                                          setFishNameError("");
+                                          setShowAddFishModal(true);
+                                        }}
+                                        disabled={isTransactionLocked}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${isTransactionLocked ? "cursor-not-allowed border-slate-200" : "hover:bg-blue-50"}`}
+                                        style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}
+                                        >
+                                          <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
+                                        </button>
+                                    </Tooltip>
+                                    <Tooltip title={isTransactionLocked ? transactionLockMessage : "Archive"}>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (isTransactionLocked) return;
+                                          setDeletingFish(cls);
+                                        }}
+                                        disabled={isTransactionLocked || deletingFishId === cls.classification_id}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
+                                          isTransactionLocked || deletingFishId === cls.classification_id
+                                            ? "cursor-not-allowed border-slate-200"
+                                            : "cursor-pointer hover:bg-red-50"
+                                        }`}
+                                        style={{ borderColor: isTransactionLocked || deletingFishId === cls.classification_id ? undefined : "#ef4444" }}
                                       >
-                                        <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
+                                        <IoArchiveOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#ef4444" }} />
                                       </button>
-                                  </Tooltip>
-                                  <Tooltip title={isTransactionLocked ? transactionLockMessage : "Archive"}>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (isTransactionLocked) return;
-                                        setDeletingFish(cls);
-                                      }}
-                                      disabled={isTransactionLocked || deletingFishId === cls.classification_id}
-                                      className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
-                                        isTransactionLocked || deletingFishId === cls.classification_id
-                                          ? "cursor-not-allowed border-slate-200"
-                                          : "cursor-pointer hover:bg-red-50"
-                                      }`}
-                                      style={{ borderColor: isTransactionLocked || deletingFishId === cls.classification_id ? undefined : "#ef4444" }}
-                                    >
-                                      <IoArchiveOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#ef4444" }} />
-                                    </button>
-                                  </Tooltip>
-                                </div>
-                              </td>
+                                    </Tooltip>
+                                  </div>
+                                </td>
+                              ) : null}
                             </tr>
                           ))
                         )}
@@ -2495,7 +2585,7 @@ const SuperBanyera = () => {
       </div>
 
       {/* Modals */}
-      <AddBanyeraModal
+      {!isHeadViewOnly ? <AddBanyeraModal
         open={showAddModal}
         onClose={() => {
           setShowAddModal(false);
@@ -2507,8 +2597,8 @@ const SuperBanyera = () => {
         fees={fees}
         classifications={classifications}
         isLookupsLoading={isLookupsLoading}
-      />
-        <AddFishModal
+      /> : null}
+        {!isHeadViewOnly ? <AddFishModal
           open={showAddFishModal}
           onClose={() => {
             if (addFishMutation.isPending || updateFishMutation.isPending) return;
@@ -2524,8 +2614,8 @@ const SuperBanyera = () => {
           }}
           error={fishNameError}
           isEditing={Boolean(editingFish)}
-        />
-      <EditBanyeraDrawer
+        /> : null}
+      {!isHeadViewOnly ? <EditBanyeraDrawer
         open={!!editingTx}
         tx={editingTx}
         boats={boats}
@@ -2534,7 +2624,7 @@ const SuperBanyera = () => {
         onClose={() => setEditingTx(null)}
         onSubmit={updateTransaction}
         saving={savingTx}
-      />
+      /> : null}
       <BanyeraDetailDrawer
         open={!!detailTx}
         tx={detailTx}
@@ -2545,7 +2635,7 @@ const SuperBanyera = () => {
         open={Boolean(selectedFishClassification)}
         onClose={() => setSelectedFishClassification(null)}
       />
-      <VoidBanyeraModal
+      {!isHeadViewOnly ? <VoidBanyeraModal
         open={Boolean(pendingVoidTx)}
         tx={pendingVoidTx}
         selectedReason={voidReasonOption}
@@ -2598,8 +2688,8 @@ const SuperBanyera = () => {
             void_reason: trimmedReason,
           });
         }}
-      />
-      <ArchiveModal
+      /> : null}
+      {!isHeadViewOnly ? <ArchiveModal
         open={!!deletingFish}
         title="Archive Fish Classification"
         itemName={deletingFish?.classification_name || "this record"}
@@ -2614,7 +2704,7 @@ const SuperBanyera = () => {
             onSettled: () => setDeletingFish(null),
           });
         }}
-      />
+      /> : null}
       </>
     </ConfigProvider>
   );
@@ -2757,8 +2847,7 @@ const EditBanyeraDrawer = ({ tx, open, boats, fees, classifications, onClose, on
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
           <div className="space-y-4">
             <ModalInput label="Boat Name" readOnly value={getBoatName(tx)} placeholder="-" wrapperClassName="!bg-slate-100" inputStyle={{ color: "#475569" }} />
-            <ModalInput label="Banyera Date" icon={IoCalendarOutline} readOnly value={formatDate(tx?.transaction_date)} placeholder="-" wrapperClassName="!bg-slate-100" inputStyle={{ color: "#475569" }} />
-            <ModalInput label="Banyera Time" icon={IoCalendarOutline} readOnly value={formatTime(tx?.transaction_date)} placeholder="-" wrapperClassName="!bg-slate-100" inputStyle={{ color: "#475569" }} />
+            <ModalInput label="Banyera Date & Time" icon={IoCalendarOutline} readOnly value={formatDateTime(tx?.transaction_date)} placeholder="-" wrapperClassName="!bg-slate-100" inputStyle={{ color: "#475569" }} />
           </div>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3">

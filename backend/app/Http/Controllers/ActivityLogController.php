@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ActivityLog;
+use Illuminate\Support\Facades\Auth;
 
 class ActivityLogController extends Controller
 {
@@ -25,6 +26,11 @@ class ActivityLogController extends Controller
             ->forTableIndex()
             ->searchTable($validated['search'] ?? null)
             ->tableFilters($validated);
+
+        if (strtolower(trim((string) (Auth::user()?->role ?? ''))) === 'inspector') {
+            $baseQuery->where('user_id', Auth::id());
+        }
+
         $this->applyFiscalYear($baseQuery, $request, 'created_at');
 
         $stats = [
@@ -41,6 +47,7 @@ class ActivityLogController extends Controller
             ->through(function ($log) {
                 return [
                     'id' => $log->id,
+                    'user_id' => $log->user_id,
                     'created_at' => optional($log->created_at)->toIso8601String(),
                     'timestamp' => optional($log->created_at)->toIso8601String(),
                     'user_name' => $log->user_name ?: 'System',

@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\TransactionUpdated;
 use App\Models\Docking;
 use App\Models\BillItem;
 use App\Models\Boat;
 use App\Services\ActivityLogService;
+use App\Services\VoidRequestNotificationService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -67,7 +69,7 @@ class DockingController extends Controller
         return [
             'docking_id' => $docking->docking_id,
             'boat_id' => $docking->boat_id,
-            'docking_date' => $docking->docking_date,
+            'docking_date' => $this->formatDockingDateTimeValue($docking->getRawOriginal('docking_date')),
             'docking_fee' => $docking->docking_fee,
             'void_reason' => $docking->void_reason,
             'voided_at' => $docking->voided_at,
@@ -112,7 +114,7 @@ class DockingController extends Controller
 
     private function formatDockingDateLabel(?string $value): string
     {
-        return $value ? Carbon::parse($value, 'Asia/Manila')->format('F j, Y') : 'blank';
+        return $value ? Carbon::parse($value, 'Asia/Manila')->format('F j, Y') : '';
     }
 
     private function dockingDateIsInFuture(?string $dateTimeValue): bool
@@ -387,6 +389,7 @@ class DockingController extends Controller
         // Check if a docking already exists for this boat on this date
         if ($this->dockingExistsForBoatOnDate($validated['boat_id'], $validated['docking_date'])) {
             return response()->json([
+                'code' => 'duplicate_record',
                 'message' => 'A docking record already exists for this boat on this date.',
                 'errors' => [
                     'boat_id' => ['Only one docking per boat per day is allowed.'],
@@ -404,11 +407,12 @@ class DockingController extends Controller
         app(ActivityLogService::class)->log(
             action: 'INSERT',
             module: 'Docking',
-            details: 'Created docking record for boat "' . $docking->boat?->boat_name . '" on ' . $docking->docking_date?->format('F j, Y') . '.',
+            details: 'Created docking transaction for boat "' . $docking->boat?->boat_name . '" with fee PHP ' . number_format((float) $docking->docking_fee, 2) . '.',
             user: Auth::user()
         );
 
         $this->prepareDockingForResponse($docking);
+        broadcast(new TransactionUpdated('docking', 'created', $docking->toArray()));
 
         return response()->json($docking, 201);
     }
@@ -499,17 +503,17 @@ class DockingController extends Controller
             $beforeState,
             $afterState,
             [
-                'boat' => 'Boat',
-                'fee_name' => 'Applicable fee',
-                'docking_date' => 'Date',
-                'docking_fee' => 'Docking fee',
+                'boat' => 'boat',
+                'fee_name' => 'applicable fee',
+                'docking_date' => 'date',
+                'docking_fee' => 'docking fee',
             ]
         );
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Docking',
-            details: 'Updated docking record for boat "' . $docking->boat?->boat_name . '"' . ($changeDetails !== '' ? ': ' . $changeDetails . '.' : '.'),
+            details: 'Updated docking record for boat "' . $docking->boat?->boat_name . '"' . ($changeDetails !== '' ? ' in ' . $changeDetails . '.' : '.'),
             user: Auth::user()
         );
 
@@ -560,6 +564,9 @@ class DockingController extends Controller
             user: Auth::user()
         );
 
+        broadcast(new TransactionUpdated('docking', 'updated', $docking->toArray()));
+        app(VoidRequestNotificationService::class)->notifyRequester('docking', $docking);
+
         return response()->json([
             'message' => 'Docking record voided successfully.',
             'docking' => $docking,
@@ -604,6 +611,8 @@ class DockingController extends Controller
             details: 'Restored voided docking record for boat "' . $docking->boat?->boat_name . '".',
             user: Auth::user()
         );
+
+        broadcast(new TransactionUpdated('docking', 'updated', $docking->toArray()));
 
         return response()->json([
             'message' => 'Docking record restored successfully.',

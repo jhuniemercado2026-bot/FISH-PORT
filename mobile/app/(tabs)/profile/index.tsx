@@ -121,13 +121,21 @@ export default function ProfileScreen() {
           {profileActions.map((action) => (
             <View
               key={action.key}
-              className="mb-4 rounded-[24px] border border-[#ECE8EC] bg-white px-5"
+              className="mb-4 rounded-[18px] border border-[#ECE8EC] bg-white px-5"
+              style={{
+                boxShadow: "0px 4px 8px rgba(0, 0, 0, 0.06)",
+                elevation: 3,
+              }}
             >
               <Pressable
                 className="flex-row items-center justify-between py-5"
                 onPress={() => {
                   if (action.key === "edit-profile") {
                     router.push("/(tabs)/profile/[id]?id=1");
+                  }
+
+                  if (action.key === "change-password") {
+                    router.push("/(tabs)/profile/[id]?id=1&mode=change-password");
                   }
 
                   if (action.key === "sign-out") {

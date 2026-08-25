@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "../api/axios";
 
-export const getTransactionLockQueryOptions = ({ staleTime = 5 * 60 * 1000 } = {}) => ({
-  queryKey: ["transaction-lock"],
+export const getTransactionLockQueryOptions = ({ staleTime = 5 * 60 * 1000, resource = null } = {}) => ({
+  queryKey: resource ? ["transaction-lock", resource] : ["transaction-lock"],
   queryFn: async ({ signal }) => {
-    const res = await api.get("/transaction-lock", { signal });
+    const res = await api.get("/transaction-lock", {
+      signal,
+      params: resource ? { resource } : undefined,
+    });
     const payload = res.data ?? {};
 
     return {
@@ -22,7 +25,7 @@ export const getTransactionLockQueryOptions = ({ staleTime = 5 * 60 * 1000 } = {
 
 export const useTransactionLockOnlyQuery = (options = {}) => {
   return useQuery({
-    ...getTransactionLockQueryOptions(),
+    ...getTransactionLockQueryOptions(options),
     ...options,
   });
 };

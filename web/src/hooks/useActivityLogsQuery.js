@@ -5,6 +5,25 @@ import { useFiscalYearStore } from "../store/fiscalYearStore";
 
 export const ACTIVITY_LOGS_QUERY_KEY = ["activity-logs-data"];
 
+const emptyActivityLogsData = (perPage = 10) => ({
+  logs: [],
+  meta: {
+    current_page: 1,
+    last_page: 1,
+    per_page: perPage,
+    total: 0,
+    from: 0,
+    to: 0,
+    stats: {
+      total_logs: 0,
+      info_count: 0,
+      warning_count: 0,
+      critical_count: 0,
+      today_count: 0,
+    },
+  },
+});
+
 const buildActivityLogsParams = ({
   search = "",
   module = "all",
@@ -57,10 +76,21 @@ export const getActivityLogsQueryOptions = ({
   ],
   queryFn: async ({ signal }) => {
     const filters = { page, perPage, search, module, user, status, period, sort, paginated, fiscalYear };
-    const res = await api.get("/activity-logs", {
-      params: buildActivityLogsParams(filters),
-      signal,
-    });
+    let res;
+
+    try {
+      res = await api.get("/activity-logs", {
+        params: buildActivityLogsParams(filters),
+        signal,
+      });
+    } catch (error) {
+      if ([401, 403].includes(Number(error?.response?.status))) {
+        throw error;
+      }
+
+      console.error("Failed to load activity logs; showing an empty history state.", error);
+      return emptyActivityLogsData(filters.perPage);
+    }
 
     const logs = res.data?.data ?? [];
     return {
@@ -69,18 +99,14 @@ export const getActivityLogsQueryOptions = ({
         current_page: 1,
         last_page: 1,
         per_page: filters.perPage ?? 20,
-        stats: {
-          total_logs: 0,
-          info_count: 0,
-          warning_count: 0,
-          critical_count: 0,
-          today_count: 0,
-        },
+        stats: emptyActivityLogsData(filters.perPage).meta.stats,
       }),
     };
   },
   staleTime: 5 * 60 * 1000,
   gcTime: 30 * 60 * 1000,
+  initialData: () => emptyActivityLogsData(perPage),
+  initialDataUpdatedAt: 0,
   placeholderData: (previousData) => previousData,
   refetchOnReconnect: true,
   refetchOnWindowFocus: false,

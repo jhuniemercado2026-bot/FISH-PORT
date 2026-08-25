@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MasterDataUpdated;
 use App\Models\Boat;
 use App\Models\BoatOwner;
 use App\Models\BoatType;
@@ -221,7 +222,8 @@ class BoatController extends Controller
                 ->get();
 
             $owners = \App\Models\BoatOwner::active()
-                ->select('owner_id', 'owner_firstname', 'owner_lastname', 'address', 'contact_number')
+                ->select('owner_id', 'owner_firstname', 'owner_lastname', 'address', 'contact_number', 'owner_signature_data_url', 'owner_signature_public_id', 'owner_signature_signed_at', 'owner_signature_updated_by')
+                ->with('ownerSignatureUpdatedByUser:user_id,first_name,last_name,email')
                 ->orderByDesc('created_at')
                 ->orderByDesc('owner_id')
                 ->get();
@@ -306,6 +308,8 @@ class BoatController extends Controller
             user: Auth::user()
         );
 
+        broadcast(new MasterDataUpdated('boats', 'created', $boat->toArray()));
+
         return response()->json($boat, 201);
     }
 
@@ -320,7 +324,12 @@ class BoatController extends Controller
     public function update(Request $request, $id)
     {
         $boat = Boat::findOrFail($id);
-        $previousBoatName = $boat->boat_name;
+        $previousValues = [
+            'boat_name' => $boat->boat_name,
+            'boat_owner' => BoatOwner::withTrashed()->find($boat->owner_id)?->full_name,
+            'boat_type' => BoatType::withTrashed()->find($boat->boat_type_id)?->type_name,
+            'status' => $boat->status,
+        ];
 
         if ($request->has('boat_name')) {
             $request->merge([
@@ -354,19 +363,39 @@ class BoatController extends Controller
 
         $boat->update($validated);
         $boat->load(['owner' => function ($query) {
-            $query->select('owner_id', 'owner_firstname', 'owner_lastname', 'address', 'contact_number')->withTrashed();
+            $query
+                ->select('owner_id', 'owner_firstname', 'owner_lastname', 'address', 'contact_number', 'owner_signature_data_url', 'owner_signature_public_id', 'owner_signature_signed_at', 'owner_signature_updated_by')
+                ->with('ownerSignatureUpdatedByUser:user_id,first_name,last_name,email')
+                ->withTrashed();
         }, 'boatType' => function ($query) {
             $query->select('boat_type_id', 'type_name')->withTrashed();
         }, 'createdBy:user_id,first_name,last_name']);
         $boat->owner?->append('full_name');
         $boat->createdBy?->append('full_name');
+        $changeDetails = app(ActivityLogService::class)->describeChanges(
+            $previousValues,
+            [
+                'boat_name' => $boat->boat_name,
+                'boat_owner' => $boat->owner?->full_name,
+                'boat_type' => $boat->boatType?->type_name,
+                'status' => $boat->status,
+            ],
+            [
+                'boat_name' => 'boat name',
+                'boat_owner' => 'boat owner',
+                'boat_type' => 'boat type',
+                'status' => 'status',
+            ]
+        );
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Boat Management',
-            details: 'Updated registered boat "' . $previousBoatName . '" to "' . $boat->boat_name . '".',
+            details: 'Updated registered boat "' . $boat->boat_name . '"' . ($changeDetails !== '' ? ' in ' . $changeDetails . '.' : '.'),
             user: Auth::user()
         );
+
+        broadcast(new MasterDataUpdated('boats', 'updated', $boat->toArray()));
 
         return response()->json($boat);
     }
@@ -384,6 +413,8 @@ class BoatController extends Controller
             user: Auth::user()
         );
 
+        broadcast(new MasterDataUpdated('boats', 'archived', ['boat_id' => $boat->boat_id]));
+
         return response()->json(['message' => 'Boat archived successfully.']);
     }
 
@@ -398,6 +429,8 @@ class BoatController extends Controller
             details: 'Restored boat "' . $boat->boat_name . '".',
             user: Auth::user()
         );
+
+        broadcast(new MasterDataUpdated('boats', 'restored', ['boat_id' => $boat->boat_id]));
 
         return response()->json(['message' => 'Boat restored successfully.']);
     }
@@ -476,6 +509,12 @@ class BoatController extends Controller
             details: 'Updated boat image for "' . $boat->boat_name . '".',
             user: Auth::user()
         );
+
+        broadcast(new MasterDataUpdated('boats', 'updated', [
+            'boat_id' => $boat->boat_id,
+            'image_path' => $path,
+            'image_public_id' => $publicId,
+        ]));
 
         return response()->json([
             'message'    => 'Image uploaded successfully.',

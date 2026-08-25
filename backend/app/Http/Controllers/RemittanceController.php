@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Payment;
+use App\Events\TransactionUpdated;
 use App\Models\Notification;
+use App\Models\Payment;
 use App\Models\Remittance;
 use App\Models\User;
 use App\Models\VehicleTicket;
@@ -66,6 +67,12 @@ class RemittanceController extends Controller
 
     private function remittancePayload(Remittance $remittance): array
     {
+        $submittedBy = $remittance->submittedBy;
+        $submittedByName = trim((string) implode(' ', array_filter([
+            $submittedBy?->first_name,
+            $submittedBy?->last_name,
+        ])));
+
         return [
             'remittance_id' => $remittance->remittance_id,
             'remittance_reference_no' => $remittance->remittance_reference_no,
@@ -75,7 +82,124 @@ class RemittanceController extends Controller
             'deficit' => round((float) $remittance->deficit, 2),
             'status' => $remittance->status,
             'remarks' => $remittance->remarks,
+            'submitted_by' => $remittance->submitted_by,
+            'submitted_by_name' => $submittedByName !== '' ? $submittedByName : $submittedBy?->email,
+            'submitted_by_email' => $submittedBy?->email,
+            'submitted_by_role' => $submittedBy?->role,
+            'created_at' => optional($remittance->created_at)->toIso8601String(),
+            'updated_at' => optional($remittance->updated_at)->toIso8601String(),
         ];
+    }
+
+    private function broadcastRemittance(Remittance $remittance, string $action): array
+    {
+        $remittance->refresh()->loadMissing('submittedBy');
+        $payload = $this->remittancePayload($remittance);
+
+        broadcast(new TransactionUpdated('remittance', $action, $payload));
+
+        return $payload;
+    }
+
+    private function transactionLockForUser(?User $user = null): ?array
+    {
+        $user ??= Auth::user();
+
+        if (strtolower(trim((string) ($user?->role ?? ''))) === 'head') {
+            return null;
+        }
+
+        return $this->transactionLockService->getActiveLock($user, 'vehicle-tickets');
+    }
+
+    private function canManageRemittance(?User $user, Remittance $remittance): bool
+    {
+        $managerRole = strtolower(trim((string) ($user?->role ?? '')));
+        $submitterRole = strtolower(trim((string) ($remittance->submittedBy?->role ?? '')));
+
+        return match ($managerRole) {
+            'coordinator' => $submitterRole === 'inspector',
+            'head' => $submitterRole === 'coordinator',
+            default => false,
+        };
+    }
+
+    private function manageRemittanceDeniedMessage(Remittance $remittance): string
+    {
+        $submitterRole = strtolower(trim((string) ($remittance->submittedBy?->role ?? '')));
+
+        return match ($submitterRole) {
+            'inspector' => 'Only the coordinator can accept or undo inspector remittances.',
+            'coordinator' => 'Only the head can accept or undo coordinator remittances.',
+            default => 'You are not allowed to accept or undo this remittance.',
+        };
+    }
+
+    private function remittanceApproverRole(Remittance $remittance): ?string
+    {
+        $submitterRole = strtolower(trim((string) ($remittance->submittedBy?->role ?? '')));
+
+        return match ($submitterRole) {
+            'inspector' => 'coordinator',
+            'coordinator' => 'head',
+            default => null,
+        };
+    }
+
+    private function resolveRemittanceApproverUserIds(Remittance $remittance): array
+    {
+        $approverRole = $this->remittanceApproverRole($remittance);
+
+        if (!$approverRole) {
+            return [];
+        }
+
+        return User::query()
+            ->where('role', $approverRole)
+            ->where('status', 'active')
+            ->orderBy('user_id')
+            ->pluck('user_id')
+            ->all();
+    }
+
+    private function noRemittanceApproverMessage(Remittance $remittance): string
+    {
+        return match ($this->remittanceApproverRole($remittance)) {
+            'coordinator' => 'No active coordinators are available to receive this remittance.',
+            'head' => 'No active heads are available to receive this remittance.',
+            default => 'No approver is available to receive this remittance.',
+        };
+    }
+
+    private function createRemittanceSubmittedNotifications(Remittance $remittance, array $approverUserIds): void
+    {
+        $this->pruneRemittanceSubmittedNotifications($remittance, $approverUserIds);
+
+        foreach ($approverUserIds as $approverUserId) {
+            Notification::updateOrCreate([
+                'recipient_user_id' => $approverUserId,
+                'related_type' => 'remittance',
+                'related_id' => $remittance->remittance_id,
+                'title' => 'New remittance submitted',
+            ], [
+                'message' => $this->remittanceSubmittedMessage($remittance),
+                'sender_user_id' => Auth::id(),
+                'is_read' => false,
+                'read_at' => null,
+            ]);
+        }
+    }
+
+    private function pruneRemittanceSubmittedNotifications(Remittance $remittance, array $approverUserIds): void
+    {
+        $allowedRecipientIds = array_values(array_filter(array_map('intval', $approverUserIds)));
+
+        Notification::query()
+            ->where('related_type', 'remittance')
+            ->where('related_id', $remittance->remittance_id)
+            ->where('title', 'New remittance submitted')
+            ->when(!empty($allowedRecipientIds), fn ($query) => $query->whereNotIn('recipient_user_id', $allowedRecipientIds))
+            ->delete();
     }
 
     public function index(Request $request)
@@ -93,7 +217,9 @@ class RemittanceController extends Controller
             ->orderByDesc('created_at')
             ->orderByDesc('remittance_id');
         $this->applyFiscalYear($query, $request, 'date');
-        $statsQuery = (clone $query)->reorder();
+        $statsQuery = (clone $query)
+            ->whereHas('submittedBy', fn ($submitterQuery) => $submitterQuery->where('role', 'coordinator'))
+            ->reorder();
         $stats = [
             'total_remittances' => (float) (clone $statsQuery)->sum('amount'),
             'total_surplus' => (float) (clone $statsQuery)->sum('surplus'),
@@ -109,7 +235,7 @@ class RemittanceController extends Controller
             return response()->json([
                 'data' => $remittances,
                 'stats' => $stats,
-                'transaction_lock' => $this->transactionLockService->getActiveLock(),
+                'transaction_lock' => $this->transactionLockForUser($request->user()),
             ]);
         }
 
@@ -130,17 +256,34 @@ class RemittanceController extends Controller
             'data' => $items,
             'meta' => $meta,
             'stats' => $stats,
-            'transaction_lock' => $this->transactionLockService->getActiveLock(),
+            'transaction_lock' => $this->transactionLockForUser($request->user()),
         ]);
     }
 
-    public function todaySystemCashReceived(Request $request)
+    public function todayCollection(Request $request)
     {
         $date = Carbon::parse($request->query('date', now('Asia/Manila')->toDateString()), 'Asia/Manila')->toDateString();
+        $hasSubmittedRemittance = Remittance::query()
+            ->whereDate('date', $date)
+            ->where('submitted_by', $request->user()?->user_id)
+            ->exists();
 
         return response()->json([
             'date' => $date,
-            'amount' => $this->calculateDateAmount($date),
+            'amount' => $hasSubmittedRemittance
+                ? 0
+                : $this->calculateDateAmount($date, $this->collectionUserIdForRemittance($request->user())),
+            'has_submitted_remittance' => $hasSubmittedRemittance,
+            'remittance_progress' => $this->remittanceProgressForDate($date),
+        ]);
+    }
+
+    public function show($id)
+    {
+        $remittance = Remittance::with('submittedBy')->findOrFail($id);
+
+        return response()->json([
+            'remittance' => $this->remittancePayload($remittance),
         ]);
     }
 
@@ -169,27 +312,42 @@ class RemittanceController extends Controller
 
         $duplicateExists = Remittance::query()
             ->whereDate('date', $validated['date'])
+            ->where('submitted_by', Auth::id())
             ->exists();
 
         if ($duplicateExists) {
             return response()->json([
-                'message' => 'A remittance record for this date already exists.',
+                'message' => 'You already submitted a remittance record for this date.',
                 'errors' => [
-                    'date' => ['A remittance record for this date already exists.'],
+                    'date' => ['You already submitted a remittance record for this date.'],
                 ],
             ], 422);
         }
 
         $date = Carbon::parse($validated['date'], 'Asia/Manila')->toDateString();
-        $todayCashReceived = $this->calculateDateAmount($date);
+        $todayCollection = $this->calculateDateAmount($date, $this->collectionUserIdForRemittance($request->user()));
+        $remittanceProgress = $this->remittanceProgressForDate($date);
         $amount = round((float) $validated['amount'], 2);
 
-        if ($todayCashReceived <= 0) {
+        if ($todayCollection <= 0) {
             return response()->json([
                 'message' => 'No cash collections were found for the selected date.',
                 'errors' => [
                     'date' => ['No cash collections were found for the selected date.'],
                 ],
+            ], 422);
+        }
+
+        if (
+            strtolower(trim((string) ($request->user()?->role ?? ''))) === 'coordinator' &&
+            (int) ($remittanceProgress['pending_users'] ?? 0) > 0
+        ) {
+            return response()->json([
+                'message' => 'Cannot submit remittance until all inspectors with vehicle ticket collections have submitted their remittance.',
+                'errors' => [
+                    'remittance_progress' => ['All inspectors with vehicle ticket collections must submit their remittance first.'],
+                ],
+                'remittance_progress' => $remittanceProgress,
             ], 422);
         }
 
@@ -203,6 +361,17 @@ class RemittanceController extends Controller
             'submitted_by' => Auth::id(),
         ]);
 
+        $remittance->loadMissing('submittedBy');
+        $approverUserIds = $this->resolveRemittanceApproverUserIds($remittance);
+
+        if (empty($approverUserIds)) {
+            $remittance->delete();
+
+            return response()->json([
+                'message' => $this->noRemittanceApproverMessage($remittance),
+            ], 422);
+        }
+
         // Immediately set a server-side transaction lock based on this submission so
         // other endpoints will be view-only while this remittance stands.
         try {
@@ -211,17 +380,7 @@ class RemittanceController extends Controller
             // best-effort: do not prevent remittance creation if lock write fails
         }
 
-        $headUserId = $this->resolveHeadUserId();
-
-        Notification::create([
-            'title' => 'New remittance submitted',
-            'message' => $this->remittanceSubmittedMessage($remittance),
-            'recipient_user_id' => $headUserId,
-            'sender_user_id' => Auth::id(),
-            'related_type' => 'remittance',
-            'related_id' => $remittance->remittance_id,
-            'is_read' => false,
-        ]);
+        $this->createRemittanceSubmittedNotifications($remittance, $approverUserIds);
 
         app(ActivityLogService::class)->log(
             action: 'INSERT',
@@ -231,10 +390,12 @@ class RemittanceController extends Controller
             user: Auth::user()
         );
 
+        $payload = $this->broadcastRemittance($remittance, 'created');
+
         return response()->json([
             'message' => 'Remittance submitted successfully.',
-            'remittance' => $this->remittancePayload($remittance),
-            'transaction_lock' => $this->transactionLockService->getActiveLock(),
+            'remittance' => $payload,
+            'transaction_lock' => $this->transactionLockForUser($request->user()),
         ], 201);
     }
 
@@ -268,9 +429,10 @@ class RemittanceController extends Controller
             $deficit !== $originalDeficit;
 
         if ($shouldValidateCollections) {
-            $todayCashReceived = $this->calculateDateAmount($date);
+            $remittance->loadMissing('submittedBy');
+            $todayCollection = $this->calculateDateAmount($date, $this->collectionUserIdForRemittance($remittance->submittedBy));
 
-            if ($todayCashReceived <= 0) {
+            if ($todayCollection <= 0) {
                 return response()->json([
                     'message' => 'No cash collections were found for the selected date.',
                     'errors' => [
@@ -289,19 +451,10 @@ class RemittanceController extends Controller
             'remarks' => $validated['remarks'] ?? null,
         ]);
 
-        $headUserId = $this->resolveHeadUserId();
+        $remittance->loadMissing('submittedBy');
+        $approverUserIds = $this->resolveRemittanceApproverUserIds($remittance);
 
-        Notification::query()
-            ->where('related_type', 'remittance')
-            ->where('related_id', $remittance->remittance_id)
-            ->where('recipient_user_id', $headUserId)
-            ->where('title', 'New remittance submitted')
-            ->update([
-                'message' => $this->remittanceSubmittedMessage($remittance),
-                'sender_user_id' => Auth::id(),
-                'is_read' => false,
-                'read_at' => null,
-            ]);
+        $this->createRemittanceSubmittedNotifications($remittance, $approverUserIds);
 
         Notification::query()
             ->where('related_type', 'remittance')
@@ -317,20 +470,22 @@ class RemittanceController extends Controller
             user: Auth::user()
         );
 
+        $payload = $this->broadcastRemittance($remittance, 'updated');
+
         return response()->json([
             'message' => 'Remittance updated successfully.',
-            'remittance' => $this->remittancePayload($remittance),
+            'remittance' => $payload,
         ]);
     }
 
     public function remit($id)
     {
-        $remittance = Remittance::findOrFail($id);
+        $remittance = Remittance::with('submittedBy')->findOrFail($id);
         $user = Auth::user();
 
-        if (($user?->role ?? null) !== 'head') {
+        if (!$this->canManageRemittance($user, $remittance)) {
             return response()->json([
-                'message' => 'Only the head can mark remittances as remitted.',
+                'message' => $this->manageRemittanceDeniedMessage($remittance),
             ], 403);
         }
 
@@ -344,12 +499,12 @@ class RemittanceController extends Controller
             'status' => 'remitted',
         ]);
 
-        $headUserId = $this->resolveHeadUserId();
+        $approverUserId = (int) ($user?->user_id ?? 0);
 
         Notification::query()
             ->where('related_type', 'remittance')
             ->where('related_id', $remittance->remittance_id)
-            ->where('recipient_user_id', $headUserId)
+            ->where('recipient_user_id', $approverUserId)
             ->where('title', 'New remittance submitted')
             ->update([
                 'is_read' => true,
@@ -369,21 +524,23 @@ class RemittanceController extends Controller
             user: $user
         );
 
+        $payload = $this->broadcastRemittance($remittance, 'updated');
+
         return response()->json([
             'message' => 'Remittance marked as remitted.',
-            'remittance' => $this->remittancePayload($remittance),
-            'transaction_lock' => $this->transactionLockService->getActiveLock(),
+            'remittance' => $payload,
+            'transaction_lock' => $this->transactionLockForUser($user),
         ]);
     }
 
     public function unremit($id)
     {
-        $remittance = Remittance::findOrFail($id);
+        $remittance = Remittance::with('submittedBy')->findOrFail($id);
         $user = Auth::user();
 
-        if (($user?->role ?? null) !== 'head') {
+        if (!$this->canManageRemittance($user, $remittance)) {
             return response()->json([
-                'message' => 'Only the head can undo remitted records.',
+                'message' => $this->manageRemittanceDeniedMessage($remittance),
             ], 403);
         }
 
@@ -410,42 +567,113 @@ class RemittanceController extends Controller
             user: $user
         );
 
+        $payload = $this->broadcastRemittance($remittance, 'updated');
+
         return response()->json([
             'message' => 'Remittance reverted to pending.',
-            'remittance' => $this->remittancePayload($remittance),
-            'transaction_lock' => $this->transactionLockService->getActiveLock(),
+            'remittance' => $payload,
+            'transaction_lock' => $this->transactionLockForUser($user),
         ]);
     }
 
-    private function calculateDateAmount(string $date): float
+    private function calculateDateAmount(string $date, ?int $createdBy = null): float
     {
-        $paymentsTotal = (float) Payment::query()
-            ->whereBetween('payment_date', [$date . ' 00:00:00', $date . ' 23:59:59'])
-            ->sum('amount_paid');
-
         $ticketsTotal = (float) VehicleTicket::query()
             ->whereDate('ticket_date', $date)
+            ->when($createdBy, fn ($query) => $query->where('created_by', $createdBy))
             ->whereNull('voided_at')
             ->sum('ticket_fee');
 
-        return round($paymentsTotal + $ticketsTotal, 2);
+        $paymentsTotal = (float) Payment::query()
+            ->whereDate('payment_date', $date)
+            ->when($createdBy, fn ($query) => $query->where('received_by', $createdBy))
+            ->sum('amount_paid');
+
+        return round($ticketsTotal + $paymentsTotal, 2);
     }
 
-    private function resolveHeadUserId(): ?int
+    private function collectionUserIdForRemittance(?User $user): ?int
     {
-        return User::query()
-            ->where('role', 'head')
-            ->orderBy('user_id')
-            ->value('user_id');
+        $role = strtolower(trim((string) ($user?->role ?? '')));
+
+        return $role === 'inspector' ? (int) $user->user_id : null;
+    }
+
+    private function remittanceProgressForDate(string $date): array
+    {
+        $ticketCreatorIds = VehicleTicket::query()
+            ->whereDate('ticket_date', $date)
+            ->whereNull('voided_at')
+            ->whereNotNull('created_by')
+            ->distinct()
+            ->pluck('created_by')
+            ->map(fn ($userId) => (int) $userId)
+            ->filter()
+            ->values();
+
+        if ($ticketCreatorIds->isEmpty()) {
+            return [
+                'eligible_users' => 0,
+                'remitted_users' => 0,
+                'pending_users' => 0,
+                'percentage' => 0,
+                'users' => [],
+            ];
+        }
+
+        $inspectors = User::query()
+            ->whereIn('user_id', $ticketCreatorIds)
+            ->where('role', 'inspector')
+            ->get(['user_id', 'first_name', 'last_name', 'email']);
+
+        $inspectorIds = $inspectors
+            ->pluck('user_id')
+            ->map(fn ($userId) => (int) $userId)
+            ->values();
+
+        $remittedUserIds = Remittance::query()
+            ->whereDate('date', $date)
+            ->whereIn('submitted_by', $inspectorIds)
+            ->pluck('submitted_by')
+            ->map(fn ($userId) => (int) $userId)
+            ->unique()
+            ->values();
+
+        $eligibleCount = $inspectorIds->count();
+        $remittedCount = $remittedUserIds->count();
+
+        return [
+            'eligible_users' => $eligibleCount,
+            'remitted_users' => $remittedCount,
+            'pending_users' => max($eligibleCount - $remittedCount, 0),
+            'percentage' => $eligibleCount > 0 ? (int) round(($remittedCount / $eligibleCount) * 100) : 0,
+            'users' => $inspectors
+                ->map(function (User $user) use ($remittedUserIds) {
+                    $name = trim(collect([$user->first_name, $user->last_name])->filter()->join(' '));
+
+                    return [
+                        'user_id' => $user->user_id,
+                        'name' => $name !== '' ? $name : $user->email,
+                        'email' => $user->email,
+                        'has_remitted' => $remittedUserIds->contains((int) $user->user_id),
+                    ];
+                })
+                ->values(),
+        ];
     }
 
     private function remittanceSubmittedMessage(Remittance $remittance): string
     {
+        $remittance->loadMissing('submittedBy');
         $submittedAt = Carbon::parse($remittance->created_at ?? now())->timezone('Asia/Manila');
         $remittanceDate = Carbon::parse($remittance->date, 'Asia/Manila')->format('F j, Y');
+        $submitterRole = strtolower(trim((string) ($remittance->submittedBy?->role ?? '')));
+        $lockMessage = $submitterRole === 'coordinator'
+            ? 'All transaction now is lock.'
+            : 'The submitter daily vehicle tickets are locked now.';
 
         return 'Remittance "' . $remittance->remittance_reference_no . '" was submitted at ' .
-            $submittedAt->format('g:i A') . ' for ' . $remittanceDate . ' with the amount of PHP ' .
-            number_format((float) $remittance->amount, 2) . '. Transactions are locked now.';
+            $submittedAt->format('g:i A') . ' for ' . $remittanceDate . ' with the amount of ₱' .
+            number_format((float) $remittance->amount, 2) . '. ' . $lockMessage;
     }
 }

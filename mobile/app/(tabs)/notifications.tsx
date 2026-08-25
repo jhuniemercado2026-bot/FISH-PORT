@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
+import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
+  Modal as NativeModal,
   Pressable,
   ScrollView,
   StatusBar,
@@ -12,7 +13,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getAuthToken } from "../../api/auth";
 import { buildApiHeaders, getApiBaseUrl } from "../../api/axios";
+import NotificationModal from "../../components/NotificationModal";
 import { useToastStore } from "../../store/toastStore";
+import {
+  getOfflineResourceArray,
+  saveOfflineResource,
+} from "../../utils/offlineMasterData";
 
 type NotificationItem = {
   notification_id: number | null;
@@ -21,6 +27,11 @@ type NotificationItem = {
   is_read: boolean;
   created_at: string | null;
 };
+
+type NotificationStatusFilter = "all" | "unread" | "read";
+
+const formatNotificationMessage = (message?: string | null) =>
+  String(message || "").replace(/\bPHP\s+/g, "₱");
 
 const normalizeNotificationsPayload = (payload: any): NotificationItem[] => {
   const rows = Array.isArray(payload?.notifications)
@@ -40,30 +51,15 @@ const normalizeNotificationsPayload = (payload: any): NotificationItem[] => {
   }));
 };
 
-const formatNotificationDate = (value?: string | null) => {
-  if (!value) return "No date";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "No date";
-
-  return date.toLocaleDateString("en-PH", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-};
-
-const formatNotificationTime = (value?: string | null) => {
-  if (!value) return "No time";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "No time";
-
-  return date.toLocaleTimeString("en-PH", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-};
+function isOfflineNetworkState(state: {
+  isConnected: boolean | null;
+  isInternetReachable: boolean | null;
+} | null) {
+  return Boolean(
+    state &&
+      (state.isConnected === false || state.isInternetReachable === false)
+  );
+}
 
 function NotificationCard({
   notification,
@@ -79,10 +75,7 @@ function NotificationCard({
       onPress={onPress}
       className="mb-3 rounded-[10px] border border-[#E8E1E6] bg-white p-4"
       style={{
-        shadowColor: "#000000",
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 4 },
+        boxShadow: "0px 4px 8px rgba(0, 0, 0, 0.06)",
         elevation: 3,
       }}
     >
@@ -133,46 +126,132 @@ function NotificationCard({
             numberOfLines={3}
             style={{ fontFamily: "Montserrat_400Regular" }}
           >
-            {notification.message || "No message provided."}
+            {notification.message ? formatNotificationMessage(notification.message) : "No message provided."}
           </Text>
-
-          <View className="mt-3 flex-row items-center">
-            <Ionicons name="calendar-outline" size={13} color="#8A94A3" />
-            <Text
-              className="ml-1 text-[11px] text-[#8A94A3]"
-              style={{ fontFamily: "Montserrat_400Regular" }}
-            >
-              {formatNotificationDate(notification.created_at)}
-            </Text>
-            <View className="mx-2 h-1 w-1 rounded-full bg-[#CBD5E1]" />
-            <Ionicons name="time-outline" size={13} color="#8A94A3" />
-            <Text
-              className="ml-1 text-[11px] text-[#8A94A3]"
-              style={{ fontFamily: "Montserrat_400Regular" }}
-            >
-              {formatNotificationTime(notification.created_at)}
-            </Text>
-          </View>
         </View>
       </View>
     </Pressable>
   );
 }
 
+function NotificationSkeletonCard() {
+  return (
+    <View className="mb-3 rounded-[10px] border border-[#E8E1E6] bg-white p-4">
+      <View className="flex-row items-start">
+        <View className="h-11 w-11 rounded-[14px] bg-[#E8EDF5]" />
+
+        <View className="ml-3 flex-1">
+          <View className="flex-row items-start justify-between">
+            <View className="h-4 w-[58%] rounded-full bg-[#E8EDF5]" />
+            <View className="h-6 w-14 rounded-full bg-[#F1F5F9]" />
+          </View>
+
+          <View className="mt-3 h-3 w-full rounded-full bg-[#EEF2F7]" />
+          <View className="mt-2 h-3 w-[82%] rounded-full bg-[#EEF2F7]" />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const notificationFilterOptions: { value: NotificationStatusFilter; label: string }[] = [
+  { value: "all", label: "All notifications" },
+  { value: "unread", label: "Unread" },
+  { value: "read", label: "Read" },
+];
+
+function NotificationFilterModal({
+  visible,
+  selectedValue,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  selectedValue: NotificationStatusFilter;
+  onClose: () => void;
+  onSelect: (value: NotificationStatusFilter) => void;
+}) {
+  return (
+    <NativeModal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <SafeAreaView className="flex-1 bg-black/30">
+        <Pressable className="flex-1 items-center justify-center px-4" onPress={onClose}>
+          <Pressable className="w-full max-w-[280px] overflow-hidden rounded-[14px] border border-[#E8E1E6] bg-white shadow-sm shadow-black/10">
+            <View className="border-b border-[#F2ECEF] px-4 py-3">
+              <Text className="text-[14px] font-semibold text-[#1A1F36]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                Filter
+              </Text>
+            </View>
+
+            {notificationFilterOptions.map((option) => {
+              const isSelected = selectedValue === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => {
+                    onSelect(option.value);
+                    onClose();
+                  }}
+                  className={`flex-row items-center justify-between px-4 py-3 ${isSelected ? "bg-[#EFF6FF]" : "bg-white"}`}
+                >
+                  <Text className={`text-[14px] ${isSelected ? "text-[#1D4ED8]" : "text-[#1A1F36]"}`} style={{ fontFamily: "Montserrat_400Regular" }}>
+                    {option.label}
+                  </Text>
+                  {isSelected ? <Ionicons name="checkmark" size={18} color="#1D4ED8" /> : null}
+                </Pressable>
+              );
+            })}
+          </Pressable>
+        </Pressable>
+      </SafeAreaView>
+    </NativeModal>
+  );
+}
+
+const wait = (milliseconds: number) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
 export default function NotificationsScreen() {
   const authToken = getAuthToken();
   const showToast = useToastStore((state) => state.showToast);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasLoadedNotifications, setHasLoadedNotifications] = useState(false);
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<NotificationStatusFilter>("all");
+  const [selectedNotification, setSelectedNotification] =
+    useState<NotificationItem | null>(null);
 
   const loadNotifications = useCallback(
     async (options: { showLoading?: boolean } = {}) => {
+      const cachedNotifications =
+        await getOfflineResourceArray<NotificationItem>("notifications");
+      const hasCachedNotifications = cachedNotifications.length > 0;
+
+      if (hasCachedNotifications) {
+        setNotifications(cachedNotifications);
+      }
+
       if (options.showLoading) {
-        setIsLoading(true);
+        setIsLoading(!hasCachedNotifications);
+        if (!hasCachedNotifications) {
+          await wait(800);
+        }
+        setIsLoading(false);
+      }
+
+      const networkState = await NetInfo.fetch().catch(() => null);
+      if (isOfflineNetworkState(networkState)) {
+        setNotifications(cachedNotifications);
+        setHasLoadedNotifications(true);
+        setIsLoading(false);
+        return;
       }
 
       if (!authToken) {
-        setNotifications([]);
+        setNotifications(cachedNotifications);
+        setHasLoadedNotifications(true);
         setIsLoading(false);
         return;
       }
@@ -187,11 +266,16 @@ export default function NotificationsScreen() {
           throw new Error("Unable to load notifications.");
         }
 
-        setNotifications(normalizeNotificationsPayload(payload));
+        const nextNotifications = normalizeNotificationsPayload(payload);
+        setNotifications(nextNotifications);
+        await saveOfflineResource("notifications", nextNotifications);
       } catch {
-        setNotifications([]);
-        showToast("error", "Unable to load notifications.");
+        setNotifications(cachedNotifications);
+        if (cachedNotifications.length === 0) {
+          showToast("error", "Unable to load notifications.");
+        }
       } finally {
+        setHasLoadedNotifications(true);
         setIsLoading(false);
       }
     },
@@ -214,11 +298,13 @@ export default function NotificationsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadNotifications();
+      loadNotifications({ showLoading: true });
     }, [loadNotifications])
   );
 
   const handleNotificationPress = async (notification: NotificationItem) => {
+    setSelectedNotification(notification);
+
     if (notification.is_read || !notification.notification_id || !authToken) {
       return;
     }
@@ -243,10 +329,28 @@ export default function NotificationsScreen() {
             : item
         )
       );
+      setSelectedNotification((current) =>
+        current?.notification_id === notification.notification_id
+          ? { ...current, is_read: true }
+          : current
+      );
     } catch {
       showToast("error", "Unable to update notification.");
     }
   };
+
+  const shouldShowSkeleton = (isLoading || !hasLoadedNotifications) && notifications.length === 0;
+  const displayedNotifications = notifications.filter((notification) => {
+    if (statusFilter === "all") return true;
+    if (statusFilter === "unread") return !notification.is_read;
+    return notification.is_read;
+  });
+  const emptyMessage =
+    statusFilter === "unread"
+      ? "No unread notifications."
+      : statusFilter === "read"
+        ? "No read notifications."
+        : "No notifications yet";
 
   return (
     <View className="flex-1 bg-[#FFFDFB]">
@@ -259,10 +363,7 @@ export default function NotificationsScreen() {
         <View
           className="h-[66px] flex-row items-center justify-between overflow-hidden rounded-b-[20px] bg-[#1A1F36] px-5"
           style={{
-            shadowColor: "#000000",
-            shadowOpacity: 0.18,
-            shadowRadius: 12,
-            shadowOffset: { width: 0, height: 6 },
+            boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.18)",
             elevation: 18,
           }}
         >
@@ -272,11 +373,18 @@ export default function NotificationsScreen() {
           >
             Notifications
           </Text>
-          <Pressable hitSlop={10}>
+          <Pressable hitSlop={10} onPress={() => setFilterModalVisible(true)}>
             <Ionicons name="options-outline" size={24} color="#FFFFFF" />
           </Pressable>
         </View>
       </SafeAreaView>
+
+      <NotificationFilterModal
+        visible={filterModalVisible}
+        selectedValue={statusFilter}
+        onClose={() => setFilterModalVisible(false)}
+        onSelect={(value) => setStatusFilter(value)}
+      />
 
       <ScrollView
         className="flex-1"
@@ -284,21 +392,14 @@ export default function NotificationsScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View className="px-5">
-          {isLoading ? (
-            <View
-              className="items-center justify-center rounded-[10px] border border-[#E8E1E6] bg-white py-10"
-              style={{ minHeight: 180 }}
-            >
-              <ActivityIndicator size="large" color="#1A1F36" />
-              <Text
-                className="mt-3 text-[13px] text-[#6F6F82]"
-                style={{ fontFamily: "Montserrat_400Regular" }}
-              >
-                Loading notifications
-              </Text>
-            </View>
-          ) : notifications.length > 0 ? (
-            notifications.map((notification, index) => (
+          {shouldShowSkeleton ? (
+            <>
+              {Array.from({ length: 5 }).map((_, index) => (
+                <NotificationSkeletonCard key={`notification-skeleton-${index}`} />
+              ))}
+            </>
+          ) : displayedNotifications.length > 0 ? (
+            displayedNotifications.map((notification, index) => (
               <NotificationCard
                 key={`${notification.notification_id ?? "notification"}-${index}`}
                 notification={notification}
@@ -306,7 +407,7 @@ export default function NotificationsScreen() {
               />
             ))
           ) : (
-            <View className="items-center justify-center rounded-[10px] border border-[#E8E1E6] bg-white px-6 py-10">
+            <View className="items-center justify-center px-6" style={{ minHeight: 520 }}>
               <View
                 className="h-12 w-12 items-center justify-center rounded-[16px]"
                 style={{ backgroundColor: "rgba(37,99,235,0.08)" }}
@@ -317,18 +418,17 @@ export default function NotificationsScreen() {
                 className="mt-3 text-center text-[14px] text-[#1A1F36]"
                 style={{ fontFamily: "Montserrat_600SemiBold" }}
               >
-                No Notifications Yet
-              </Text>
-              <Text
-                className="mt-1 text-center text-[12px] leading-5 text-[#6F6F82]"
-                style={{ fontFamily: "Montserrat_400Regular" }}
-              >
-                New updates and alerts will appear here.
+                {emptyMessage}
               </Text>
             </View>
           )}
         </View>
       </ScrollView>
+
+      <NotificationModal
+        notification={selectedNotification}
+        onClose={() => setSelectedNotification(null)}
+      />
     </View>
   );
 }

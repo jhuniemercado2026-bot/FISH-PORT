@@ -5,8 +5,36 @@ import { ReactNode, useState } from "react";
 const parseIsoDateTime = (value?: string | null) => {
   if (!value) return null;
   const raw = String(value).trim();
-  const withoutZone = raw.replace(/([+-]\d{2}:\d{2})$/, "").replace(/Z$/, "");
-  const match = withoutZone.match(
+
+  if (/(Z|[+-]\d{2}:?\d{2})$/i.test(raw)) {
+    const parsedDate = new Date(raw.replace(/\.(\d{3})\d+/, ".$1"));
+    if (Number.isNaN(parsedDate.getTime())) return null;
+
+    const parts = new Intl.DateTimeFormat("en-PH", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(parsedDate);
+    const getPart = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((part) => part.type === type)?.value ?? "0");
+
+    return {
+      year: getPart("year"),
+      month: getPart("month"),
+      day: getPart("day"),
+      hour: getPart("hour"),
+      minute: getPart("minute"),
+      second: getPart("second"),
+      hasTime: true,
+    };
+  }
+
+  const match = raw.match(
     /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?)?$/
   );
 
@@ -19,6 +47,7 @@ const parseIsoDateTime = (value?: string | null) => {
     hour: Number(match[4] ?? "0"),
     minute: Number(match[5] ?? "0"),
     second: Number(match[6] ?? "0"),
+    hasTime: Boolean(match[4] && match[5]),
   };
 };
 
@@ -31,6 +60,23 @@ const formatDateOnly = (value?: string | null) => {
   return `${monthName} ${parsed.day}, ${parsed.year}`;
 };
 
+const formatTimeOnly = (value?: string | null) => {
+  const parsed = parseIsoDateTime(value);
+  if (!parsed?.hasTime) return "";
+  return new Date(
+    parsed.year,
+    parsed.month - 1,
+    parsed.day,
+    parsed.hour,
+    parsed.minute,
+    parsed.second
+  ).toLocaleTimeString("en-PH", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).replace(/\b(am|pm)\b/i, (value) => value.toUpperCase());
+};
+
 export const VOID_REASON_OPTIONS = [
   { value: "duplicate-entry", label: "Duplicate Entry" },
   { value: "entered-by-mistake", label: "Entered by mistake" },
@@ -40,7 +86,7 @@ export const VOID_REASON_OPTIONS = [
 export const GENERIC_VOID_REASON_OPTIONS = [
   { value: "entered-by-mistake", label: "Entered by mistake" },
   { value: "wrong-boat-selected", label: "Wrong boat selected" },
-  { value: "wrong-date", label: "Wrong date" },
+  { value: "wrong-date", label: "Wrong date or time" },
   { value: "others", label: "Others" },
 ] as const;
 
@@ -72,7 +118,7 @@ function InlineErrorCard({ message }: { message?: string }) {
 type ReasonSelectProps = {
   label: string;
   value: string;
-  options: { value: string; label: string }[];
+  options: readonly { value: string; label: string }[];
   error?: string;
   onChangeValue: (value: string) => void;
 };
@@ -190,10 +236,10 @@ export function VoidTransactionModal({
 }: VoidTransactionModalProps) {
   const title =
     transactionType === "banyera"
-      ? "Void Banyera"
+      ? "Request to Void Banyera"
       : transactionType === "tickets"
-      ? "Void Ticket"
-      : "Void Docking";
+      ? "Request to Void Ticket"
+      : "Request to Void Docking";
 
   const primaryLabel = transactionType === "tickets" ? "Vehicle Type" : "Boat Name";
   const primaryValue =
@@ -210,6 +256,8 @@ export function VoidTransactionModal({
       ? transaction?.transaction_date || transaction?.ticket_date || transaction?.created_at || transaction?.docking_date || null
       : transaction?.transaction_date || transaction?.docking_date || null;
   const dateText = dateValue ? formatDateOnly(dateValue) : "N/A";
+  const timeText = formatTimeOnly(dateValue);
+  const displayDateText = transactionType === "tickets" || !timeText ? dateText : `${dateText} at ${timeText}`;
 
   const feeValue =
     transactionType === "banyera"
@@ -256,13 +304,13 @@ export function VoidTransactionModal({
           <View className="mb-3 rounded-[14px] bg-[#F8F8FA] p-3">
             <Text className="text-[10px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
               {transactionType === "banyera"
-                ? "Banyera Date"
+                ? "Banyera Date & Time"
                 : transactionType === "docking"
-                ? "Docking Date"
+                ? "Docking Date & Time"
                 : "Ticket Date"}
             </Text>
             <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-              {dateText}
+              {displayDateText}
             </Text>
           </View>
 
@@ -294,7 +342,7 @@ export function VoidTransactionModal({
                 editable={!saving}
                 multiline
                 numberOfLines={4}
-                placeholder="Enter the void reason"
+                placeholder="Enter the specific reason"
                 placeholderTextColor="#9AA3AF"
                 className="mb-1 min-h-[110px] rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3 text-[14px] text-[#1A1F36]"
                 style={{ fontFamily: "Montserrat_400Regular", textAlignVertical: "top" }}
@@ -322,7 +370,7 @@ export function VoidTransactionModal({
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Text className="text-center text-[14px] font-semibold text-white" style={{ fontFamily: "Montserrat_600SemiBold" }}>
-                  Save
+                  Send Request
                 </Text>
               )}
             </Pressable>

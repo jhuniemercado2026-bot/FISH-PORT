@@ -12,8 +12,11 @@ class BanyeraTransaction extends Model
 
     protected $fillable = [
         'boat_id',
+        'owner_id',
         'transaction_date',
         'total_fee',
+        'owner_signature_data_url',
+        'owner_signature_signed_at',
         'created_by',
         'void_reason',
         'voided_at',
@@ -23,6 +26,7 @@ class BanyeraTransaction extends Model
     protected $casts = [
         'transaction_date' => 'datetime',
         'total_fee' => 'decimal:2',
+        'owner_signature_signed_at' => 'datetime',
         'voided_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
@@ -95,8 +99,11 @@ class BanyeraTransaction extends Model
             ->select([
                 'banyera_transactions.banyera_id',
                 'banyera_transactions.boat_id',
+                'banyera_transactions.owner_id',
                 'banyera_transactions.transaction_date',
                 'banyera_transactions.total_fee',
+                'banyera_transactions.owner_signature_data_url',
+                'banyera_transactions.owner_signature_signed_at',
                 'banyera_transactions.created_by',
                 'banyera_transactions.void_reason',
                 'banyera_transactions.voided_at',
@@ -106,7 +113,8 @@ class BanyeraTransaction extends Model
             ])
             ->with([
                 'boat:boat_id,boat_name,owner_id,boat_type_id,image_path,status,deleted_at',
-                'boat.owner:owner_id,owner_firstname,owner_lastname,address,contact_number,deleted_at',
+                'boat.owner:owner_id,owner_firstname,owner_lastname,address,contact_number,owner_signature_data_url,owner_signature_public_id,owner_signature_signed_at,owner_signature_updated_by,deleted_at',
+                'boat.owner.ownerSignatureUpdatedByUser:user_id,first_name,last_name,email',
                 'boat.boatType:boat_type_id,type_name,deleted_at',
                 'items:item_id,banyera_id,classification_id,quantity,fee_id,subtotal,daug',
                 'items.classification:classification_id,classification_name',

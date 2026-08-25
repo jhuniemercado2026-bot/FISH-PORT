@@ -1,6 +1,8 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Broadcast;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ActivityLogController;
 use App\Http\Controllers\UserController;
@@ -32,6 +34,7 @@ use App\Http\Controllers\RegisteredBoatsReportController;
 use App\Http\Controllers\OwnerInfoReportController;
 use App\Http\Controllers\DockingReportController;
 use App\Http\Controllers\BackupRecoveryController;
+use App\Http\Controllers\VoidRequestController;
 
 /*
 |--------------------------------------------------------------------------
@@ -40,6 +43,9 @@ use App\Http\Controllers\BackupRecoveryController;
 */
 
 Route::post('login', [AuthController::class, 'login']);
+Route::post('forgot-password/check-email', [AuthController::class, 'checkForgotPasswordEmail']);
+Route::post('forgot-password/verify-code', [AuthController::class, 'verifyForgotPasswordCode']);
+Route::post('forgot-password/reset', [AuthController::class, 'resetForgotPassword']);
 
 /*
 |--------------------------------------------------------------------------
@@ -51,6 +57,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Auth
     Route::post('logout', [AuthController::class, 'logout']);
     Route::get('me',      [AuthController::class, 'me']);
+    Route::post('broadcasting/auth', fn (Request $request) => Broadcast::auth($request));
     Route::post('me/password/send-code', [UserController::class, 'sendAuthenticatedPasswordChangeCode']);
     Route::post('me/password/verify-code', [UserController::class, 'verifyAuthenticatedPasswordChangeCode']);
     Route::get('dashboard-data', [DashboardController::class, 'index']);
@@ -67,6 +74,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('activity-logs', [ActivityLogController::class, 'index']); // GET /api/activity-logs
     Route::get('notifications', [NotificationController::class, 'index']);
     Route::get('transaction-lock', [\App\Http\Controllers\TransactionLockController::class, 'index']);
+    Route::post('void-requests', [VoidRequestController::class, 'store']);
     Route::patch('notifications/{id}/read', [NotificationController::class, 'markRead']);
         Route::get('notifications/summary', [NotificationController::class, 'summary']);
 
@@ -117,6 +125,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('boat-owners')->group(function () {
         Route::get('/',              [BoatOwnerController::class, 'index']);   // GET    /api/boat-owners
         Route::post('/',             [BoatOwnerController::class, 'store']);   // POST   /api/boat-owners
+        Route::get('{id}/signature-audits', [BoatOwnerController::class, 'signatureAudits']); // GET /api/boat-owners/{id}/signature-audits
         Route::get('{id}',           [BoatOwnerController::class, 'show']);    // GET    /api/boat-owners/{id}
         Route::put('{id}',           [BoatOwnerController::class, 'update']);  // PUT    /api/boat-owners/{id}
         Route::patch('{id}/archive', [BoatOwnerController::class, 'destroy']); // PATCH  /api/boat-owners/{id}/archive
@@ -173,9 +182,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('collections', [CollectionController::class, 'index']);
 
     Route::prefix('remittances')->group(function () {
-        Route::get('today-system-cash-received', [RemittanceController::class, 'todaySystemCashReceived']);
+        Route::get('today-collection', [RemittanceController::class, 'todayCollection']);
         Route::get('/', [RemittanceController::class, 'index']);
         Route::post('/', [RemittanceController::class, 'store']);
+        Route::get('{id}', [RemittanceController::class, 'show']);
         Route::put('{id}', [RemittanceController::class, 'update']);
         Route::patch('{id}/remit', [RemittanceController::class, 'remit']);
         Route::patch('{id}/unremit', [RemittanceController::class, 'unremit']);
@@ -270,6 +280,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('fish-classifications/{id}/restore', [BanyeraTransactionController::class, 'restoreClassification']);
     Route::get('banyera-transactions', [BanyeraTransactionController::class, 'index']);
     Route::post('banyera-transactions', [BanyeraTransactionController::class, 'store'])->middleware('transactions.unlocked');
+    Route::get('banyera-transactions/{id}', [BanyeraTransactionController::class, 'show']);
     Route::put('banyera-transactions/{id}', [BanyeraTransactionController::class, 'update'])->middleware('transactions.unlocked');
     Route::patch('banyera-transactions/{id}/void', [BanyeraTransactionController::class, 'void'])->middleware('transactions.unlocked');
     Route::patch('banyera-transactions/{id}/restore', [BanyeraTransactionController::class, 'unvoid'])->middleware('transactions.unlocked');

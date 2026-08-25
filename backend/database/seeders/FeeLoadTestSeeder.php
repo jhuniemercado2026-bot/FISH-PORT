@@ -15,6 +15,18 @@ use Illuminate\Support\Facades\Hash;
 class FeeLoadTestSeeder extends Seeder
 {
     private const FEE_COUNT = 110;
+    private const VEHICLE_TYPE_NAMES = [
+        'Tricab',
+        'Rela',
+        'Motorcycle',
+        'Multicab',
+        'Private Car',
+        'Van',
+        'Pickup',
+        'Truck',
+        'Delivery Van',
+        'Tricycle',
+    ];
 
     private static function startDate(): string
     {
@@ -50,19 +62,32 @@ class FeeLoadTestSeeder extends Seeder
             throw new \RuntimeException('Expected current boat type seed data to exist before seeding fees.');
         }
 
-        $vehicleTypes = VehicleType::query()
-            ->where('type_name', 'like', 'Vehicle Ticket Load Type %')
-            ->orderBy('vehicle_type_id')
-            ->get();
+        $vehicleTypes = collect(self::VEHICLE_TYPE_NAMES)->map(function (string $typeName, int $index) use ($user) {
+            $oldTypeName = sprintf('Vehicle Ticket Load Type %02d', $index + 1);
+            $vehicleType = VehicleType::withTrashed()->where('type_name', $typeName)->first();
 
-        if ($vehicleTypes->isEmpty()) {
-            $vehicleTypes = collect(range(1, 10))->map(function (int $number) use ($user) {
-                return VehicleType::firstOrCreate(
-                    ['type_name' => sprintf('Vehicle Ticket Load Type %02d', $number)],
-                    ['created_by' => $user->user_id]
-                );
-            })->values();
-        }
+            if (!$vehicleType) {
+                $vehicleType = VehicleType::withTrashed()->where('type_name', $oldTypeName)->first();
+
+                if ($vehicleType) {
+                    $vehicleType->type_name = $typeName;
+                    $vehicleType->save();
+                }
+            }
+
+            if (!$vehicleType) {
+                $vehicleType = VehicleType::create([
+                    'type_name' => $typeName,
+                    'created_by' => $user->user_id,
+                ]);
+            }
+
+            if ($vehicleType->trashed()) {
+                $vehicleType->restore();
+            }
+
+            return $vehicleType;
+        })->values();
 
         $feeIds = Fee::query()
             ->where('created_by', $user->user_id)

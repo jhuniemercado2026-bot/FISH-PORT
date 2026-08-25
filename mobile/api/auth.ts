@@ -28,6 +28,12 @@ let authSession: AuthSession | null = null;
 export function setAuthSession(session: AuthSession | null) {
   authSession = session;
   useProfileStore.getState().initProfile(session?.user ?? null);
+
+  if (!session) {
+    useHomeStore.getState().clearHomeData();
+    return;
+  }
+
   useHomeStore.getState().setHomeData({
     userFullName: session?.user?.full_name?.trim() ?? "",
     userEmail: session?.user?.email?.trim() ?? "",

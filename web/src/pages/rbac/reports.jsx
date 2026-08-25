@@ -33,6 +33,7 @@ import { useBanyeraReportDataQuery } from "../../hooks/useBanyeraDataQuery";
 import { useBfarReportDataQuery } from "../../hooks/useBfarReportDataQuery";
 import { useFiscalYearStore, getFiscalYearOptions } from "../../store/fiscalYearStore";
 import { showBottomToast } from "../../store/bottomToastStore";
+import { cacheTab, getCachedTab } from "../../utils/tabSession";
 
 const FONT = "'Montserrat', sans-serif";
 const antTheme = {
@@ -62,6 +63,8 @@ const REPORT_CONTENT = {
 };
 
 const HEAD_ONLY_REPORT_KEYS = ["fees"];
+const REPORTS_TAB_STORAGE_KEY = "opol:reports:active-tab";
+const REPORTS_PREVIEW_STORAGE_KEY = "opol:reports:preview-cache";
 
 const MONTH_OPTIONS = [
   { value: "01", label: "January" },
@@ -127,10 +130,86 @@ const createBlobPdfPreviewUrl = (pdfBytes, fileName) => {
   return URL.createObjectURL(pdfFile);
 };
 
+const pdfBytesToBase64 = (pdfBytes) => {
+  const bytes = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+
+  return window.btoa(binary);
+};
+
+const base64ToPdfBytes = (base64) => {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+};
+
+const readStoredReportPreviewCache = () => {
+  try {
+    const rawCache = window.sessionStorage.getItem(REPORTS_PREVIEW_STORAGE_KEY);
+    const parsedCache = rawCache ? JSON.parse(rawCache) : {};
+
+    return Object.entries(parsedCache ?? {}).reduce((cache, [reportKey, preview]) => {
+      if (!preview?.pdfBase64) return cache;
+
+      const fileName = preview.fileName || getPdfFileName(reportKey, preview.generatedFilters ?? {});
+      cache[reportKey] = {
+        url: createBlobPdfPreviewUrl(base64ToPdfBytes(preview.pdfBase64), fileName),
+        fileName,
+        generatedFilters: preview.generatedFilters ?? {},
+        pdfBase64: preview.pdfBase64,
+      };
+      return cache;
+    }, {});
+  } catch {
+    return {};
+  }
+};
+
+const writeStoredReportPreviewCache = (cache) => {
+  try {
+    const serializableCache = Object.entries(cache ?? {}).reduce((nextCache, [reportKey, preview]) => {
+      if (!preview?.pdfBase64) return nextCache;
+
+      nextCache[reportKey] = {
+        fileName: preview.fileName,
+        generatedFilters: preview.generatedFilters ?? {},
+        pdfBase64: preview.pdfBase64,
+      };
+      return nextCache;
+    }, {});
+
+    window.sessionStorage.setItem(REPORTS_PREVIEW_STORAGE_KEY, JSON.stringify(serializableCache));
+  } catch {
+    // Ignore quota/security failures; in-memory report preview still works for this visit.
+  }
+};
+
+const formatCoverageDateLabel = (value) => {
+  if (!value) return "";
+  const normalized = String(value).slice(0, 10);
+  const date = new Date(`${normalized}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return normalized;
+  return date.toLocaleDateString("en-PH", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
 const getExportReportHeader = ({ activeReport, filters }) => {
   const filterType = filters?.filterType;
   const monthLabel = MONTH_OPTIONS.find((option) => option.value === filters?.month)?.label;
-  const formattedDate = filters?.date || "";
+  const formattedDate = formatCoverageDateLabel(filters?.date);
   const formattedMonth = monthLabel ? `${monthLabel} ${filters?.year || ""}`.trim() : `${filters?.year || ""}`.trim();
   const formattedYear = filters?.year || "";
 
@@ -215,7 +294,7 @@ const getExportReportHeader = ({ activeReport, filters }) => {
       };
     case "fisheries-bfar":
       return {
-        reportTitle: "Fisheries (BFAR) Report",
+        reportTitle: "BFAR Report",
         reportTypeLabel:
           filterType === "monthly"
             ? "Monthly Fisheries"
@@ -237,7 +316,7 @@ const getExportReportHeader = ({ activeReport, filters }) => {
       };
     case "daily-vehicle-ticket":
       return {
-        reportTitle: "Vehicle Ticket Report",
+        reportTitle: "Daily Vehicle Ticket Report",
         reportTypeLabel:
           filterType === "monthly"
             ? "Vehicle Ticket Monthly"
@@ -259,7 +338,7 @@ const getExportReportHeader = ({ activeReport, filters }) => {
       };
     case "vehicle-ticket":
       return {
-        reportTitle: "Vehicle Ticket Report",
+        reportTitle: "Annual Vehicle Ticket Report",
         reportTypeLabel: "Yearly",
         coverageLabel: "Coverage Year",
         coverageValue: formattedYear,
@@ -511,6 +590,66 @@ const getReportRowsForExport = ({
   if (activeReport === "billing") return billingReportData?.rows ?? billingReportData?.bills ?? [];
   if (activeReport === "fees") return feeReportData?.fees ?? [];
   return [];
+};
+
+const isVoidedVehicleTicket = (ticket) =>
+  Boolean(ticket?.is_voided || ticket?.voided_at) ||
+  String(ticket?.status || "").toLowerCase() === "voided";
+
+const getAnnualVehicleTicketRowsForExport = (rows, filters = {}) => {
+  const coverageYear = String(filters?.year || "").slice(0, 4);
+  if (!Array.isArray(rows) || !coverageYear) return rows;
+
+  return rows.filter((ticket) => {
+    const ticketType = String(ticket?.ticket_type || ticket?.ticketType || "").toLowerCase();
+    const ticketDate = String(ticket?.ticket_date || ticket?.issued_at || ticket?.created_at || "");
+
+    if (ticketType !== "annual") return false;
+    if (isVoidedVehicleTicket(ticket)) return false;
+    return ticketDate.slice(0, 4) === coverageYear;
+  });
+};
+
+const ticketMatchesCoverage = (ticketDate, filters = {}) => {
+  const normalizedDate = String(ticketDate || "");
+
+  if (filters?.filterType === "monthly") {
+    const coverageMonth = `${String(filters?.year || "").slice(0, 4)}-${String(filters?.month || "").padStart(2, "0")}`;
+    return coverageMonth.length === 7 && normalizedDate.slice(0, 7) === coverageMonth;
+  }
+
+  if (filters?.filterType === "yearly") {
+    const coverageYear = String(filters?.year || "").slice(0, 4);
+    return Boolean(coverageYear) && normalizedDate.slice(0, 4) === coverageYear;
+  }
+
+  const coverageDate = String(filters?.date || "").slice(0, 10);
+  return Boolean(coverageDate) && normalizedDate.slice(0, 10) === coverageDate;
+};
+
+const getDailyVehicleTicketRowsForExport = (rows, filters = {}) => {
+  if (!Array.isArray(rows)) return rows;
+
+  return rows.filter((ticket) => {
+    const ticketType = String(ticket?.ticket_type || ticket?.ticketType || "").toLowerCase();
+    const ticketDate = String(ticket?.ticket_date || ticket?.issued_at || ticket?.created_at || "");
+
+    if (ticketType !== "daily") return false;
+    if (isVoidedVehicleTicket(ticket)) return false;
+    return ticketMatchesCoverage(ticketDate, filters);
+  });
+};
+
+const getRowsForExcelExport = ({ activeReport, rows, filters }) => {
+  if (activeReport === "daily-vehicle-ticket") {
+    return getDailyVehicleTicketRowsForExport(rows, filters);
+  }
+
+  if (activeReport === "vehicle-ticket") {
+    return getAnnualVehicleTicketRowsForExport(rows, filters);
+  }
+
+  return rows;
 };
 
 const getExportColumnsForReport = ({
@@ -1125,11 +1264,15 @@ const getExportData = ({
 });
 
 const getExportBlobAndName = async (context) => {
-  const rows = getExportData(context);
+  const filters = getExportFilters(context);
+  const rows = getRowsForExcelExport({
+    activeReport: context.activeReport,
+    rows: getExportData(context),
+    filters,
+  });
   if (!Array.isArray(rows) || rows.length === 0) {
     return null;
   }
-  const filters = getExportFilters(context);
   const fileName = getExportFileName(context.activeReport, filters);
   const columns = getExportColumnsForReport({
     activeReport: context.activeReport,
@@ -1145,7 +1288,7 @@ const getExportBlobAndName = async (context) => {
     activeReport: context.activeReport,
     filters,
   });
-  const reportSummary = getExportReportSummary({
+  let reportSummary = getExportReportSummary({
     activeReport: context.activeReport,
     revenueReportData: context.revenueReportData,
     remittanceReportData: context.remittanceReportData,
@@ -1165,6 +1308,20 @@ const getExportBlobAndName = async (context) => {
 
   if (!hasExportableRows) {
     return null;
+  }
+
+  if (context.activeReport === "daily-vehicle-ticket" || context.activeReport === "vehicle-ticket") {
+    const ticketFeeTotal = exportRows.reduce(
+      (sum, row) => sum + Number(row?.ticketFee || 0),
+      0,
+    );
+    reportSummary = {
+      totalLabel: "Total Ticket Fee:",
+      totalValue: `PHP ${ticketFeeTotal.toLocaleString("en-PH", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`,
+    };
   }
 
   const blob = await createExcelExportBlob({
@@ -1239,8 +1396,17 @@ const SuperReports = () => {
     () => REPORT_TABS.filter((tab) => isAllowedReportKey(tab.key)),
     [isHead],
   );
+  const availableReportTabKeys = useMemo(
+    () => availableReportTabs.map((tab) => tab.key),
+    [availableReportTabs],
+  );
   const defaultReportTab = availableReportTabs[0]?.key || "revenue";
-  const initialReportTab = isAllowedReportKey(requestedReportTab) ? requestedReportTab : defaultReportTab;
+  const cachedReportTab = getCachedTab(REPORTS_TAB_STORAGE_KEY, availableReportTabKeys, defaultReportTab);
+  const initialReportTab = isAllowedReportKey(requestedReportTab)
+    ? requestedReportTab
+    : requestedTab
+      ? defaultReportTab
+      : cachedReportTab;
   const [activeItem, setActiveItem] = useState(
     initialReportTab === "remittance" ? "Remittance" : "Reports",
   );
@@ -1257,7 +1423,7 @@ const SuperReports = () => {
   const [reportBuildKey, setReportBuildKey] = useState(0);
   const [reportBuildRequest, setReportBuildRequest] = useState(null);
   const [generatedFilters, setGeneratedFilters] = useState({});
-  const reportPreviewCacheRef = useRef({});
+  const reportPreviewCacheRef = useRef(readStoredReportPreviewCache());
   const ownerInfoReportDataRef = useRef(null);
   const dockingReportDataRef = useRef(null);
   const banyeraReportDataRef = useRef(null);
@@ -1292,6 +1458,7 @@ const SuperReports = () => {
     if (isAllowedReportKey(requestedReportTab)) {
       setActiveReport(requestedReportTab);
       setActiveItem(requestedReportTab === "remittance" ? "Remittance" : "Reports");
+      cacheTab(REPORTS_TAB_STORAGE_KEY, requestedReportTab, availableReportTabKeys);
       if (["daily", "monthly", "yearly"].includes(requestedTab)) {
         setRevenueFilterType(requestedTab);
       }
@@ -1301,9 +1468,13 @@ const SuperReports = () => {
       return;
     }
 
-    setActiveReport(defaultReportTab);
-    setActiveItem(defaultReportTab === "remittance" ? "Remittance" : "Reports");
-  }, [defaultReportTab, requestedDate, requestedReportTab, requestedTab]);
+    const nextReportTab = requestedTab
+      ? defaultReportTab
+      : getCachedTab(REPORTS_TAB_STORAGE_KEY, availableReportTabKeys, defaultReportTab);
+    setActiveReport(nextReportTab);
+    setActiveItem(nextReportTab === "remittance" ? "Remittance" : "Reports");
+    cacheTab(REPORTS_TAB_STORAGE_KEY, nextReportTab, availableReportTabKeys);
+  }, [availableReportTabKeys, defaultReportTab, requestedDate, requestedReportTab, requestedTab]);
 
   useEffect(() => {
     if (window.innerWidth >= 1024 && sidebarOpen) {
@@ -1567,6 +1738,10 @@ const SuperReports = () => {
     setReportBuildRequest(null);
   };
 
+  useEffect(() => {
+    restoreCachedReportPreview(activeReport);
+  }, []);
+
   const resetReportFilters = () => {
     setDailyDate(undefined);
     setMonthlyDate(undefined);
@@ -1590,6 +1765,7 @@ const SuperReports = () => {
     resetReportFilters();
     setActiveReport(nextReport);
     setActiveItem(nextReport === "remittance" ? "Remittance" : "Reports");
+    cacheTab(REPORTS_TAB_STORAGE_KEY, nextReport, availableReportTabKeys);
     restoreCachedReportPreview(nextReport);
   };
 
@@ -2094,6 +2270,7 @@ const SuperReports = () => {
                             : null;
 
         if (!pdfBytes) return;
+        const pdfBase64 = pdfBytesToBase64(pdfBytes);
         nextUrl = createBlobPdfPreviewUrl(pdfBytes, nextFileName);
         if (!isActive.current) {
           if (nextUrl.startsWith("blob:")) URL.revokeObjectURL(nextUrl);
@@ -2109,7 +2286,9 @@ const SuperReports = () => {
           url: nextUrl,
           fileName: nextFileName,
           generatedFilters: { ...generatedFilters },
+          pdfBase64,
         };
+        writeStoredReportPreviewCache(reportPreviewCacheRef.current);
         setReportPdfUrl(nextUrl);
         setReportPdfFileName(nextFileName);
       } catch (error) {

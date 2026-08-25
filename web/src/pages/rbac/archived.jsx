@@ -20,6 +20,8 @@ import { showBottomToast } from "../../store/bottomToastStore";
 import { useSidebar } from "../../store/sidebarStore";
 import { useArchivedDataQuery } from "../../hooks/useArchivedDataQuery";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
+import { isHeadRole } from "../../utils/transactionLock";
+import { cacheTab, getCachedTab } from "../../utils/tabSession";
 import StatusPill from "../../components/StatusPill";
 import TableCard from "../../components/TableCard";
 import OverviewCard from "../../components/Overview";
@@ -44,6 +46,8 @@ const TABS = [
   { key: "fishClassifications", label: "Fish Classifications", icon: IoFishOutline },
   { key: "vehicleTypes", label: "Vehicle Types", icon: IoCarOutline },
 ];
+const ARCHIVES_TAB_STORAGE_KEY = "opol:archives:active-tab";
+const ARCHIVES_TAB_KEYS = TABS.map((tab) => tab.key);
 
 // Table header matches the visual language used in Registered Boats.
 const TH = ({ children }) => (
@@ -176,7 +180,7 @@ const RESOURCE_META = {
 // Page component keeps layout wiring separate from archive presentation logic.
 const SuperArchived = () => {
   const [activeItem, setActiveItem] = useState("Archives");
-  const [activeTab, setActiveTab] = useState("boats");
+  const [activeTab, setActiveTab] = useState(() => getCachedTab(ARCHIVES_TAB_STORAGE_KEY, ARCHIVES_TAB_KEYS, "boats"));
   const [currentPage, setCurrentPage] = useState(1);
   const setRequestedPage = setCurrentPage;
   const requestedPage = currentPage;
@@ -194,6 +198,7 @@ const SuperArchived = () => {
   const [contentMargin, setContentMargin] = useState(() => (sidebarCollapsed ? 72 : 256));
 
   const queryClient = useQueryClient();
+  const isHeadViewOnly = isHeadRole();
   const activeSearchValue = activeTab === "fishClassifications"
     ? debouncedFishNameSearch
     : activeTab === "vehicleTypes"
@@ -288,6 +293,7 @@ const SuperArchived = () => {
   }, [requestedPage, totalPages]);
 
   const switchTab = (nextTab) => {
+    cacheTab(ARCHIVES_TAB_STORAGE_KEY, nextTab, ARCHIVES_TAB_KEYS);
     setCurrentPage(1);
     setActiveTab(nextTab);
     setSearch("");
@@ -297,6 +303,8 @@ const SuperArchived = () => {
   };
 
   const handleRestore = async (item) => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -398,6 +406,8 @@ const SuperArchived = () => {
   };
 
   const renderRestoreAction = (item) => {
+    if (isHeadViewOnly) return null;
+
     const itemKey = currentMeta.getKey(item);
     const isRestoring = restoringKey === itemKey;
     const tooltipTitle = isTransactionLocked
@@ -436,14 +446,14 @@ const SuperArchived = () => {
           "text-md",
           "date",
           "time",
-          "action",
         ],
-        boatTypes: ["text-lg", "pill", "text-md", "date", "time", "action"],
-        fishClassifications: ["text-lg", "pill", "text-md", "date", "time", "action"],
-        vehicleTypes: ["text-lg", "pill", "text-md", "date", "time", "action"],
-        boatOwners: ["text-lg", "text-xl", "text-md", "pill", "text-md", "date", "time", "action"],
+        boatTypes: ["text-lg", "pill", "text-md", "date", "time"],
+        fishClassifications: ["text-lg", "pill", "text-md", "date", "time"],
+        vehicleTypes: ["text-lg", "pill", "text-md", "date", "time"],
+        boatOwners: ["text-lg", "text-xl", "text-md", "pill", "text-md", "date", "time"],
       };
-      const cellShapes = skeletonCellsByTab[activeTab] ?? skeletonCellsByTab.boatOwners;
+      const baseCellShapes = skeletonCellsByTab[activeTab] ?? skeletonCellsByTab.boatOwners;
+      const cellShapes = isHeadViewOnly ? baseCellShapes : [...baseCellShapes, "action"];
       const renderSkeletonCell = (shape, index) => {
         const shapeClassName = {
           image: "w-10 h-10 rounded-lg",
@@ -473,9 +483,9 @@ const SuperArchived = () => {
 
     if (paginatedItems.length === 0) {
       const colSpan =
-        activeTab === "boats" ? 9 :
-        activeTab === "fishClassifications" ? 7 :
-        activeTab === "vehicleTypes" ? 7 : 7;
+        activeTab === "boats" ? (isHeadViewOnly ? 7 : 8) :
+        activeTab === "boatOwners" ? (isHeadViewOnly ? 7 : 8) :
+        isHeadViewOnly ? 5 : 6;
 
       return (
         <tr>
@@ -520,11 +530,13 @@ const SuperArchived = () => {
           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{getUserDisplayName(getArchivedBy(boat))}</td>
           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatDateOnly(getArchivedAt(boat))}</td>
           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatTimeOnly(getArchivedAt(boat))}</td>
-          <td className="px-4 py-3">
-            <div className="flex items-center gap-2">
-              {renderRestoreAction(boat)}
-            </div>
-           </td>
+          {!isHeadViewOnly ? (
+            <td className="px-4 py-3">
+              <div className="flex items-center gap-2">
+                {renderRestoreAction(boat)}
+              </div>
+             </td>
+          ) : null}
          </tr>
       ));
     }
@@ -542,11 +554,13 @@ const SuperArchived = () => {
           <td className="px-4 py-3 text-[13px]" style={{ color: "#1a1f36" }}>{getUserDisplayName(getArchivedBy(boatType))}</td>
           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatDateOnly(getArchivedAt(boatType))}</td>
           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatTimeOnly(getArchivedAt(boatType))}</td>
-          <td className="px-4 py-3">
-            <div className="flex items-center gap-2">
-              {renderRestoreAction(boatType)}
-            </div>
-           </td>
+          {!isHeadViewOnly ? (
+            <td className="px-4 py-3">
+              <div className="flex items-center gap-2">
+                {renderRestoreAction(boatType)}
+              </div>
+             </td>
+          ) : null}
          </tr>
       ));
     }
@@ -564,11 +578,13 @@ const SuperArchived = () => {
           <td className="px-4 py-3 text-[13px]" style={{ color: "#1a1f36" }}>{getUserDisplayName(getArchivedBy(classification))}</td>
           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatDateOnly(getArchivedAt(classification))}</td>
           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatTimeOnly(getArchivedAt(classification))}</td>
-          <td className="px-4 py-3">
-            <div className="flex items-center gap-2">
-              {renderRestoreAction(classification)}
-            </div>
-            </td>
+          {!isHeadViewOnly ? (
+            <td className="px-4 py-3">
+              <div className="flex items-center gap-2">
+                {renderRestoreAction(classification)}
+              </div>
+              </td>
+          ) : null}
           </tr>
       ));
     }
@@ -586,11 +602,13 @@ const SuperArchived = () => {
           <td className="px-4 py-3 text-[13px]" style={{ color: "#1a1f36" }}>{getUserDisplayName(getArchivedBy(vehicleType))}</td>
           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatDateOnly(getArchivedAt(vehicleType))}</td>
           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatTimeOnly(getArchivedAt(vehicleType))}</td>
-          <td className="px-4 py-3">
-            <div className="flex items-center gap-2">
-              {renderRestoreAction(vehicleType)}
-            </div>
-            </td>
+          {!isHeadViewOnly ? (
+            <td className="px-4 py-3">
+              <div className="flex items-center gap-2">
+                {renderRestoreAction(vehicleType)}
+              </div>
+              </td>
+          ) : null}
           </tr>
       ));
     }
@@ -609,11 +627,13 @@ const SuperArchived = () => {
         <td className="px-4 py-3 text-[13px]" style={{ color: "#1a1f36" }}>{getUserDisplayName(getArchivedBy(owner))}</td>
         <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatDateOnly(getArchivedAt(owner))}</td>
         <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatTimeOnly(getArchivedAt(owner))}</td>
-        <td className="px-4 py-3">
-          <div className="flex items-center gap-2">
-            {renderRestoreAction(owner)}
-          </div>
-          </td>
+        {!isHeadViewOnly ? (
+          <td className="px-4 py-3">
+            <div className="flex items-center gap-2">
+              {renderRestoreAction(owner)}
+            </div>
+            </td>
+        ) : null}
         </tr>
     ));
   };
@@ -629,7 +649,7 @@ const SuperArchived = () => {
           <TH>Archived By</TH>
           <TH>Archived At</TH>
           <TH>Time</TH>
-          <TH>Action</TH>
+          {!isHeadViewOnly ? <TH>Action</TH> : null}
         </tr>
       );
     }
@@ -642,7 +662,7 @@ const SuperArchived = () => {
           <TH>Archived By</TH>
           <TH>Archived At</TH>
           <TH>Time</TH>
-          <TH>Action</TH>
+          {!isHeadViewOnly ? <TH>Action</TH> : null}
         </tr>
       );
     }
@@ -655,7 +675,7 @@ const SuperArchived = () => {
           <TH>Archived By</TH>
           <TH>Archived At</TH>
           <TH>Time</TH>
-          <TH>Action</TH>
+          {!isHeadViewOnly ? <TH>Action</TH> : null}
         </tr>
       );
     }
@@ -668,7 +688,7 @@ const SuperArchived = () => {
           <TH>Archived By</TH>
           <TH>Archived At</TH>
           <TH>Time</TH>
-          <TH>Action</TH>
+          {!isHeadViewOnly ? <TH>Action</TH> : null}
         </tr>
       );
     }
@@ -682,7 +702,7 @@ const SuperArchived = () => {
         <TH>Archived By</TH>
         <TH>Archived At</TH>
         <TH>Time</TH>
-        <TH>Action</TH>
+        {!isHeadViewOnly ? <TH>Action</TH> : null}
       </tr>
     );
   };
@@ -751,7 +771,7 @@ const SuperArchived = () => {
                 title={currentMeta.label}
                 subtitle="All archived records stored in the system."
                 loading={fetching}
-                headerActionsSkeletonCount={2}
+                headerActionsSkeletonCount={isHeadViewOnly ? 1 : 2}
                 bodyClassName="overflow-x-auto"
                 actions={
                   <div className="flex items-center gap-2 flex-wrap">
@@ -814,7 +834,16 @@ const SuperArchived = () => {
                 }}
               >
                 <div className="overflow-x-auto">
-                  <table className="w-full border-collapse" style={{ minWidth: activeTab === "boats" ? 1080 : activeTab === "fishClassifications" || activeTab === "vehicleTypes" || activeTab === "boatTypes" ? 780 : 860 }}>
+                  <table
+                    className="w-full border-collapse"
+                    style={{
+                      minWidth: activeTab === "boats"
+                        ? isHeadViewOnly ? 960 : 1080
+                        : activeTab === "fishClassifications" || activeTab === "vehicleTypes" || activeTab === "boatTypes"
+                          ? isHeadViewOnly ? 680 : 780
+                          : isHeadViewOnly ? 760 : 860,
+                    }}
+                  >
                     <thead>{renderTableHeader()}</thead>
                     <tbody>{renderRows()}</tbody>
                   </table>
@@ -824,7 +853,7 @@ const SuperArchived = () => {
             </div>
           </main>
         </div>
-        <RestoreModal
+        {!isHeadViewOnly ? <RestoreModal
           open={actionModal.open}
           title={
             activeTab === "boats" ? "Restore Boat" :
@@ -841,7 +870,7 @@ const SuperArchived = () => {
             await handleRestore(actionModal.item);
             setActionModal({ open: false, item: null });
           }}
-        />
+        /> : null}
       </div>
   );
 };

@@ -22,7 +22,6 @@ import {
   IoReloadOutline,
   IoSearchOutline,
   IoTimeOutline,
-  IoTrashOutline,
   IoArchiveOutline,
   IoWarningOutline,
 } from "react-icons/io5";
@@ -50,9 +49,11 @@ import { showAddedToast, showBottomToast, showNoChangesToast, showUpdatedToast }
 import api from "../../api/axios";
 import { useVehicleTicketsDataQuery, useVehicleTicketsLookupsQuery, useVehicleTypesDataQuery } from "../../hooks/useVehicleTicketsDataQuery";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
+import { isHeadRole } from "../../utils/transactionLock";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { upsertArchiveItemInDataCache } from "../../utils/archiveCache";
-import { adjustTodaySystemCashReceived, invalidateTodaySystemCashReceived } from "../../utils/remittanceCashCache";
+import { cacheTab, getCachedTab } from "../../utils/tabSession";
+import { adjustTodayCollection, invalidateTodayCollection } from "../../utils/remittanceCollectionCache";
 import { upsertVehicleTicketInCache, updateVehicleTicketStatsInCache, syncVehicleTypeUsageInCache, removeVehicleTicketFromCache } from "../../utils/ticketsCache";
 
 const FONT = "'Montserrat', sans-serif";
@@ -83,6 +84,8 @@ const TABS = [
 const VEHICLE_TICKET_SEARCH_GROUPS = ["Vehicle Tickets", "Daily Vehicle Tickets", "Annual Vehicle Tickets"];
 const VEHICLE_TYPE_SEARCH_GROUPS = ["Vehicle Type", "Vehicle Types"];
 const VEHICLE_TICKET_TABS = new Set(["daily", "annual", "types"]);
+const VEHICLE_TICKET_TAB_KEYS = Array.from(VEHICLE_TICKET_TABS);
+const VEHICLE_TICKET_TAB_STORAGE_KEY = "opol:vehicle-tickets:active-tab";
 const VEHICLE_TICKET_TAB_PATHS = {
   daily: "/daily-vehicle-tickets",
   annual: "/annual-vehicle-tickets",
@@ -92,7 +95,6 @@ const VEHICLE_TICKET_PATH_TABS = {
   "/daily-vehicle-tickets": "daily",
   "/annual-vehicle-tickets": "annual",
   "/vehicle-types": "types",
-  "/vehicle-tickets": "daily",
 };
 const getVehicleTicketTabPath = (tab) => VEHICLE_TICKET_TAB_PATHS[tab] ?? VEHICLE_TICKET_TAB_PATHS.daily;
 const isVehicleTicketSearchGroup = (group) => VEHICLE_TICKET_SEARCH_GROUPS.includes(String(group || ""));
@@ -118,6 +120,10 @@ const getVehicleTicketTabFromLocation = ({ highlightedSearchResult, pathname, se
 
   const tab = new URLSearchParams(search).get("tab");
   if (VEHICLE_TICKET_TABS.has(tab)) return tab;
+
+  if (pathname === "/vehicle-tickets") {
+    return getCachedTab(VEHICLE_TICKET_TAB_STORAGE_KEY, VEHICLE_TICKET_TAB_KEYS, "daily");
+  }
 
   return VEHICLE_TICKET_PATH_TABS[pathname] ?? "daily";
 };
@@ -329,6 +335,30 @@ const formatDisplayDate = (value) => {
   });
 };
 
+const hasTimeInDateValue = (value) => /(?:[T\s]\d{2}:\d{2})/.test(String(value || "").trim());
+
+const formatDisplayTime = (value) => {
+  if (!hasTimeInDateValue(value)) return "";
+  const raw = String(value || "").trim();
+  const match = raw.match(/[T\s](\d{2}):(\d{2})/);
+  if (!match) return "";
+
+  let hour = Number(match[1]);
+  const minute = match[2];
+  if (!Number.isFinite(hour)) return "";
+  const meridiem = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12 || 12;
+
+  return `${hour}:${minute} ${meridiem}`;
+};
+
+const formatDisplayDateTime = (value) => {
+  const dateText = formatDisplayDate(value);
+  const timeText = formatDisplayTime(value);
+  if (dateText === "-") return "-";
+  return timeText ? `${dateText} at ${timeText}` : dateText;
+};
+
 const buildDateFromParts = (year, month, day) => {
   if (!year || !month || !day) return "";
   return `${year}-${month}-${day}`;
@@ -441,7 +471,7 @@ const isValidAnnualTicket = (ticket) => {
   return true;
 };
 
-const buildDailyFeeItems = (fees, vehicleTypeId, quantity = "1", options = {}) => {
+const buildDailyFeeItems = (fees, vehicleTypeId, quantity = "0", options = {}) => {
   const { zeroDailyTicket = false } = options;
   const applicableFees = getDailyApplicableFees(fees, vehicleTypeId);
   const dailyFee = getAutoFeeForTicketType(applicableFees, "daily");
@@ -450,12 +480,12 @@ const buildDailyFeeItems = (fees, vehicleTypeId, quantity = "1", options = {}) =
   return [
     {
       fee_id: zeroDailyTicket ? "" : dailyFee ? String(dailyFee.fee_id) : "",
-      quantity,
+      quantity: quantity || "0",
       row_type: "daily",
     },
     {
       fee_id: banyeraFee ? String(banyeraFee.fee_id) : "",
-      quantity: "1",
+      quantity: "0",
       row_type: "banyera",
     },
   ];
@@ -517,6 +547,7 @@ const normalizeTicket = (ticket) => {
     ticketFee: Number(ticket.ticket_fee || 0),
     dailyFee: Number(ticket.daily_fee || 0),
     banyeraFee: Number(ticket.banyera_fee || 0),
+    ticketDateTime: ticket.ticket_date || "",
     rawTicketDate: normalizeDateString(ticket.ticket_date),
     rawEndDate: normalizeDateString(ticket.end_date),
     ticketDate: formatDisplayDate(ticket.ticket_date),
@@ -883,9 +914,9 @@ const VoidVehicleTicketModal = ({
           inputStyle={{ color: "#475569" }}
         />
         <ModalInput
-          label="Date"
+          label="Ticket Date"
           icon={IoCalendarOutline}
-          value={ticket.ticketDate || "-"}
+          value={ticket.ticketDate || formatDisplayDate(ticket.ticketDateTime || ticket.rawTicketDate)}
           readOnly
           disabled
           wrapperClassName="!bg-slate-100"
@@ -1016,7 +1047,7 @@ const AddVehicleTicketDrawer = ({
   useEffect(() => {
     if (!open) {
       setForm(getInitialTicketForm("daily"));
-      setFeeItems(buildDailyFeeItems(fees, "", "1"));
+      setFeeItems(buildDailyFeeItems(fees, "", "0"));
       setErrors({});
       return;
     }
@@ -1025,7 +1056,7 @@ const AddVehicleTicketDrawer = ({
       setFeeItems(buildFeeItemsFromRecord(editingTicket, fees, effectiveTicketType));
     } else {
       setForm(syncAnnualEndDate(getInitialTicketForm(effectiveTicketType), isAnnualTicket));
-      setFeeItems(isAnnualTicket ? getInitialFeeItems() : buildDailyFeeItems(fees, "", "1"));
+      setFeeItems(isAnnualTicket ? getInitialFeeItems() : buildDailyFeeItems(fees, "", "0"));
     }
     setErrors({});
   }, [draftTicketType, editingTicket, effectiveTicketType, fees, isAnnualTicket, open]);
@@ -1034,12 +1065,12 @@ const AddVehicleTicketDrawer = ({
     if (!open || isAnnualTicket) return;
 
     setFeeItems((current) => {
-      const dailyRow = current.find((item) => item.row_type === "daily") ?? current[0] ?? { fee_id: "", quantity: "1" };
-      const banyeraRow = current.find((item) => item.row_type === "banyera") ?? current[1] ?? { fee_id: "", quantity: "1" };
+      const dailyRow = current.find((item) => item.row_type === "daily") ?? current[0] ?? { fee_id: "", quantity: "0" };
+      const banyeraRow = current.find((item) => item.row_type === "banyera") ?? current[1] ?? { fee_id: "", quantity: "0" };
 
       return [
-        { ...dailyRow, row_type: "daily", quantity: dailyRow.quantity || "1" },
-        { ...banyeraRow, row_type: "banyera", quantity: banyeraRow.quantity || "1" },
+        { ...dailyRow, row_type: "daily", quantity: dailyRow.quantity || "0" },
+        { ...banyeraRow, row_type: "banyera", quantity: banyeraRow.quantity || "0" },
       ];
     });
   }, [isAnnualTicket, open]);
@@ -1051,7 +1082,7 @@ const AddVehicleTicketDrawer = ({
       const nextRows = buildDailyFeeItems(
         fees,
         form.vehicle_type_id,
-        current[0]?.quantity || "1",
+        current[0]?.quantity ?? "0",
         { zeroDailyTicket: isAnnualRegisteredDailyEntry }
       );
       const currentDailyRow = current.find((item) => item.row_type === "daily");
@@ -1066,7 +1097,7 @@ const AddVehicleTicketDrawer = ({
         return {
           ...row,
           fee_id: nextFeeId,
-          quantity: currentRow?.quantity || row.quantity || "1",
+          quantity: currentRow?.quantity ?? row.quantity ?? "0",
         };
       });
     });
@@ -1146,7 +1177,7 @@ const AddVehicleTicketDrawer = ({
               quantity: current[0]?.quantity || "1",
             },
           ]
-        : buildDailyFeeItems(fees, nextVehicleTypeId, current[0]?.quantity || "1", {
+        : buildDailyFeeItems(fees, nextVehicleTypeId, current[0]?.quantity ?? "0", {
             zeroDailyTicket: isLinkedToAnnualRegistration(form.control_number, annualShortcutOptions),
           })
     );
@@ -1180,23 +1211,6 @@ const AddVehicleTicketDrawer = ({
     }));
   };
 
-  const handleFeeItemRemove = (rowType) => {
-    setFeeItems((current) =>
-      current.map((item) =>
-        item.row_type === rowType
-          ? { ...item, fee_id: "" }
-          : item
-      )
-    );
-    setErrors((current) => ({
-      ...current,
-      fee_id: "",
-      fee_item_0: "",
-      fee_item_1: "",
-      ticket_fee: "",
-    }));
-  };
-
   const applyAnnualShortcutTicket = (matchedAnnualVehicle, controlNumber = "") => {
     const nextControlNumber = String(controlNumber || matchedAnnualVehicle?.control_number || "");
     const nextVehicleTypeId = String(matchedAnnualVehicle?.vehicle_type_id ?? "");
@@ -1215,7 +1229,7 @@ const AddVehicleTicketDrawer = ({
       )
     );
     setFeeItems(
-      buildDailyFeeItems(fees, nextVehicleTypeId, "1", {
+      buildDailyFeeItems(fees, nextVehicleTypeId, "0", {
         zeroDailyTicket: Boolean(matchedAnnualVehicle),
       })
     );
@@ -1266,8 +1280,8 @@ const AddVehicleTicketDrawer = ({
     if (isAnnualTicket && form.control_number.trim() && !/^\d{6}$/.test(form.control_number.trim())) {
       nextErrors.control_number = "Control no. must be exactly 6 digits.";
     }
-    if (isAnnualTicket && form.official_receipt_no.trim() && !/^\d{6}$/.test(form.official_receipt_no.trim())) {
-      nextErrors.official_receipt_no = "Official Receipt No. must be exactly 6 digits.";
+    if (isAnnualTicket && form.official_receipt_no.trim() && !/^\d{7}$/.test(form.official_receipt_no.trim())) {
+      nextErrors.official_receipt_no = "Official Receipt No. must be exactly 7 digits.";
     }
     if (!hasFeeSelection) nextErrors.fee_id = "Fee is required.";
     if (!builtTicketDate) nextErrors.ticket_date = "Ticket date is required.";
@@ -1280,8 +1294,9 @@ const AddVehicleTicketDrawer = ({
       if (isAutoBanyeraRow && !item.fee_id) return;
       if (isZeroedDailyRow) return;
       if (!item.fee_id) return;
-      if (!item.quantity || Number.parseInt(item.quantity, 10) < 1) nextErrors[`fee_qty_${index}`] = "Required";
+      if (Number.parseInt(item.quantity || "0", 10) < 0) nextErrors[`fee_qty_${index}`] = "Quantity cannot be negative.";
     });
+    if (!isAnnualTicket && totalTicketFee <= 0) nextErrors.fee_id = "Fee is required.";
 
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors);
@@ -1581,7 +1596,7 @@ const AddVehicleTicketDrawer = ({
                   icon={IoDocumentTextOutline}
                   value={form.official_receipt_no}
                   onChange={(event) => {
-                    const nextValue = String(event.target.value || "").replace(/\D/g, "").slice(0, 6);
+                    const nextValue = String(event.target.value || "").replace(/\D/g, "").slice(0, 7);
                     setForm((current) => ({ ...current, official_receipt_no: nextValue }));
                     setErrors((current) => ({ ...current, official_receipt_no: "" }));
                   }}
@@ -1602,8 +1617,8 @@ const AddVehicleTicketDrawer = ({
             </div>
 
             {[
-              feeItems.find((item) => item.row_type === "daily") ?? { fee_id: "", quantity: "1", row_type: "daily" },
-              feeItems.find((item) => item.row_type === "banyera") ?? { fee_id: "", quantity: "1", row_type: "banyera" },
+              feeItems.find((item) => item.row_type === "daily") ?? { fee_id: "", quantity: "0", row_type: "daily" },
+              feeItems.find((item) => item.row_type === "banyera") ?? { fee_id: "", quantity: "0", row_type: "banyera" },
             ].map((item, index) => {
               const selectedItemFee = fees.find((fee) => String(fee.fee_id) === String(item.fee_id));
               const quantity = Number.parseInt(item.quantity || "0", 10) || 0;
@@ -1628,7 +1643,7 @@ const AddVehicleTicketDrawer = ({
                 <div
                   key={`fee-item-${index}`}
                   className="mb-2 grid items-start gap-2 last:mb-0"
-                  style={{ gridTemplateColumns: "minmax(0,2fr) minmax(96px,0.65fr) minmax(0,1.2fr) 40px" }}
+                  style={{ gridTemplateColumns: "minmax(0,1fr) minmax(110px,0.8fr) minmax(0,1fr)" }}
                 >
                   <div>
                     {showRowLabel ? (
@@ -1641,7 +1656,7 @@ const AddVehicleTicketDrawer = ({
                       readOnly
                       value={selectedItemFee ? formatMoney(selectedItemFee.amount) : isZeroedDailyRow ? formatMoney(0) : ""}
                       placeholder="₱0.00"
-                      className="h-[46px] w-full rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-medium outline-none"
+                      className="h-[46px] w-full rounded-xl border border-slate-200 bg-slate-100 px-3 text-[12px] font-normal outline-none"
                       style={{ color: selectedItemFee || isZeroedDailyRow ? "#0d1117" : "#94a3b8", fontFamily: FONT }}
                     />
                   </div>
@@ -1669,25 +1684,9 @@ const AddVehicleTicketDrawer = ({
                       readOnly
                       value={item.fee_id || item.quantity || isZeroedDailyRow ? `₱${formatMoneyValue(subtotal)}` : "₱0.00"}
                       placeholder="₱0.00"
-                      className="h-[46px] w-full rounded-xl border border-slate-200 bg-slate-100 px-3 text-[12px] font-medium outline-none"
+                      className="h-[46px] w-full rounded-xl border border-slate-200 bg-slate-100 px-3 text-right text-[12px] font-normal outline-none"
                       style={{ color: item.fee_id || item.quantity || isZeroedDailyRow ? "#0d1117" : "#94a3b8", fontFamily: FONT }}
                     />
-                  </div>
-
-                  <div>
-                    {showRowLabel ? <div className="mb-1 h-[13px]" /> : null}
-                    <div className="flex h-[46px] items-center justify-center">
-                      {!isZeroedDailyRow ? (
-                        <button
-                          type="button"
-                          onClick={() => handleFeeItemRemove(rowType)}
-                          className="text-red-500 transition-colors hover:text-red-600"
-                          aria-label={`Remove ${rowType} fee`}
-                        >
-                          <IoTrashOutline className="text-[22px]" />
-                        </button>
-                      ) : null}
-                    </div>
                   </div>
 
                 </div>
@@ -1977,7 +1976,8 @@ const SuperVehicleTickets = () => {
   const highlightedSearchResult = location.state?.universalSearchResult ?? null;
   const queryClient = useQueryClient();
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } = useSidebar();
-  const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery("vehicle-tickets");
+  const isHeadViewOnly = isHeadRole();
 
   const initialActiveTab = getVehicleTicketTabFromLocation({
     highlightedSearchResult,
@@ -2067,9 +2067,10 @@ const SuperVehicleTickets = () => {
     }
 
     if (location.pathname === "/vehicle-tickets") {
+      const cachedTab = getCachedTab(VEHICLE_TICKET_TAB_STORAGE_KEY, VEHICLE_TICKET_TAB_KEYS, "daily");
       navigate(
         {
-          pathname: getVehicleTicketTabPath("daily"),
+          pathname: getVehicleTicketTabPath(cachedTab),
           search: location.search,
         },
         { replace: true, state: location.state }
@@ -2079,10 +2080,13 @@ const SuperVehicleTickets = () => {
   useEffect(() => {
     setDismissedHighlightToken("");
   }, [location.key]);
+  useEffect(() => {
+    cacheTab(VEHICLE_TICKET_TAB_STORAGE_KEY, activeTab, VEHICLE_TICKET_TAB_KEYS);
+  }, [activeTab]);
   const ticketTypeFilter = activeTab === "daily" || activeTab === "annual" ? activeTab : "all";
   const serverStatusFilter = activeTab === "annual" && statusFilter === "expired" ? "all" : statusFilter;
   const lookupsQuery = useVehicleTicketsLookupsQuery({
-    enabled: showAddDrawer || Boolean(editingTicket),
+    enabled: !isHeadViewOnly && (showAddDrawer || Boolean(editingTicket)),
   });
   const vehicleTypesQuery = useVehicleTypesDataQuery({
     page: typePage,
@@ -2125,7 +2129,7 @@ const SuperVehicleTickets = () => {
     paginated: false,
     includeStats: false,
   }, {
-    enabled: showAddDrawer && activeTab === "daily" && !editingTicket,
+    enabled: !isHeadViewOnly && showAddDrawer && activeTab === "daily" && !editingTicket,
   });
 
   const rawTickets = data?.tickets ?? [];
@@ -2232,6 +2236,7 @@ const SuperVehicleTickets = () => {
     if (!nextTab) return;
 
     setActiveTab(nextTab);
+    cacheTab(VEHICLE_TICKET_TAB_STORAGE_KEY, nextTab, VEHICLE_TICKET_TAB_KEYS);
     const nextPath = getVehicleTicketTabPath(nextTab);
     if (location.pathname !== nextPath) {
       navigate(
@@ -2349,13 +2354,16 @@ const SuperVehicleTickets = () => {
       void queryClient.invalidateQueries({ queryKey: ["vehicle-tickets-lookups"], refetchType: "active" });
     }
 
-    invalidateTodaySystemCashReceived(queryClient);
+    invalidateTodayCollection(queryClient);
     void queryClient.invalidateQueries({ queryKey: ["vehicle-ticket-report"], refetchType: "active" });
     void queryClient.invalidateQueries({ queryKey: ["revenue-report"], refetchType: "active" });
   };
 
   const createTicketMutation = useMutation({
     mutationFn: async (payload) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked || isLockedTicketDate(payload?.ticket_date)) {
         throw new Error(transactionLockMessage);
       }
@@ -2366,7 +2374,7 @@ const SuperVehicleTickets = () => {
       upsertTicketInCache(savedTicket);
       updateVehicleTicketStatsInCache(queryClient, savedTicket, "add");
       syncVehicleTypeUsageInCache(queryClient, savedTicket);
-      adjustTodaySystemCashReceived(queryClient, savedTicket?.ticket_date, savedTicket?.ticket_fee);
+      adjustTodayCollection(queryClient, savedTicket?.ticket_date, savedTicket?.ticket_fee);
       setShowAddDrawer(false);
       setEditingTicket(null);
       showAddedToast("Vehicle Ticket", "vehicle ticket");
@@ -2376,6 +2384,9 @@ const SuperVehicleTickets = () => {
 
   const updateTicketMutation = useMutation({
     mutationFn: async ({ id, payload }) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked || isLockedTicketDate(payload?.ticket_date)) {
         throw new Error(transactionLockMessage);
       }
@@ -2395,6 +2406,9 @@ const SuperVehicleTickets = () => {
 
   const createVehicleTypeMutation = useMutation({
     mutationFn: async (payload) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked) {
         throw new Error(transactionLockMessage);
       }
@@ -2405,6 +2419,7 @@ const SuperVehicleTickets = () => {
       setShowAddVehicleTypeDrawer(false);
       setVehicleTypeForm(getInitialVehicleTypeForm());
       setVehicleTypeErrors({});
+      cacheTab(VEHICLE_TICKET_TAB_STORAGE_KEY, "types", VEHICLE_TICKET_TAB_KEYS);
       setActiveTab("types");
       navigate(getVehicleTicketTabPath("types"), { replace: location.pathname === getVehicleTicketTabPath("types"), state: null });
       showAddedToast("Vehicle Type", "vehicle type");
@@ -2423,6 +2438,9 @@ const SuperVehicleTickets = () => {
 
   const updateVehicleTypeMutation = useMutation({
     mutationFn: async ({ id, payload }) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked) {
         throw new Error(transactionLockMessage);
       }
@@ -2434,6 +2452,7 @@ const SuperVehicleTickets = () => {
       setVehicleTypeForm(getInitialVehicleTypeForm());
       setVehicleTypeErrors({});
       setEditingVehicleType(null);
+      cacheTab(VEHICLE_TICKET_TAB_STORAGE_KEY, "types", VEHICLE_TICKET_TAB_KEYS);
       setActiveTab("types");
       navigate(getVehicleTicketTabPath("types"), { replace: location.pathname === getVehicleTicketTabPath("types"), state: null });
       showUpdatedToast("Vehicle Type", "vehicle type");
@@ -2452,6 +2471,9 @@ const SuperVehicleTickets = () => {
 
   const archiveVehicleTypeMutation = useMutation({
     mutationFn: async (id) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       if (isTransactionLocked) {
         throw new Error(transactionLockMessage);
       }
@@ -2476,6 +2498,9 @@ const SuperVehicleTickets = () => {
 
   const voidTicketMutation = useMutation({
     mutationFn: async ({ id, void_reason }) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       const ticket = tickets.find((entry) => String(entry.id) === String(id));
       if (isTransactionLocked || isLockedTicketDate(ticket?.rawTicketDate)) {
         throw new Error(transactionLockMessage);
@@ -2501,6 +2526,9 @@ const SuperVehicleTickets = () => {
 
   const restoreVoidedTicketMutation = useMutation({
     mutationFn: async (id) => {
+      if (isHeadViewOnly) {
+        throw new Error("Head accounts are view-only.");
+      }
       const ticket = tickets.find((entry) => String(entry.id) === String(id));
       if (isTransactionLocked || isLockedTicketDate(ticket?.rawTicketDate)) {
         throw new Error(transactionLockMessage);
@@ -2531,13 +2559,16 @@ const SuperVehicleTickets = () => {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    const nextTab = getVehicleTicketTabFromLocation({ highlightedSearchResult, pathname: location.pathname, search: location.search });
     setSearch(highlightedSearchResult ? "" : params.get("q") || "");
     setTypeSearch(highlightedSearchResult ? "" : params.get("typeQ") || "");
-    setActiveTab(getVehicleTicketTabFromLocation({ highlightedSearchResult, pathname: location.pathname, search: location.search }));
+    setActiveTab(nextTab);
+    cacheTab(VEHICLE_TICKET_TAB_STORAGE_KEY, nextTab, VEHICLE_TICKET_TAB_KEYS);
     if (params.get("highlight")?.startsWith("ticket-")) {
       setRequestedPage(1);
     }
     if (params.get("highlight")?.startsWith("vehicle-type-")) {
+      cacheTab(VEHICLE_TICKET_TAB_STORAGE_KEY, "types", VEHICLE_TICKET_TAB_KEYS);
       setActiveTab("types");
       if (location.pathname !== getVehicleTicketTabPath("types")) {
         navigate(
@@ -2658,7 +2689,8 @@ const SuperVehicleTickets = () => {
   const vehicleTypesNotInUse = vehicleTypesSummary.unused ?? Math.max(0, vehicleTypesTotal - vehicleTypesInUse);
   const totalTypeLinks = vehicleTypes.reduce((sum, type) => sum + type.ticketsUsing, 0);
   const isAnnualTicketsTab = activeTab === "annual";
-  const ticketTableColumnCount = activeTab === "daily" ? 7 : 8;
+  const ticketTableBaseColumnCount = activeTab === "daily" ? 6 : 7;
+  const ticketTableColumnCount = ticketTableBaseColumnCount + (isHeadViewOnly ? 0 : 1);
   const drawerTicketType = editingTicket
     ? String(editingTicket.ticket_type || "").toLowerCase() === "annual"
       ? "annual"
@@ -2668,12 +2700,15 @@ const SuperVehicleTickets = () => {
       : "daily";
 
   const openAddDrawer = () => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked || isTodayDateLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
     }
 
     if (lookupsQuery.isFetched && rawVehicleTypes.length === 0) {
+      cacheTab(VEHICLE_TICKET_TAB_STORAGE_KEY, "types", VEHICLE_TICKET_TAB_KEYS);
       setActiveTab("types");
       navigate(getVehicleTicketTabPath("types"), { replace: location.pathname === getVehicleTicketTabPath("types"), state: null });
       showBottomToast("error", "No Vehicle Types", "Add a vehicle type first before creating a ticket.");
@@ -2690,6 +2725,8 @@ const SuperVehicleTickets = () => {
   };
 
   const openVoidTicket = (ticket) => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -2713,6 +2750,8 @@ const SuperVehicleTickets = () => {
   };
 
   const openAddVehicleType = () => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -2725,6 +2764,8 @@ const SuperVehicleTickets = () => {
   };
 
   const openEditVehicleType = (type) => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -2737,6 +2778,8 @@ const SuperVehicleTickets = () => {
   };
 
   const handleSaveTicket = async (payload) => {
+    if (isHeadViewOnly) return;
+
     if (editingTicket?.ticket_id) {
       return updateTicketMutation.mutateAsync({
         id: editingTicket.ticket_id,
@@ -2748,6 +2791,8 @@ const SuperVehicleTickets = () => {
   };
 
   const handleSaveVehicleType = () => {
+    if (isHeadViewOnly) return;
+
     if (isTransactionLocked) {
       showBottomToast("error", "Transactions Locked", transactionLockMessage);
       return;
@@ -2896,6 +2941,7 @@ const SuperVehicleTickets = () => {
                 tabs={TABS.map((tab) => ({ key: tab.value, label: tab.label, icon: tab.icon }))}
                 activeKey={activeTab}
                 onTabChange={(value) => {
+                  cacheTab(VEHICLE_TICKET_TAB_STORAGE_KEY, value, VEHICLE_TICKET_TAB_KEYS);
                   clearUniversalHighlight(value);
                   setActiveTab(value);
                   resetTicketPage();
@@ -2933,7 +2979,7 @@ const SuperVehicleTickets = () => {
                       ? "All record of annual vehicle tickets."
                       : "All record of daily vehicle tickets."
                   }
-                  headerActionsSkeletonCount={5}
+                  headerActionsSkeletonCount={isHeadViewOnly ? 3 : 4}
                   className=""
                   bodyClassName="overflow-x-auto"
                   footerClassName="flex items-center justify-between"
@@ -2981,19 +3027,21 @@ const SuperVehicleTickets = () => {
                         options={STATUS_FILTER_OPTIONS}
                         height={42}
                       />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          clearUniversalHighlight();
-                          openAddDrawer();
-                        }}
-                        disabled={isTransactionLocked || isTodayDateLocked}
-                        className="flex h-[42px] items-center justify-center gap-2 rounded-xl border-none px-5 text-[13px] font-semibold text-white cursor-pointer disabled:cursor-not-allowed"
-                        style={{ backgroundColor: isTransactionLocked || isTodayDateLocked ? "#94a3b8" : "#1a1f36" }}
-                      >
-                        <IoAddOutline className="text-[16px]" />
-                        Add Ticket
-                      </button>
+                      {!isHeadViewOnly ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            clearUniversalHighlight();
+                            openAddDrawer();
+                          }}
+                          disabled={isTransactionLocked || isTodayDateLocked}
+                          className="flex h-[42px] items-center justify-center gap-2 rounded-xl border-none px-5 text-[13px] font-semibold text-white cursor-pointer disabled:cursor-not-allowed"
+                          style={{ backgroundColor: isTransactionLocked || isTodayDateLocked ? "#94a3b8" : "#1a1f36" }}
+                        >
+                          <IoAddOutline className="text-[16px]" />
+                          Add Ticket
+                        </button>
+                      ) : null}
                     </>
                   }
                   pagination={{
@@ -3023,7 +3071,7 @@ const SuperVehicleTickets = () => {
                           {activeTab === "daily" ? <TH><div className="text-right">Banyera Fee(₱)</div></TH> : null}
                           {activeTab === "daily" ? <TH><div className="text-right">Ticket Fee(₱)</div></TH> : null}
                           <TH>Voided Reason</TH>
-                          <TH>Action</TH>
+                          {!isHeadViewOnly ? <TH>Action</TH> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -3032,7 +3080,7 @@ const SuperVehicleTickets = () => {
                             <tr key={index} className="animate-pulse" style={{ borderBottom: "1px solid #f1f5f9" }}>
                               {Array.from({ length: ticketTableColumnCount }).map((__, column) => (
                                 <td key={column} className="px-4 py-3">
-                                  {column === ticketTableColumnCount - 1 ? (
+                                  {!isHeadViewOnly && column === ticketTableColumnCount - 1 ? (
                                     <div className="flex gap-2">
                                       <div className="h-8 w-8 rounded-lg bg-slate-100" />
                                       {activeTab === "daily" ? <div className="h-8 w-8 rounded-lg bg-slate-100" /> : null}
@@ -3135,43 +3183,45 @@ const SuperVehicleTickets = () => {
                                   </td>
                                 </>
                               )}
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  {(ticket.ticketType === "Daily" || ticket.ticketType === "Annual") ? (
-                                  <Tooltip title={isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) ? transactionLockMessage : !isTicketEditableToday(ticket) ? getVoidRestrictionMessage(ticket) : ticket.isVoided ? "Restore" : "Void"}>
-                                      <button
-                                        type="button"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          clearUniversalHighlight();
-                                          if (deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket)) return;
-                                          if (ticket.isVoided) {
-                                            setDeletingTicketId(ticket.id);
-                                            restoreVoidedTicketMutation.mutate(ticket.id);
-                                            return;
-                                          }
-                                          openVoidTicket(ticket);
-                                        }}
-                                        disabled={deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket)}
-                                        className={`w-8 h-8 rounded-lg border flex items-center justify-center bg-white transition-colors ${
-                                          deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket)
-                                            ? "cursor-not-allowed border-slate-200"
-                                            : ticket.isVoided
-                                              ? "cursor-pointer hover:bg-emerald-50"
-                                              : "cursor-pointer hover:bg-amber-50"
-                                        }`}
-                                        style={{ borderColor: deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket) ? undefined : ticket.isVoided ? "#10b981" : "#f59e0b" }}
-                                      >
-                                        {ticket.isVoided ? (
-                                          <IoReloadOutline style={{ fontSize: "16px", color: "#10b981" }} />
-                                        ) : (
-                                          <IoCloseOutline style={{ fontSize: "16px", color: "#f59e0b" }} />
-                                        )}
-                                      </button>
-                                    </Tooltip>
-                                  ) : null}
-                                </div>
-                              </td>
+                              {!isHeadViewOnly ? (
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    {(ticket.ticketType === "Daily" || ticket.ticketType === "Annual") ? (
+                                    <Tooltip title={isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) ? transactionLockMessage : !isTicketEditableToday(ticket) ? getVoidRestrictionMessage(ticket) : ticket.isVoided ? "Restore" : "Void"}>
+                                        <button
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            clearUniversalHighlight();
+                                            if (deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket)) return;
+                                            if (ticket.isVoided) {
+                                              setDeletingTicketId(ticket.id);
+                                              restoreVoidedTicketMutation.mutate(ticket.id);
+                                              return;
+                                            }
+                                            openVoidTicket(ticket);
+                                          }}
+                                          disabled={deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket)}
+                                          className={`w-8 h-8 rounded-lg border flex items-center justify-center bg-white transition-colors ${
+                                            deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket)
+                                              ? "cursor-not-allowed border-slate-200"
+                                              : ticket.isVoided
+                                                ? "cursor-pointer hover:bg-emerald-50"
+                                                : "cursor-pointer hover:bg-amber-50"
+                                          }`}
+                                          style={{ borderColor: deletingTicketId === ticket.id || isTransactionLocked || isLockedTicketDate(ticket.rawTicketDate) || !isTicketEditableToday(ticket) ? undefined : ticket.isVoided ? "#10b981" : "#f59e0b" }}
+                                        >
+                                          {ticket.isVoided ? (
+                                            <IoReloadOutline style={{ fontSize: "16px", color: "#10b981" }} />
+                                          ) : (
+                                            <IoCloseOutline style={{ fontSize: "16px", color: "#f59e0b" }} />
+                                          )}
+                                        </button>
+                                      </Tooltip>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              ) : null}
                             </tr>
                               );
                             })()
@@ -3188,7 +3238,7 @@ const SuperVehicleTickets = () => {
                   title="Vehicle Type Records"
                   subtitle="All record of vehicle types."
                   loading={isVehicleTypesInitialLoading}
-                  headerActionsSkeletonCount={3}
+                  headerActionsSkeletonCount={isHeadViewOnly ? 2 : 3}
                   className=""
                   bodyClassName="overflow-x-auto"
                   footerClassName="flex items-center justify-between"
@@ -3216,20 +3266,22 @@ const SuperVehicleTickets = () => {
                         options={VEHICLE_TYPE_USAGE_FILTER_OPTIONS}
                         height={42}
                       />
-                      <Tooltip title={isTransactionLocked ? transactionLockMessage : "Add Vehicle Type"}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            clearUniversalHighlight();
-                            openAddVehicleType();
-                          }}
-                          disabled={isTransactionLocked}
-                          className="flex h-[42px] items-center justify-center gap-2 rounded-xl border-none bg-[#1a1f36] px-5 text-[13px] font-semibold text-white cursor-pointer hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          <IoAddOutline className="text-[16px]" />
-                          Add Vehicle Type
-                        </button>
-                      </Tooltip>
+                      {!isHeadViewOnly ? (
+                        <Tooltip title={isTransactionLocked ? transactionLockMessage : "Add Vehicle Type"}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              clearUniversalHighlight();
+                              openAddVehicleType();
+                            }}
+                            disabled={isTransactionLocked}
+                            className="flex h-[42px] items-center justify-center gap-2 rounded-xl border-none bg-[#1a1f36] px-5 text-[13px] font-semibold text-white cursor-pointer hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
+                          >
+                            <IoAddOutline className="text-[16px]" />
+                            Add Vehicle Type
+                          </button>
+                        </Tooltip>
+                      ) : null}
                     </>
                   }
                   pagination={{
@@ -3243,13 +3295,19 @@ const SuperVehicleTickets = () => {
                   }}
                 >
                   <div className="overflow-x-auto">
-                    <table className="w-full border-collapse" style={{ minWidth: 700 }}>
+                    <table className="w-full border-collapse" style={{ minWidth: isHeadViewOnly ? 620 : 700 }}>
+                      <colgroup>
+                        <col style={{ width: isHeadViewOnly ? "44%" : "34%" }} />
+                        <col style={{ width: isHeadViewOnly ? "28%" : "25%" }} />
+                        <col style={{ width: isHeadViewOnly ? "28%" : "25%" }} />
+                        {!isHeadViewOnly ? <col style={{ width: "16%" }} /> : null}
+                      </colgroup>
                       <thead>
                         <tr style={{ backgroundColor: "#ffffff" }}>
                           <TH>Vehicle Type</TH>
-                          <TH>Usage Count - Daily (Yearly)</TH>
-                          <TH>Usage Count - Annual (Yearly)</TH>
-                          <TH>Action</TH>
+                          <TH><div className="text-center">Usage Count - Daily (Yearly)</div></TH>
+                          <TH><div className="text-center">Usage Count - Annual (Yearly)</div></TH>
+                          {!isHeadViewOnly ? <TH>Action</TH> : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -3257,14 +3315,14 @@ const SuperVehicleTickets = () => {
                           Array.from({ length: PAGE_SIZE }).map((_, index) => (
                             <tr key={index} className="animate-pulse" style={{ borderBottom: "1px solid #f1f5f9" }}>
                               <td className="px-4 py-3"><div className="h-3 w-32 rounded bg-slate-100" /></td>
-                              <td className="px-4 py-3"><div className="h-6 w-20 rounded-full bg-slate-100" /></td>
-                              <td className="px-4 py-3"><div className="h-6 w-20 rounded-full bg-slate-100" /></td>
-                              <td className="px-4 py-3"><div className="flex gap-2"><div className="h-8 w-8 rounded-lg bg-slate-100" /><div className="h-8 w-8 rounded-lg bg-slate-100" /></div></td>
+                              <td className="px-4 py-3"><div className="mx-auto h-6 w-20 rounded-full bg-slate-100" /></td>
+                              <td className="px-4 py-3"><div className="mx-auto h-6 w-20 rounded-full bg-slate-100" /></td>
+                              {!isHeadViewOnly ? <td className="px-4 py-3"><div className="flex gap-2"><div className="h-8 w-8 rounded-lg bg-slate-100" /><div className="h-8 w-8 rounded-lg bg-slate-100" /></div></td> : null}
                             </tr>
                           ))
                         ) : vehicleTypesQuery.isError ? (
                           <tr>
-                            <td colSpan={4} className="px-4 py-10 text-center">
+                            <td colSpan={isHeadViewOnly ? 3 : 4} className="px-4 py-10 text-center">
                               <div className="flex flex-col items-center gap-3">
                                 <IoWarningOutline className="text-[32px] text-red-400" />
                                 <p className="m-0 text-[13px] font-normal text-red-500">Unable to load vehicle types.</p>
@@ -3280,7 +3338,7 @@ const SuperVehicleTickets = () => {
                           </tr>
                         ) : paginatedVehicleTypes.length === 0 ? (
                           <tr>
-                            <td colSpan={4}>
+                            <td colSpan={isHeadViewOnly ? 3 : 4}>
                               <NoDataFound title={debouncedTypeSearch || typeUsageFilter !== "all" ? "No results found" : "No Data Found"} />
                             </td>
                           </tr>
@@ -3299,12 +3357,13 @@ const SuperVehicleTickets = () => {
                               }}
                             >
                               <td className="px-4 py-3 text-[13px] font-normal text-[#1a1f36]">{type.typeName}</td>
-                              <td className="px-4 py-3">
+                              <td className="px-4 py-3 text-center">
                                 <button
                                   type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     clearUniversalHighlight("daily");
+                                    cacheTab(VEHICLE_TICKET_TAB_STORAGE_KEY, "daily", VEHICLE_TICKET_TAB_KEYS);
                                     setActiveTab("daily");
                                     resetTicketPage();
                                     setTypesPage(1);
@@ -3322,12 +3381,13 @@ const SuperVehicleTickets = () => {
                                   />
                                 </button>
                               </td>
-                              <td className="px-4 py-3">
+                              <td className="px-4 py-3 text-center">
                                 <button
                                   type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     clearUniversalHighlight("annual");
+                                    cacheTab(VEHICLE_TICKET_TAB_STORAGE_KEY, "annual", VEHICLE_TICKET_TAB_KEYS);
                                     setActiveTab("annual");
                                     resetTicketPage();
                                     setTypesPage(1);
@@ -3345,49 +3405,51 @@ const SuperVehicleTickets = () => {
                                   />
                                 </button>
                               </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        clearUniversalHighlight();
-                                        openEditVehicleType(type);
-                                      }}
-                                      disabled={isTransactionLocked}
-                                      className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${isTransactionLocked ? "cursor-not-allowed border-slate-200" : "hover:bg-blue-50"}`}
-                                      style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}
-                                    >
-                                      <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
-                                    </button>
-                                  </Tooltip>
-                                  <Tooltip title={isTransactionLocked ? transactionLockMessage : "Archive"}>
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        clearUniversalHighlight();
-                                        if (isTransactionLocked) return;
-                                        setPendingDeleteVehicleType(type);
-                                      }}
-                                      disabled={isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id)}
-                                      className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
-                                        isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id)
-                                          ? "cursor-not-allowed border-slate-200"
-                                          : "cursor-pointer hover:bg-red-50"
-                                      }`}
-                                      style={{ borderColor: isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id) ? undefined : "#ef4444" }}
-                                    >
-                                      {archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id ? (
-                                        <span className="text-red-500"><Spinner size={15} /></span>
-                                      ) : (
-                                        <IoArchiveOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#ef4444" }} />
-                                      )}
-                                    </button>
-                                  </Tooltip>
-                                </div>
-                              </td>
+                              {!isHeadViewOnly ? (
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          clearUniversalHighlight();
+                                          openEditVehicleType(type);
+                                        }}
+                                        disabled={isTransactionLocked}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${isTransactionLocked ? "cursor-not-allowed border-slate-200" : "hover:bg-blue-50"}`}
+                                        style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}
+                                      >
+                                        <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
+                                      </button>
+                                    </Tooltip>
+                                    <Tooltip title={isTransactionLocked ? transactionLockMessage : "Archive"}>
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          clearUniversalHighlight();
+                                          if (isTransactionLocked) return;
+                                          setPendingDeleteVehicleType(type);
+                                        }}
+                                        disabled={isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id)}
+                                        className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white transition-colors ${
+                                          isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id)
+                                            ? "cursor-not-allowed border-slate-200"
+                                            : "cursor-pointer hover:bg-red-50"
+                                        }`}
+                                        style={{ borderColor: isTransactionLocked || (archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id) ? undefined : "#ef4444" }}
+                                      >
+                                        {archiveVehicleTypeMutation.isPending && deletingVehicleTypeId === type.id ? (
+                                          <span className="text-red-500"><Spinner size={15} /></span>
+                                        ) : (
+                                          <IoArchiveOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#ef4444" }} />
+                                        )}
+                                      </button>
+                                    </Tooltip>
+                                  </div>
+                                </td>
+                              ) : null}
                             </tr>
                           ))
                         )}
@@ -3403,7 +3465,7 @@ const SuperVehicleTickets = () => {
         </div>
       </div>
 
-      <AddVehicleTicketDrawer
+      {!isHeadViewOnly ? <AddVehicleTicketDrawer
         open={showAddDrawer}
         onClose={() => {
           setShowAddDrawer(false);
@@ -3417,8 +3479,8 @@ const SuperVehicleTickets = () => {
         ticketType={drawerTicketType}
         editingTicket={editingTicket}
         isLookupsLoading={lookupsQuery.isLoading}
-      />
-      <AddVehicleTypeDrawer
+      /> : null}
+      {!isHeadViewOnly ? <AddVehicleTypeDrawer
         open={showAddVehicleTypeDrawer}
         onClose={() => setShowAddVehicleTypeDrawer(false)}
         form={vehicleTypeForm}
@@ -3428,10 +3490,10 @@ const SuperVehicleTickets = () => {
         onSave={handleSaveVehicleType}
         saving={createVehicleTypeMutation.isPending || updateVehicleTypeMutation.isPending}
         isEditing={Boolean(editingVehicleType)}
-      />
+      /> : null}
       <VehicleTypeDetailsDrawer type={detailVehicleType} open={Boolean(detailVehicleType)} onClose={() => setDetailVehicleType(null)} />
       <VehicleTicketDetailDrawer ticket={detailTicket} fees={vehicleFees} open={Boolean(detailTicket)} onClose={() => setDetailTicket(null)} />
-      <VoidVehicleTicketModal
+      {!isHeadViewOnly ? <VoidVehicleTicketModal
         open={Boolean(pendingVoidTicket)}
         ticket={pendingVoidTicket}
         selectedReason={voidReasonOption}
@@ -3495,8 +3557,8 @@ const SuperVehicleTickets = () => {
             },
           );
         }}
-      />
-      <ArchiveModal
+      /> : null}
+      {!isHeadViewOnly ? <ArchiveModal
         open={Boolean(pendingDeleteVehicleType)}
         title="Archive Vehicle Type"
         itemName={pendingDeleteVehicleType?.typeName || "this record"}
@@ -3512,7 +3574,7 @@ const SuperVehicleTickets = () => {
             onSettled: () => setPendingDeleteVehicleType(null),
           });
         }}
-      />
+      /> : null}
     </ConfigProvider>
   );
 };

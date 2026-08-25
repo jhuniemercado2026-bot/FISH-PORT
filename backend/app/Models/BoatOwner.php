@@ -21,7 +21,15 @@ class BoatOwner extends Model
         'owner_lastname',
         'address',
         'contact_number',
+        'owner_signature_data_url',
+        'owner_signature_public_id',
+        'owner_signature_signed_at',
+        'owner_signature_updated_by',
         'created_by',
+    ];
+
+    protected $casts = [
+        'owner_signature_signed_at' => 'datetime',
     ];
 
     protected $hidden = [
@@ -51,6 +59,16 @@ class BoatOwner extends Model
         return $this->belongsTo(User::class, 'created_by', 'user_id');
     }
 
+    public function ownerSignatureUpdatedByUser()
+    {
+        return $this->belongsTo(User::class, 'owner_signature_updated_by', 'user_id');
+    }
+
+    public function signatureAudits()
+    {
+        return $this->hasMany(BoatOwnerSignatureAudit::class, 'owner_id', 'owner_id');
+    }
+
     // ── Scopes ──
     public function scopeActive($query)
     {
@@ -65,7 +83,10 @@ class BoatOwner extends Model
     public function scopeForManagementIndex(Builder $query): Builder
     {
         return $query
-            ->with('createdBy:user_id,first_name,last_name,email')
+            ->with([
+                'createdBy:user_id,first_name,last_name,email',
+                'ownerSignatureUpdatedByUser:user_id,first_name,last_name,email',
+            ])
             ->withCount('activeBoats as boats_count')
             ->active();
     }

@@ -14,9 +14,6 @@ export default function TransactionLockRealtimeBridge() {
     const channel = echo.channel("transaction-lock");
 
     channel.listen(".updated", (payload) => {
-      queryClient.setQueryData(TRANSACTION_LOCK_QUERY_KEY, {
-        transaction_lock: payload?.transaction_lock ?? null,
-      });
       queryClient.invalidateQueries({ queryKey: TRANSACTION_LOCK_QUERY_KEY });
     });
 

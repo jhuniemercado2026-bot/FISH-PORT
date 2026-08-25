@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\ActivityLogUpdated;
 use App\Models\ActivityLog;
 use App\Models\User;
 
@@ -26,7 +27,7 @@ class ActivityLogService
             $resolvedName = $user?->email ?: 'System';
         }
 
-        return ActivityLog::create([
+        $activityLog = ActivityLog::create([
             'user_id' => $user?->user_id,
             'user_name' => $resolvedName,
             'user_role' => $userRole ?? $user?->role,
@@ -35,6 +36,21 @@ class ActivityLogService
             'details' => $details,
             'severity' => $this->resolveSeverity($normalizedAction),
         ]);
+
+        broadcast(new ActivityLogUpdated([
+            'id' => $activityLog->id,
+            'user_id' => $activityLog->user_id,
+            'created_at' => optional($activityLog->created_at)->toIso8601String(),
+            'timestamp' => optional($activityLog->created_at)->toIso8601String(),
+            'user_name' => $activityLog->user_name ?: 'System',
+            'user_role' => $activityLog->user_role,
+            'action' => $activityLog->action,
+            'module' => $activityLog->module,
+            'details' => $activityLog->details,
+            'severity' => $activityLog->severity,
+        ]));
+
+        return $activityLog;
     }
 
     public function describeChanges(array $before, array $after, array $labels = []): string
@@ -89,19 +105,19 @@ class ActivityLogService
             $formatted = array_values(array_filter(array_map(
                 fn ($item) => $this->formatActivityValue($item),
                 $value
-            ), fn ($item) => $item !== 'blank'));
+            ), fn ($item) => $item !== ''));
 
-            return empty($formatted) ? 'blank' : implode(', ', $formatted);
+            return empty($formatted) ? '' : implode(', ', $formatted);
         }
 
         if ($value === null) {
-            return 'blank';
+            return '';
         }
 
         $stringValue = trim((string) $value);
 
         if ($stringValue === '') {
-            return 'blank';
+            return '';
         }
 
         if (is_bool($value)) {

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Carbon\Carbon;
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
@@ -28,6 +29,11 @@ class Docking extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    protected function serializeDate(DateTimeInterface $date): string
+    {
+        return Carbon::instance($date)->timezone('Asia/Manila')->format('Y-m-d H:i:s');
+    }
 
     // Main linked boat for the docking record.
     public function boat()

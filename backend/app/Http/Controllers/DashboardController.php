@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MasterDataUpdated;
 use App\Models\BanyeraTransaction;
 use App\Models\Bill;
 use App\Models\Boat;
@@ -173,6 +174,14 @@ class DashboardController extends Controller
             $target->save();
         }
 
+        broadcast(new MasterDataUpdated('dashboard_targets', 'updated', [
+            'target_type' => 'monthly',
+            'year' => $target->target_year,
+            'month' => $target->target_month,
+            'amount' => (float) $target->amount,
+            'key' => sprintf('%d-%02d', $target->target_year, $target->target_month),
+        ]));
+
         return response()->json([
             'message' => 'Monthly target saved successfully.',
             'target' => [
@@ -207,6 +216,13 @@ class DashboardController extends Controller
             $target->created_by = $userId;
             $target->save();
         }
+
+        broadcast(new MasterDataUpdated('dashboard_targets', 'updated', [
+            'target_type' => 'yearly',
+            'year' => $target->target_year,
+            'amount' => (float) $target->amount,
+            'key' => (string) $target->target_year,
+        ]));
 
         return response()->json([
             'message' => 'Yearly target saved successfully.',

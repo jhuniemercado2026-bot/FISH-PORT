@@ -44,6 +44,9 @@ const formatMoney = (value) => {
   }).format(amount);
 };
 
+const formatNotificationMessage = (message) =>
+  String(message || "").replace(/\bPHP\s+/g, "₱");
+
 const getPaymentReference = (payment, fallback = "") =>
   String(
     payment?.payment_reference_no ||
@@ -232,6 +235,7 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
   const [searchValue, setSearchValue] = useState("");
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [burgerHovered, setBurgerHovered] = useState(false);
   const dropdownRef = useRef(null);
   const notificationsRef = useRef(null);
@@ -281,8 +285,16 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
     (isSearchWaitingForDebounce || universalSearchQuery.isFetching);
 
   const handleConfirmLogout = async () => {
-    await logoutUser();
-    window.location.replace("/login");
+    if (isSigningOut) return;
+
+    setIsSigningOut(true);
+
+    try {
+      await logoutUser();
+      window.location.replace("/login");
+    } catch (error) {
+      setIsSigningOut(false);
+    }
   };
 
   const markReadMutation = useMutation({
@@ -297,6 +309,70 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
   const getNotificationNavigationTarget = (notification) => {
     const relatedType = String(notification?.related_type || "").trim().toLowerCase();
     const relatedId = notification?.related_id;
+
+    if (relatedType === "void_request_docking" && relatedId) {
+      const highlightId = `docking-${relatedId}`;
+
+      return {
+        pathname: "/docking",
+        search: `?highlight=${highlightId}`,
+        state: {
+          universalSearchResult: {
+            id: highlightId,
+            group: "Docking",
+            path: `/docking?highlight=${highlightId}`,
+            title: notification?.title || "Void Request",
+            subtitle: notification?.message || "",
+          },
+        },
+      };
+    }
+
+    if (relatedType === "void_request_banyera" && relatedId) {
+      const highlightId = `banyera-${relatedId}`;
+
+      return {
+        pathname: "/banyera",
+        search: `?highlight=${highlightId}`,
+        state: {
+          universalSearchResult: {
+            id: highlightId,
+            group: "Banyera",
+            path: `/banyera?highlight=${highlightId}`,
+            title: notification?.title || "Void Request",
+            subtitle: notification?.message || "",
+          },
+        },
+      };
+    }
+
+    if (
+      [
+        "void_request_tickets",
+        "void_request_daily_ticket",
+        "void_request_annual_ticket",
+      ].includes(relatedType) &&
+      relatedId
+    ) {
+      const highlightId = `ticket-${relatedId}`;
+      const isAnnualTicket = relatedType === "void_request_annual_ticket";
+      const pathname = isAnnualTicket ? "/annual-vehicle-tickets" : "/daily-vehicle-tickets";
+      const group = isAnnualTicket ? "Annual Vehicle Tickets" : "Daily Vehicle Tickets";
+
+      return {
+        pathname,
+        search: `?highlight=${highlightId}`,
+        state: {
+          universalSearchResult: {
+            id: highlightId,
+            group,
+            path: `${pathname}?highlight=${highlightId}`,
+            title: notification?.title || "Void Request",
+            subtitle: notification?.message || "",
+          },
+        },
+      };
+    }
 
     if (relatedType === "remittance" && relatedId) {
       const highlightId = `remittance-${relatedId}`;
@@ -464,8 +540,21 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
               <p className="text-sm text-gray-500">Are you sure you want to sign out of your account?</p>
             </div>
             <div className="flex gap-3 w-full">
-              <button onClick={() => setShowLogoutModal(false)} className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-[#f5f5f5] text-gray-500 hover:bg-[#e8eaed] transition-colors border border-gray-500">Cancel</button>
-              <button onClick={handleConfirmLogout} className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-[#1a1f36] text-white hover:bg-[#252b47] transition-colors">Sign Out</button>
+              <button
+                onClick={() => setShowLogoutModal(false)}
+                disabled={isSigningOut}
+                className="flex-1 py-2.5 rounded-xl text-sm font-normal bg-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ border: "2px solid #1a1f36", color: "#1a1f36", fontFamily: "'Montserrat', sans-serif", opacity: isSigningOut ? 0.5 : 1 }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmLogout}
+                disabled={isSigningOut}
+                className="flex flex-1 items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-normal bg-[#1a1f36] text-white disabled:cursor-not-allowed disabled:opacity-80"
+              >
+                {isSigningOut ? <Spinner size={16} className="text-white" /> : "Sign Out"}
+              </button>
             </div>
           </div>
         </div>
@@ -676,11 +765,6 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
                     <p className="m-0 text-[13px] font-bold text-[#1a1f36]">Notifications</p>
                     <p className="m-0 mt-0.5 text-[11px] text-slate-500" />
                   </div>
-                  {notificationsQuery.isFetching && visibleNotifications.length > 0 ? (
-                    <div className="pr-3">
-                      <Spinner size={14} className="text-slate-400" />
-                    </div>
-                  ) : null}
                 </div>
 
                 <div className="topbar-panel-scroll max-h-[320px] overflow-y-auto">
@@ -706,7 +790,7 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
                               {row.title || "Notification"}
                             </p>
                             <p className="m-0 mt-1 text-[11px] text-slate-500">
-                              {row.message || `Submitted for ${formatNotificationDate(row.created_at)}`}
+                              {row.message ? formatNotificationMessage(row.message) : `Submitted for ${formatNotificationDate(row.created_at)}`}
                             </p>
                           </div>
                         </div>

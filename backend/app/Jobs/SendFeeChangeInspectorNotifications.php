@@ -30,7 +30,7 @@ class SendFeeChangeInspectorNotifications implements ShouldQueue
 
         $feeType = $this->getFeeTypeLabel($fee);
         $applicableTo = $this->formatFeeApplicableLabel($fee);
-        $amount = 'PHP ' . number_format((float) $fee->amount, 2);
+        $amount = '₱' . number_format((float) $fee->amount, 2);
         $effectiveFrom = optional($fee->effective_from)->format('F j, Y') ?? 'the selected date';
         $effectiveTo = optional($fee->effective_to)->format('F j, Y');
         $effectivity = $effectiveTo

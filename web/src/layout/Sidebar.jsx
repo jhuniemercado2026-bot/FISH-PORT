@@ -29,13 +29,14 @@ import {
   IoMailOutline ,
 } from "react-icons/io5";
 import { logoutUser } from "../pages/login/logout";
+import Spinner from "../components/Spinner";
 
 
 const LOGO_SRC = "/images/opol_fish_port.png";
 const SIDEBAR_SCROLL_KEY = "superadmin-sidebar-scroll-top";
 
 // ── Logout Modal ──────────────────────────────────────────────────────────────
-const LogoutModal = ({ onConfirm, onCancel }) => (
+const LogoutModal = ({ onConfirm, onCancel, isLoading }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
     <div className="rounded-2xl p-8 flex flex-col items-center gap-5 mx-4 w-full max-w-sm bg-white shadow-2xl">
       <div className="w-16 h-16 rounded-full flex items-center justify-center bg-[#1a1f36]">
@@ -46,8 +47,21 @@ const LogoutModal = ({ onConfirm, onCancel }) => (
         <p className="text-sm text-gray-500">Are you sure you want to sign out of your account?</p>
       </div>
       <div className="flex gap-3 w-full">
-        <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-[#f5f5f5] text-gray-500 hover:bg-[#e8eaed] transition-colors border border-gray-500">Cancel</button>
-        <button onClick={onConfirm} className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-[#1a1f36] text-white hover:bg-[#252b47] transition-colors">Sign Out</button>
+        <button
+          onClick={onCancel}
+          disabled={isLoading}
+          className="flex-1 py-2.5 rounded-xl text-sm font-normal bg-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+          style={{ border: "2px solid #1a1f36", color: "#1a1f36", fontFamily: "'Montserrat', sans-serif", opacity: isLoading ? 0.5 : 1 }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={isLoading}
+          className="flex flex-1 items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-normal bg-[#1a1f36] text-white disabled:cursor-not-allowed disabled:opacity-80"
+        >
+          {isLoading ? <Spinner size={16} className="text-white" /> : "Sign Out"}
+        </button>
       </div>
     </div>
   </div>
@@ -151,6 +165,7 @@ const Sidebar = ({
   const navigate = useNavigate();
   const location = useLocation();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [hovered, setHovered] = useState(false);
   const navRef = useRef(null);
   const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -191,8 +206,16 @@ const Sidebar = ({
   }, []);
 
   const confirmLogout = async () => {
-    await logoutUser();
-    navigate("/login", { replace: true });
+    if (isSigningOut) return;
+
+    setIsSigningOut(true);
+
+    try {
+      await logoutUser();
+      navigate("/login", { replace: true });
+    } catch (error) {
+      setIsSigningOut(false);
+    }
   };
 
   const navigateIfNeeded = (path) => {
@@ -288,7 +311,7 @@ const Sidebar = ({
         { type: "item", icon: IoBoatOutline, label: "Boat Management", path: "/registered-boats" },
         { type: "item", icon: IoCalendarOutline, label: "Docking", path: "/docking" },
         { type: "item", icon: IoFishOutline, label: "Banyera", path: "/banyera" },
-        { type: "item", icon: IoCarOutline, label: "Vehicle Tickets", path: "/daily-vehicle-tickets" },
+        { type: "item", icon: IoCarOutline, label: "Vehicle Tickets", path: "/vehicle-tickets" },
         { type: "item", icon: IoReceiptOutline, label: "Billing", path: "/billing" },
         { type: "item", icon: IoCashOutline, label: "Collections", path: "/collections" },
         { type: "item", icon: IoDocumentTextOutline, label: "Statement of Account", path: "/owner-statement" },
@@ -317,14 +340,18 @@ const Sidebar = ({
     items: section.items.filter((item) => {
       if (!isCoordinator) return true;
 
-      return !["Set Fees", "Accounts", "Activity Logs"].includes(item.label);
+      return !["Set Fees", "Activity Logs"].includes(item.label);
     }),
   })).filter((section) => section.items.length > 0);
 
   return (
     <>
       {showLogoutModal && (
-        <LogoutModal onConfirm={confirmLogout} onCancel={() => setShowLogoutModal(false)} />
+        <LogoutModal
+          onConfirm={confirmLogout}
+          onCancel={() => setShowLogoutModal(false)}
+          isLoading={isSigningOut}
+        />
       )}
 
       {/* Mobile overlay */}

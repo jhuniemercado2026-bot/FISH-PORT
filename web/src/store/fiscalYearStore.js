@@ -12,8 +12,8 @@ export const isCurrentFiscalYear = (year) => String(year) === getDefaultFiscalYe
 
 export const getFiscalYearLockMessage = (year) =>
   year
-    ? `Fiscal year ${year} is locked for editing and is view-only.`
-    : "Selected fiscal year is locked for editing and is view-only.";
+    ? `Transactions in ${year} is for viewing only.`
+    : "Transactions in this year is for viewing only.";
 
 const normalizeFiscalYear = (value) => {
   const year = String(value ?? "").trim();

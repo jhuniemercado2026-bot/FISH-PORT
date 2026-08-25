@@ -7,6 +7,62 @@ const getDockingFee = (docking) => Number(docking?.docking_fee ?? 0);
 
 const adjustStatValue = (value, delta) => Math.max(0, Number(value ?? 0) + delta);
 
+const sortDockingsByDate = (dockings = []) =>
+  [...dockings].sort((left, right) => {
+    const leftDate = String(left?.docking_date ?? "");
+    const rightDate = String(right?.docking_date ?? "");
+    if (leftDate !== rightDate) return leftDate.localeCompare(rightDate);
+    return Number(left?.docking_id ?? 0) - Number(right?.docking_id ?? 0);
+  });
+
+const getDockingStatus = (docking) =>
+  docking?.is_voided || docking?.voided_at || String(docking?.status ?? "").toLowerCase() === "voided"
+    ? "voided"
+    : "active";
+
+const isDockingVisibleForFilters = (docking, filters = {}) => {
+  const search = String(filters.search ?? "").trim();
+  const dockingStatus = String(filters.dockingStatus ?? "all");
+  const dockingPeriod = String(filters.dockingPeriod ?? "all");
+  const boatTypeId = String(filters.boatTypeId ?? "all");
+  const page = Number(filters.page ?? 1);
+
+  if (search || page !== 1) return false;
+  if (!["all", getDockingStatus(docking)].includes(dockingStatus)) return false;
+  if (dockingPeriod !== "all") return false;
+  if (boatTypeId !== "all") {
+    const recordBoatTypeId =
+      docking?.boat?.boat_type_id ??
+      docking?.boat?.boatType?.boat_type_id ??
+      docking?.boat?.boat_type?.boat_type_id;
+    if (String(recordBoatTypeId ?? "") !== boatTypeId) return false;
+  }
+
+  return true;
+};
+
+const trimDockingsForPage = (dockings, filters = {}) => {
+  const perPage = Number(filters.perPage ?? 0);
+  if (!perPage || perPage < 1) return dockings;
+  return dockings.slice(0, perPage);
+};
+
+const incrementDockingsMeta = (meta, dockingsCount) => {
+  if (!meta) return meta;
+
+  const total = Number(meta.total ?? 0) + 1;
+  const perPage = Number(meta.per_page ?? meta.perPage ?? dockingsCount) || dockingsCount;
+  const from = Number(meta.from ?? 0) || (dockingsCount > 0 ? 1 : 0);
+
+  return {
+    ...meta,
+    total,
+    from,
+    to: Math.min(total, Math.max(from, dockingsCount)),
+    last_page: perPage > 0 ? Math.max(1, Math.ceil(total / perPage)) : meta.last_page,
+  };
+};
+
 export const updateDockingStatsInCache = (queryClient, docking, action) => {
   const isTodaysDocking = getDockingDate(docking) === getManilaDateString();
   const dockingFee = getDockingFee(docking);
@@ -64,51 +120,79 @@ export const upsertDockingInDataCache = (queryClient, docking, hydrateDocking, o
     }
 
     const filters = queryKey?.[1] ?? {};
-    if (
-      !insertIfMissing ||
-      !dockingId ||
-      filters.paginated ||
-      String(filters.search ?? "") !== "" ||
-      !["all", "active"].includes(String(filters.dockingStatus ?? "all")) ||
-      String(filters.dockingPeriod ?? "all") !== "all" ||
-      String(filters.boatTypeId ?? "all") !== "all"
-    ) {
+    if (!insertIfMissing || !dockingId || !isDockingVisibleForFilters(hydratedDocking, filters)) {
       return;
     }
 
+    const nextDockings = trimDockingsForPage([hydratedDocking, ...previousDockings], filters);
+
     queryClient.setQueryData(queryKey, {
       ...previous,
-      dockings: [hydratedDocking, ...previousDockings],
+      dockings: nextDockings,
+      dockingsMeta: incrementDockingsMeta(previous.dockingsMeta, nextDockings.length),
     });
   });
 };
 
-export const syncDockingCalendarCache = (queryClient, docking, hydrateDocking, isDockingVoided) => {
+const isDockingInsideCalendarRange = (docking, filters = {}) => {
+  const date = getDockingDate(docking);
+  if (!date) return false;
+
+  const start = String(filters.start ?? "");
+  const end = String(filters.end ?? "");
+
+  if (start && date < start) return false;
+  if (end && date > end) return false;
+
+  return true;
+};
+
+export const syncDockingCalendarCache = (
+  queryClient,
+  docking,
+  hydrateDocking,
+  isDockingVoided,
+  options = {}
+) => {
   if (!docking?.docking_id) return;
 
+  const { insertIfMissing = false } = options;
   const hydratedDocking = hydrateDocking?.(docking) ?? docking;
   const dockingId = String(docking.docking_id);
 
-  queryClient.setQueriesData({ queryKey: ["dockings-calendar"] }, (previous) => {
+  queryClient.getQueriesData({ queryKey: ["dockings-calendar"] }).forEach(([queryKey, previous]) => {
     if (!Array.isArray(previous)) return previous;
 
     const existingIndex = previous.findIndex(
       (item) => String(item?.docking_id ?? "") === dockingId
     );
 
-    if (existingIndex < 0) return previous;
-
     if (!hydratedDocking || isDockingVoided?.(hydratedDocking)) {
-      return previous.filter((item) => String(item?.docking_id ?? "") !== dockingId);
+      if (existingIndex < 0) return;
+      queryClient.setQueryData(
+        queryKey,
+        previous.filter((item) => String(item?.docking_id ?? "") !== dockingId)
+      );
+      return;
     }
 
-    const nextCalendarDockings = [...previous];
-    nextCalendarDockings[existingIndex] = {
-      ...nextCalendarDockings[existingIndex],
-      ...hydratedDocking,
-    };
+    if (existingIndex >= 0) {
+      const nextCalendarDockings = [...previous];
+      nextCalendarDockings[existingIndex] = {
+        ...nextCalendarDockings[existingIndex],
+        ...hydratedDocking,
+      };
 
-    return nextCalendarDockings;
+      queryClient.setQueryData(queryKey, sortDockingsByDate(nextCalendarDockings));
+      return;
+    }
+
+    const filters = queryKey?.[1] ?? {};
+    if (!insertIfMissing || !isDockingInsideCalendarRange(hydratedDocking, filters)) {
+      return;
+    }
+
+    queryClient.setQueryData(queryKey, sortDockingsByDate([...previous, hydratedDocking]));
   });
 };
 

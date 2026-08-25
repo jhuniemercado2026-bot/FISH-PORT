@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\AccountStatusUpdated;
+use App\Events\MasterDataUpdated;
 use App\Models\User;
 use App\Services\ActivityLogService;
 use App\Services\PHPMailerService;
@@ -10,12 +12,47 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
-    private const PASSWORD_CHANGE_CODE_TTL_SECONDS = 300;
     private const PASSWORD_CHANGE_RESEND_COOLDOWN_SECONDS = 59;
     private const PASSWORD_CHANGE_RESEND_DAILY_LIMIT = 3;
+    private const VERIFICATION_CODE_LIMIT_MESSAGE = 'You have reached the verification code limit for today. Please use the latest verification code sent to your email. This code expires within this day.';
+
+    private function manageableAccountRoles(?User $actor): array
+    {
+        return match ($actor?->role) {
+            'head' => ['coordinator'],
+            'coordinator' => ['inspector'],
+            default => [],
+        };
+    }
+
+    private function abortIfCannotAccessAccounts(Request $request): array
+    {
+        $roles = $this->manageableAccountRoles($request->user());
+
+        abort_if(empty($roles), 403, 'You are not allowed to manage accounts.');
+
+        return $roles;
+    }
+
+    private function abortIfCannotManageTarget(Request $request, User $target): void
+    {
+        $roles = $this->manageableAccountRoles($request->user());
+
+        abort_if(
+            empty($roles) || ! in_array($target->role, $roles, true),
+            403,
+            'You are not allowed to manage this account.'
+        );
+    }
+
+    private function isSelf(Request $request, User $target): bool
+    {
+        return (int) ($request->user()?->user_id ?? 0) === (int) $target->user_id;
+    }
 
     private function highlightedPage($query, ?string $highlightId, int $requestedPage, int $perPage): int
     {
@@ -53,6 +90,8 @@ class UserController extends Controller
     // ── Get all users ─────────────────────────────────────────────────────────
     public function index(Request $request)
     {
+        $this->abortIfCannotAccessAccounts($request);
+
         $query = $this->usersIndexQuery($request);
 
         if ($request->boolean('all')) {
@@ -96,16 +135,22 @@ class UserController extends Controller
         // ⚠️ Do NOT use ->select() — it prevents $appends accessors from running
         $user = User::findOrFail($id)->makeHidden('password');
 
+        if (! $this->isSelf(request(), $user)) {
+            $this->abortIfCannotManageTarget(request(), $user);
+        }
+
         return response()->json(['data' => $user], 200);
     }
 
     // ── Create a new user ─────────────────────────────────────────────────────
     public function store(Request $request)
     {
+        $manageableRoles = $this->abortIfCannotAccessAccounts($request);
+
         $validated = $request->validate([
             'email'          => 'required|email|max:150|unique:users,email',
             'password'       => 'required|string|min:8|confirmed',
-            'role'           => 'required|in:head,coordinator,inspector',
+            'role'           => ['required', Rule::in($manageableRoles)],
             'first_name'     => 'required|string|max:100',
             'last_name'      => 'required|string|max:100',
             'gender'         => 'nullable|in:male,female',
@@ -129,6 +174,8 @@ class UserController extends Controller
             user: auth()->user()
         );
 
+        broadcast(new MasterDataUpdated('users', 'created', $user->makeHidden('password')->toArray()));
+
         return response()->json([
             'message' => 'User created successfully.',
             'data'    => $user->makeHidden('password'),
@@ -138,10 +185,12 @@ class UserController extends Controller
     // Send email invite and create a basic account entry for the user
     public function sendInvite(Request $request, PHPMailerService $mailer)
     {
+        $manageableRoles = $this->abortIfCannotAccessAccounts($request);
+
         $validated = $request->validate([
             'email' => 'required|email|max:150|unique:users,email',
             'password' => 'required|string|min:8|confirmed',
-            'role' => 'required|in:head,coordinator,inspector',
+            'role' => ['required', Rule::in($manageableRoles)],
         ]);
 
         DB::beginTransaction();
@@ -160,7 +209,9 @@ class UserController extends Controller
             $sent = $mailer->sendWelcomeEmail(
                 $user->email,
                 $user->full_name,
-                $validated['password']
+                $validated['password'],
+                auth()->user()?->role,
+                $user->role
             );
 
             if (!$sent) {
@@ -179,6 +230,8 @@ class UserController extends Controller
                 details: 'Created invited account for "' . $user->email . '" and sent login credentials.',
                 user: auth()->user()
             );
+
+            broadcast(new MasterDataUpdated('users', 'created', $user->fresh()->makeHidden('password')->toArray()));
 
             return response()->json([
                 'message' => 'User created and credentials sent successfully.',
@@ -206,6 +259,12 @@ class UserController extends Controller
             return $this->verifyPasswordChangeCode($request, $id);
         }
 
+        $isSelf = $this->isSelf($request, $user);
+
+        if (! $isSelf) {
+            $this->abortIfCannotManageTarget($request, $user);
+        }
+
         $validated = $request->validate([
             'email'          => 'sometimes|email|max:150|unique:users,email,' . $id . ',user_id',
             'password'       => 'nullable|string|min:8|confirmed',
@@ -226,6 +285,15 @@ class UserController extends Controller
             unset($validated['password']);
         }
 
+        if ($isSelf) {
+            unset($validated['role'], $validated['status']);
+        }
+
+        if (array_key_exists('role', $validated) && ! $isSelf) {
+            $manageableRoles = $this->manageableAccountRoles($request->user());
+            abort_if(! in_array($validated['role'], $manageableRoles, true), 403, 'You are not allowed to assign this role.');
+        }
+
         $user->update($validated);
 
         app(ActivityLogService::class)->log(
@@ -234,6 +302,8 @@ class UserController extends Controller
             details: 'Updated account details for "' . $user->email . '".',
             user: auth()->user()
         );
+
+        broadcast(new MasterDataUpdated('users', 'updated', $user->fresh()->makeHidden('password')->toArray()));
 
         return response()->json([
             'message' => 'User updated successfully.',
@@ -279,7 +349,7 @@ class UserController extends Controller
 
         if ($sendCount >= self::PASSWORD_CHANGE_RESEND_DAILY_LIMIT) {
             return response()->json([
-                'message' => 'You have reached the verification code limit for today.',
+                'message' => self::VERIFICATION_CODE_LIMIT_MESSAGE,
                 'remaining_resends' => 0,
             ], 429);
         }
@@ -299,13 +369,14 @@ class UserController extends Controller
 
         Cache::put($this->passwordChangeCacheKey($user->user_id), [
             'code_hash' => Hash::make($code),
-            'expires_at' => now()->addSeconds(self::PASSWORD_CHANGE_CODE_TTL_SECONDS)->toIso8601String(),
-        ], now()->addSeconds(self::PASSWORD_CHANGE_CODE_TTL_SECONDS));
+            'expires_at' => now()->endOfDay()->toIso8601String(),
+        ], now()->endOfDay());
 
         $sent = $mailer->sendPasswordChangeCodeEmail(
             $user->email,
             trim($user->full_name) !== '' ? $user->full_name : $user->email,
-            $code
+            $code,
+            'change_password'
         );
 
         if (!$sent) {
@@ -317,6 +388,14 @@ class UserController extends Controller
         }
 
         $sendCount = $this->incrementPasswordChangeResendCount($user->user_id);
+        $remainingResends = max(0, self::PASSWORD_CHANGE_RESEND_DAILY_LIMIT - $sendCount);
+
+        if ($remainingResends === 0) {
+            Cache::put($this->passwordChangeCacheKey($user->user_id), [
+                'code_hash' => Hash::make($code),
+                'expires_at' => now()->endOfDay()->toIso8601String(),
+            ], now()->endOfDay());
+        }
 
         if ($isResendRequest) {
             Cache::put(
@@ -329,7 +408,7 @@ class UserController extends Controller
         return response()->json([
             'message' => 'Verification code sent successfully.',
             'retry_after' => $isResendRequest ? self::PASSWORD_CHANGE_RESEND_COOLDOWN_SECONDS : 0,
-            'remaining_resends' => max(0, self::PASSWORD_CHANGE_RESEND_DAILY_LIMIT - $sendCount),
+            'remaining_resends' => $remainingResends,
         ], 200);
     }
 
@@ -376,9 +455,9 @@ class UserController extends Controller
 
         if (!$cachedCode || empty($cachedCode['code_hash'])) {
             return response()->json([
-                'message' => 'The verification code has expired. Please request a new code.',
+                'message' => 'The verification code has expired. Please request a new verification code.',
                 'errors' => [
-                    'verification_code' => ['The verification code has expired. Please request a new code.'],
+                    'verification_code' => ['The verification code has expired. Please request a new verification code.'],
                 ],
             ], 422);
         }
@@ -420,6 +499,10 @@ class UserController extends Controller
     {
         $user = User::findOrFail($id);
 
+        if (! $this->isSelf($request, $user)) {
+            $this->abortIfCannotManageTarget($request, $user);
+        }
+
         $request->validate([
             'profile_image' => 'required|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
@@ -441,6 +524,8 @@ class UserController extends Controller
             user: auth()->user()
         );
 
+        broadcast(new MasterDataUpdated('users', 'updated', $user->fresh()->makeHidden('password')->toArray()));
+
         return response()->json([
             'message'           => 'Profile image updated successfully.',
             'profile_image'     => $path,
@@ -452,6 +537,7 @@ class UserController extends Controller
     public function deactivate($id)
     {
         $user = User::findOrFail($id);
+        $this->abortIfCannotManageTarget(request(), $user);
 
         $user->update(['status' => 'deactivated']);
         $user->tokens()->delete();
@@ -463,6 +549,17 @@ class UserController extends Controller
             user: auth()->user()
         );
 
+        broadcast(new MasterDataUpdated('users', 'updated', $user->fresh()->makeHidden('password')->toArray()));
+        broadcast(new AccountStatusUpdated([
+            'user_id' => $user->user_id,
+            'id' => $user->user_id,
+            'email' => $user->email,
+            'name' => $user->full_name ?: $user->email,
+            'role' => $user->role,
+            'status' => $user->status,
+            'presence_status' => 'offline',
+        ]));
+
         return response()->json([
             'message' => 'User deactivated successfully.',
         ], 200);
@@ -471,6 +568,7 @@ class UserController extends Controller
     public function reactivate($id)
     {
         $user = User::findOrFail($id);
+        $this->abortIfCannotManageTarget(request(), $user);
 
         $user->update(['status' => 'active']);
 
@@ -481,6 +579,8 @@ class UserController extends Controller
             user: auth()->user()
         );
 
+        broadcast(new MasterDataUpdated('users', 'updated', $user->fresh()->makeHidden('password')->toArray()));
+
         return response()->json([
             'message' => 'User reactivated successfully.',
         ], 200);
@@ -490,6 +590,7 @@ class UserController extends Controller
     public function destroy($id)
     {
         $user = User::findOrFail($id);
+        $this->abortIfCannotManageTarget(request(), $user);
 
         // Delete profile image from storage
         if ($user->profile_image && Storage::disk('public')->exists($user->profile_image)) {
@@ -507,6 +608,10 @@ class UserController extends Controller
             user: auth()->user()
         );
 
+        broadcast(new MasterDataUpdated('users', 'deleted', [
+            'user_id' => $user->user_id,
+        ]));
+
         return response()->json([
             'message' => 'User deleted successfully.',
         ], 200);
@@ -514,12 +619,15 @@ class UserController extends Controller
 
     private function usersIndexQuery(Request $request)
     {
+        $manageableRoles = $this->manageableAccountRoles($request->user());
+
         return User::query()
             ->forTableIndex([
                 'exclude_user_id' => $request->boolean('exclude_current') && $request->user()
                     ? $request->user()->user_id
                     : null,
             ])
+            ->whereIn('role', $manageableRoles)
             ->searchTable($request->input('search'))
             ->tableFilters([
                 'status' => $request->input('status'),
@@ -529,7 +637,8 @@ class UserController extends Controller
 
     private function usersStats(Request $request): array
     {
-        $query = User::query();
+        $query = User::query()
+            ->whereIn('role', $this->manageableAccountRoles($request->user()));
 
         if ($request->boolean('exclude_current') && $request->user()) {
             $query->where('user_id', '!=', $request->user()->user_id);

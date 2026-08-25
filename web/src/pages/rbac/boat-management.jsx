@@ -48,6 +48,7 @@ import ArchiveModal from "../../components/ArchiveModal";
 import { showAddedToast, showBottomToast, showNoChangesToast, showUpdatedToast } from "../../store/bottomToastStore";
 import { useSidebar } from "../../store/sidebarStore";
 import api from "../../api/axios";
+import { buildTermsAndAgreementPdf } from "../../lib/pdfDocumentTermsAndAgreement";
 import {
   useRegisteredBoatsDataQuery,
   useBoatTypesQuery,
@@ -65,6 +66,8 @@ import {
   updateOwnerInDataCache,
   updateRegisteredBoatsDataCache,
 } from "../../utils/boatManagementCache";
+import { isHeadRole } from "../../utils/transactionLock";
+import { cacheTab, getCachedTab } from "../../utils/tabSession";
 
 const RB_PAGE_SIZE = 10;
 const RB_FONT = "'Montserrat', sans-serif";
@@ -188,6 +191,8 @@ const BOAT_MANAGEMENT_TABS = [
   { key: "/boat-type", label: "Boat Type", icon: IoLayersOutline },
   { key: "/boat-owners", label: "Boat Owner", icon: IoPersonOutline },
 ];
+const BOAT_MANAGEMENT_TAB_STORAGE_KEY = "opol:boat-management:active-tab";
+const BOAT_MANAGEMENT_TAB_KEYS = BOAT_MANAGEMENT_TABS.map((tab) => tab.key);
 
 const BM_TITLE = "Boat Management";
 const BM_SUBTITLE = "Manage all registered boats, boat types, and boat owners.";
@@ -803,6 +808,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
   const [editingBoat,    setEditingBoat]    = useState(null);
   const [deleteModal,    setDeleteModal]    = useState({ open: false, boat: null });
   const [addBoatModalOpen, setAddBoatModalOpen] = useState(false);
+  const isHeadViewOnly = isHeadRole();
   const urlFiltersKeyRef = useRef(null);
 
   const debouncedSearch = BM_useDebouncedValue(search);
@@ -828,9 +834,10 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
   }, [location.key]);
   useEffect(() => {
     if (!openAddBoatOnMount) return;
+    if (isHeadViewOnly) return;
     setAddBoatModalOpen(true);
     navigate("/registered-boats", { replace: true });
-  }, [navigate, openAddBoatOnMount]);
+  }, [isHeadViewOnly, navigate, openAddBoatOnMount]);
   const boatsQuery = useRegisteredBoatsDataQuery(
     {
       boatsPage: currentPage,
@@ -1078,7 +1085,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
               subtitle="All registered boats in the system"
               className="table-card--image-first-column"
               loading={fetching}
-              headerActionsSkeletonCount={2}
+              headerActionsSkeletonCount={isHeadViewOnly ? 2 : 3}
               pagination={{
                 meta: boatsMeta,
                 total: boatsMeta.total,
@@ -1104,33 +1111,35 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
                       className="bg-transparent border-none outline-none text-[13px] w-full" style={{ fontFamily: RB_FONT, color: "#1a1f36" }} />
                   </div>
                   <RB_TailDropdown value={statusFilter} onChange={v => { clearUniversalHighlight(); setStatusFilter(v); setRequestedPage(1); setCurrentPage(1); }} options={RB_STATUS_FILTER_OPTIONS} height={42} />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      clearUniversalHighlight();
-                      if (isTransactionLocked) {
-                        showBottomToast("error", "Transactions Locked", transactionLockMessage);
-                        return;
-                      }
-                      setAddBoatModalOpen(true);
-                    }}
-                    disabled={isTransactionLocked}
-                    className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none px-4 text-[13px] font-semibold text-white transition-colors disabled:cursor-not-allowed"
-                    style={{
-                      fontFamily: RB_FONT,
-                      backgroundColor: isTransactionLocked ? "#94a3b8" : "#1a1f36",
-                      cursor: isTransactionLocked ? "not-allowed" : "pointer",
-                    }}
-                    onMouseEnter={(event) => {
-                      if (!isTransactionLocked) event.currentTarget.style.backgroundColor = "#2d3561";
-                    }}
-                    onMouseLeave={(event) => {
-                      if (!isTransactionLocked) event.currentTarget.style.backgroundColor = "#1a1f36";
-                    }}
-                  >
-                    <IoAddOutline className="text-[16px]" />
-                    <span>Add Boat</span>
-                  </button>
+                  {!isHeadViewOnly ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearUniversalHighlight();
+                        if (isTransactionLocked) {
+                          showBottomToast("error", "Transactions Locked", transactionLockMessage);
+                          return;
+                        }
+                        setAddBoatModalOpen(true);
+                      }}
+                      disabled={isTransactionLocked}
+                      className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none px-4 text-[13px] font-semibold text-white transition-colors disabled:cursor-not-allowed"
+                      style={{
+                        fontFamily: RB_FONT,
+                        backgroundColor: isTransactionLocked ? "#94a3b8" : "#1a1f36",
+                        cursor: isTransactionLocked ? "not-allowed" : "pointer",
+                      }}
+                      onMouseEnter={(event) => {
+                        if (!isTransactionLocked) event.currentTarget.style.backgroundColor = "#2d3561";
+                      }}
+                      onMouseLeave={(event) => {
+                        if (!isTransactionLocked) event.currentTarget.style.backgroundColor = "#1a1f36";
+                      }}
+                    >
+                      <IoAddOutline className="text-[16px]" />
+                      <span>Add Boat</span>
+                    </button>
+                  ) : null}
                 </>
               }
             >
@@ -1139,7 +1148,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
                   <thead>
                       <tr>
                         <RB_TH>Image</RB_TH><RB_TH>Boat Name</RB_TH><RB_TH>Type</RB_TH><RB_TH>Owner</RB_TH>
-                        <RB_TH>Contact</RB_TH><RB_TH>Date Registered</RB_TH><RB_TH align="right">Action</RB_TH>
+                        <RB_TH>Contact</RB_TH><RB_TH>Date Registered</RB_TH>{!isHeadViewOnly ? <RB_TH align="right">Action</RB_TH> : null}
                       </tr>
                   </thead>
                   <tbody>
@@ -1152,11 +1161,11 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
                           <td className="px-4 py-3"><div className="h-3 bg-slate-100 rounded w-28" /></td>
                           <td className="px-4 py-3"><div className="h-3 bg-slate-100 rounded w-24" /></td>
                           <td className="px-4 py-3"><div className="h-5 bg-slate-100 rounded-md w-20" /></td>
-                          <td className="px-4 py-3"><div className="flex gap-2"><div className="w-8 h-8 rounded-lg bg-slate-100" /><div className="w-8 h-8 rounded-lg bg-slate-100" /></div></td>
+                          {!isHeadViewOnly ? <td className="px-4 py-3"><div className="flex gap-2"><div className="w-8 h-8 rounded-lg bg-slate-100" /><div className="w-8 h-8 rounded-lg bg-slate-100" /></div></td> : null}
                         </tr>
                       ))
                     ) : paginated.length === 0 ? (
-                      <tr><td colSpan={7}>
+                      <tr><td colSpan={isHeadViewOnly ? 6 : 7}>
                         <NoDataFound title={search || statusFilter !== "all" || ownerFilter !== "all" || boatTypeFilter !== "all" ? "No results found" : "No Data Found"} />
                       </td></tr>
                     ) : paginated.map((boat, index) => {
@@ -1203,45 +1212,41 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
                           <td className="px-4 py-3 text-[13px] font-normal" style={{ color: "#1a1f36" }}>{ownerName}</td>
                           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{boat.owner?.contact_number ?? "-"}</td>
                           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{RB_formatDate(boat.created_at)}</td>
-                          <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                            <div className="flex items-center justify-start gap-2">
-                              <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
-                                <button onClick={(e) => { e.stopPropagation(); if (isTransactionLocked) return; setEditingBoat(boat); setEditDrawerOpen(true); }}
-                                  disabled={isTransactionLocked}
-                                  className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:opacity-60"
-                                  style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}
-                                ><IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} /></button>
-                              </Tooltip>
-                              <Tooltip
-                                title={
-                                  isTransactionLocked
-                                    ? transactionLockMessage
-                                    : "Archive"
-                                }
-                              >
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (isTransactionLocked) return;
-                                    setDeleteModal({ open: true, boat });
-                                  }}
-                                  disabled={isTransactionLocked}
-                                  className={`w-8 h-8 rounded-lg border flex items-center justify-center bg-white transition-colors ${
-                                    isTransactionLocked
-                                      ? "cursor-not-allowed border-slate-200"
-                                      : "cursor-pointer border-red-300 hover:bg-red-50"
-                                  }`}
-                                >
-                                  <IoArchiveOutline
-                                    style={{
-                                      fontSize: "15px",
-                                      color: isTransactionLocked ? "#94a3b8" : "#ef4444",
+                          {!isHeadViewOnly ? (
+                            <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center justify-start gap-2">
+                                <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
+                                  <button onClick={(e) => { e.stopPropagation(); if (isTransactionLocked) return; setEditingBoat(boat); setEditDrawerOpen(true); }}
+                                    disabled={isTransactionLocked}
+                                    className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:opacity-60"
+                                    style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}
+                                  ><IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} /></button>
+                                </Tooltip>
+                                <Tooltip title={isTransactionLocked ? transactionLockMessage : "Archive"}>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (isTransactionLocked) return;
+                                      setDeleteModal({ open: true, boat });
                                     }}
-                                  />
-                                </button>
-                              </Tooltip>
-                            </div>
-                          </td>
+                                    disabled={isTransactionLocked}
+                                    className={`w-8 h-8 rounded-lg border flex items-center justify-center bg-white transition-colors ${
+                                      isTransactionLocked
+                                        ? "cursor-not-allowed border-slate-200"
+                                        : "cursor-pointer border-red-300 hover:bg-red-50"
+                                    }`}
+                                  >
+                                    <IoArchiveOutline
+                                      style={{
+                                        fontSize: "15px",
+                                        color: isTransactionLocked ? "#94a3b8" : "#ef4444",
+                                      }}
+                                    />
+                                  </button>
+                                </Tooltip>
+                              </div>
+                            </td>
+                          ) : null}
                         </tr>
                       );
                     })}
@@ -1258,7 +1263,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
       </div>
 
       <RB_RegisteredBoatDetailsDrawer boat={selectedBoat} open={drawerOpen} onClose={() => setDrawerOpen(false)} boatTypes={boatTypes} owners={owners} />
-      <RB_EditBoatDrawer
+      {!isHeadViewOnly ? <RB_EditBoatDrawer
         boat={editingBoat}
         open={editDrawerOpen}
         onClose={() => setEditDrawerOpen(false)}
@@ -1267,8 +1272,8 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
         onError={(message) => showToast("error", "Update Failed", message)}
         boatTypes={boatTypes}
         owners={owners}
-      />
-      <BA_AddBoatModal
+      /> : null}
+      {!isHeadViewOnly ? <BA_AddBoatModal
         open={addBoatModalOpen}
         onClose={() => setAddBoatModalOpen(false)}
         boatTypes={boatTypes}
@@ -1286,14 +1291,14 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
           void queryClient.invalidateQueries({ queryKey: ["registered-boats-data"], refetchType: "active" });
           refreshBoatDependentModules();
         }}
-      />
-      <ArchiveModal
+      /> : null}
+      {!isHeadViewOnly ? <ArchiveModal
         open={deleteModal.open}
         title="Archive Boat"
         itemName={deleteModal.boat?.boat_name ?? ""}
         onClose={() => setDeleteModal({ open: false, boat: null })}
         onConfirm={handleDelete}
-      />
+      /> : null}
     </ConfigProvider>
   );
 };
@@ -1690,6 +1695,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
   const [currentPage,   setCurrentPage]   = useState(1);
   const [showAddModal,  setShowAddModal]  = useState(false);
   const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const isHeadViewOnly = isHeadRole();
   const [editTarget,    setEditTarget]    = useState(null);
   const [deleteTarget,  setDeleteTarget]  = useState(null);
   const [selectedType,  setSelectedType]  = useState(null);
@@ -1791,6 +1797,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
   }, [highlightedSearchResult, location.search]);
 
   const handleAdd = async () => {
+    if (isHeadViewOnly) return;
     if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; }
     if (!addName.trim()) { setAddError("Boat type name is required."); return; }
     setLoading(true);
@@ -1816,6 +1823,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
   };
 
   const handleEdit = async () => {
+    if (isHeadViewOnly) return;
     if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; }
     if (!editName.trim()) { setEditError("Boat type name is required."); return; }
 
@@ -1852,6 +1860,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
   };
 
   const handleDelete = async () => {
+    if (isHeadViewOnly) return;
     if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; }
     const { boat_type_id, type_name } = deleteTarget;
     try {
@@ -1944,7 +1953,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
               title="Boat Type Records"
               subtitle="All registered boat types in the system"
               loading={fetching}
-              headerActionsSkeletonCount={3}
+              headerActionsSkeletonCount={isHeadViewOnly ? 2 : 3}
               pagination={{
                 meta: boatTypesMeta,
                 total: boatTypesMeta.total,
@@ -1982,24 +1991,31 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
                     options={BT_BOAT_TYPE_STATUS_OPTIONS}
                     height={42}
                   />
-                  <button
-                    onClick={() => { clearUniversalHighlight(); if (!isTransactionLocked) { setAddName(""); setAddError(""); setShowAddModal(true); } else showToast("error", "Transactions Locked", transactionLockMessage); }}
-                    disabled={isTransactionLocked}
-                    className="ml-1 flex items-center gap-1.5 px-4 py-2 rounded-lg border-none bg-[#1a1f36] cursor-pointer text-[13px] font-semibold text-white hover:bg-[#2d3561] transition-colors disabled:cursor-not-allowed disabled:opacity-70"
-                    style={{ fontFamily: BT_FONT, height: 42 }}
-                  >
-                    <IoAddOutline className="text-[17px]" /> Add Boat Type
-                  </button>
+                  {!isHeadViewOnly ? (
+                    <button
+                      onClick={() => { clearUniversalHighlight(); if (!isTransactionLocked) { setAddName(""); setAddError(""); setShowAddModal(true); } else showToast("error", "Transactions Locked", transactionLockMessage); }}
+                      disabled={isTransactionLocked}
+                      className="ml-1 flex items-center gap-1.5 px-4 py-2 rounded-lg border-none bg-[#1a1f36] cursor-pointer text-[13px] font-semibold text-white hover:bg-[#2d3561] transition-colors disabled:cursor-not-allowed disabled:opacity-70"
+                      style={{ fontFamily: BT_FONT, height: 42 }}
+                    >
+                      <IoAddOutline className="text-[17px]" /> Add Boat Type
+                    </button>
+                  ) : null}
                 </>
               }
             >
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse" style={{ minWidth: 540 }}>
+                <table className="w-full border-collapse" style={{ minWidth: isHeadViewOnly ? 440 : 540 }}>
+                  <colgroup>
+                    <col style={{ width: isHeadViewOnly ? "68%" : "56%" }} />
+                    <col style={{ width: isHeadViewOnly ? "32%" : "24%" }} />
+                    {!isHeadViewOnly ? <col style={{ width: "20%" }} /> : null}
+                  </colgroup>
                   <thead>
                     <tr>
                       <BT_TH>Type Name</BT_TH>
-                      <BT_TH>Usage Count</BT_TH>
-                      <BT_TH>Action</BT_TH>
+                      <BT_TH><div className="text-center">Usage Count</div></BT_TH>
+                      {!isHeadViewOnly ? <BT_TH>Action</BT_TH> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -2007,13 +2023,13 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
                       Array.from({ length: BT_PAGE_SIZE }).map((_, i) => (
                         <tr key={i} className="animate-pulse" style={{ borderBottom: "1px solid #f1f5f9" }}>
                           <td className="px-4 py-3"><div className="h-3 bg-slate-100 rounded w-32" /></td>
-                          <td className="px-4 py-3"><div className="h-5 bg-slate-100 rounded w-16" /></td>
-                          <td className="px-4 py-3"><div className="flex gap-2"><div className="w-8 h-8 rounded-lg bg-slate-100" /><div className="w-8 h-8 rounded-lg bg-slate-100" /></div></td>
+                          <td className="px-4 py-3"><div className="mx-auto h-5 w-16 rounded bg-slate-100" /></td>
+                          {!isHeadViewOnly ? <td className="px-4 py-3"><div className="flex gap-2"><div className="w-8 h-8 rounded-lg bg-slate-100" /><div className="w-8 h-8 rounded-lg bg-slate-100" /></div></td> : null}
                         </tr>
                       ))
                     ) : paginated.length === 0 ? (
                       <tr>
-                        <td colSpan={3}>
+                        <td colSpan={isHeadViewOnly ? 2 : 3}>
                           <NoDataFound title={search || typeStatusFilter !== "all" ? "No results found" : "No Data Found"} />
                         </td>
                       </tr>
@@ -2027,7 +2043,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
                           <td className="px-4 py-3 text-[13px]" style={{ color: "#1a1f36" }}>
                             <p className="m-0 text-[13px] font-normal" style={{ color: "#1a1f36" }}>{type.type_name}</p>
                           </td>
-                          <td className="px-4 py-3 text-[13px]">
+                          <td className="px-4 py-3 text-center text-[13px]">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -2042,46 +2058,42 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
                               />
                             </button>
                           </td>
-                          <td className="px-4 py-3 text-[13px]">
-                            <div className="flex items-center gap-2">
-                              <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
-                                <button onClick={(e) => { e.stopPropagation(); if (!isTransactionLocked) openEdit(type); else showToast("error", "Transactions Locked", transactionLockMessage); }}
-                                  disabled={isTransactionLocked}
-                                  className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:opacity-60"
-                                  style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}>
-                                  <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
-                                </button>
-                              </Tooltip>
-                              <Tooltip
-                                title={
-                                  isTransactionLocked
-                                    ? transactionLockMessage
-                                    : "Archive"
-                                }
-                              >
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (isTransactionLocked) return;
-                                    setDeleteTarget(type);
-                                  }}
-                                  disabled={isTransactionLocked}
-                                  className={`w-8 h-8 rounded-lg border flex items-center justify-center bg-white transition-colors ${
-                                    isTransactionLocked
-                                      ? "cursor-not-allowed border-slate-200"
-                                      : "cursor-pointer border-red-300 hover:bg-red-50"
-                                  }`}
-                                >
-                                  <IoArchiveOutline
-                                    style={{
-                                      fontSize: "15px",
-                                      color: isTransactionLocked ? "#94a3b8" : "#ef4444",
+                          {!isHeadViewOnly ? (
+                            <td className="px-4 py-3 text-[13px]">
+                              <div className="flex items-center gap-2">
+                                <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
+                                  <button onClick={(e) => { e.stopPropagation(); if (!isTransactionLocked) openEdit(type); else showToast("error", "Transactions Locked", transactionLockMessage); }}
+                                    disabled={isTransactionLocked}
+                                    className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:opacity-60"
+                                    style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}>
+                                    <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
+                                  </button>
+                                </Tooltip>
+                                <Tooltip title={isTransactionLocked ? transactionLockMessage : "Archive"}>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (isTransactionLocked) return;
+                                      setDeleteTarget(type);
                                     }}
-                                  />
-                                </button>
-                              </Tooltip>
-                            </div>
-                          </td>
+                                    disabled={isTransactionLocked}
+                                    className={`w-8 h-8 rounded-lg border flex items-center justify-center bg-white transition-colors ${
+                                      isTransactionLocked
+                                        ? "cursor-not-allowed border-slate-200"
+                                        : "cursor-pointer border-red-300 hover:bg-red-50"
+                                    }`}
+                                  >
+                                    <IoArchiveOutline
+                                      style={{
+                                        fontSize: "15px",
+                                        color: isTransactionLocked ? "#94a3b8" : "#ef4444",
+                                      }}
+                                    />
+                                  </button>
+                                </Tooltip>
+                              </div>
+                            </td>
+                          ) : null}
                         </tr>
                           );
                         })
@@ -2097,7 +2109,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
         </div>
       </div>
 
-      {showAddModal && (
+      {!isHeadViewOnly && showAddModal && (
         <BT_BoatTypeModal
           title="Add Boat Type"
           subtitle="Register a new boat type"
@@ -2111,7 +2123,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
         />
       )}
 
-      {editTarget && (
+      {!isHeadViewOnly && editTarget && (
         <BT_BoatTypeModal
           title="Edit Boat Type"
           subtitle="Update the selected boat type"
@@ -2131,14 +2143,14 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
         onClose={() => setDrawerOpen(false)}
       />
 
-      <ArchiveModal
+      {!isHeadViewOnly ? <ArchiveModal
         open={!!deleteTarget}
         title="Archive Boat Type"
         itemName={deleteTarget?.type_name ?? ""}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
         fontFamily={BT_FONT}
-      />
+      /> : null}
     </>
   );
 };
@@ -2340,43 +2352,203 @@ const BO_TH = ({ children }) => (
   </th>
 );
 
+const BO_TermsAndAgreementModal = ({ owner, open, onClose }) => {
+  const [pdfFile, setPdfFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open || !owner) {
+      setPdfFile((current) => {
+        if (current?.url) URL.revokeObjectURL(current.url);
+        return null;
+      });
+      setLoading(false);
+      return undefined;
+    }
+
+    let isActive = true;
+    let nextUrl = "";
+
+    setPdfFile((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
+
+    const generateTermsPdf = async () => {
+      setLoading(true);
+      try {
+        const hasPermanentSignature = Boolean(owner.owner_signature_data_url);
+        let signatureAudits = [];
+
+        if (owner.owner_id) {
+          try {
+            const response = await api.get(`/boat-owners/${owner.owner_id}/signature-audits`);
+            signatureAudits = Array.isArray(response.data) ? response.data : [];
+          } catch (error) {
+            console.error("Failed to load owner signature audit history", error);
+          }
+        }
+
+        let agreementBoatName = "";
+        if (owner.owner_id) {
+          try {
+            const response = await api.get("/boat-management", {
+              params: {
+                include_boats: 1,
+                include_boat_types: 0,
+                include_owners: 0,
+                boats_paginated: 0,
+                owner: owner.owner_id,
+              },
+            });
+            const boatNames = (response.data?.boats ?? [])
+              .map((boat) => String(boat?.boat_name ?? "").trim())
+              .filter(Boolean);
+            agreementBoatName = Array.from(new Set(boatNames)).join(", ");
+          } catch (error) {
+            console.error("Failed to load owner boats for agreement PDF", error);
+          }
+        }
+
+        const pdfBytes = await buildTermsAndAgreementPdf({
+          owner,
+          ownerName: BO_getFullName(owner),
+          boatName: agreementBoatName,
+          date: hasPermanentSignature ? owner.owner_signature_signed_at || "" : "",
+          signatureDataUrl: hasPermanentSignature ? owner.owner_signature_data_url || "" : "",
+          inspector: hasPermanentSignature
+            ? owner.owner_signature_updated_by_user || owner.ownerSignatureUpdatedByUser || owner.ownerSignatureUpdatedBy || null
+            : null,
+          signatureAudits,
+        });
+
+        if (!isActive) return;
+
+        const nextData =
+          pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
+        const safeOwnerName = BO_getFullName(owner)
+          .replace(/[^a-z0-9]+/gi, "-")
+          .replace(/^-+|-+$/g, "")
+          .toLowerCase() || "boat-owner";
+        const filename = `terms-and-agreement-${safeOwnerName}.pdf`;
+        const file = new File([nextData], filename, {
+          type: "application/pdf",
+        });
+
+        nextUrl = URL.createObjectURL(file);
+        setPdfFile({ url: nextUrl, filename });
+      } catch (error) {
+        console.error("Failed to generate terms and agreement PDF", error);
+        if (isActive) setPdfFile(null);
+      } finally {
+        if (isActive) setLoading(false);
+      }
+    };
+
+    generateTermsPdf();
+
+    return () => {
+      isActive = false;
+      if (nextUrl) URL.revokeObjectURL(nextUrl);
+    };
+  }, [open, owner]);
+
+  if (!open) return null;
+
+  return (
+    <Modal
+      title="Terms and Agreement"
+      onClose={onClose}
+      closeOnBackdrop
+      maxWidth="920px"
+      showFooter={false}
+      bodyClassName="h-[68vh] max-h-[68vh] !overflow-hidden !p-0"
+      contentClassName="h-full !gap-0"
+    >
+      <div className="relative h-full overflow-hidden bg-white">
+        {loading ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-white px-6 text-center text-[13px] text-slate-500">
+            Generating PDF preview...
+          </div>
+        ) : pdfFile?.url ? (
+          <iframe
+            src={pdfFile.url}
+            title={`Terms and Agreement ${BO_getFullName(owner)}`}
+            className="h-full w-full border-0 bg-white"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center bg-white px-6 text-center text-[13px] text-slate-500">
+            Generating PDF preview...
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
 const BO_OwnerDetailsDrawer = ({ owner, open, onClose }) => {
+  const [termsOpen, setTermsOpen] = useState(false);
+
   if (!owner) return null;
 
   return (
-    <DetailDrawer
-      open={open}
-      onClose={onClose}
-      width={460}
-      fontFamily={BO_FONT}
-      title="Owner Details"
-      subtitle="Review the selected boat owner record."
-      icon={IoPersonOutline}
-    >
-      <DrawerSection
-        icon={IoDocumentTextOutline}
-        title="Owner Info"
-        subtitle="Registered details for this boat owner"
+    <>
+      <DetailDrawer
+        open={open}
+        onClose={onClose}
+        width={460}
         fontFamily={BO_FONT}
+        title="Owner Details"
+        subtitle="Review the selected boat owner record."
+        icon={IoPersonOutline}
+        footer={
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => {
+                onClose?.();
+                setTermsOpen(true);
+              }}
+              className="inline-flex min-w-[260px] items-center justify-center gap-2 rounded-[10px] border border-[#1a1f36] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#1a1f36] transition-colors hover:bg-slate-50"
+              style={{ fontFamily: BO_FONT }}
+            >
+              <IoDocumentTextOutline className="text-[16px]" />
+              View Terms and Agreement
+            </button>
+          </div>
+        }
       >
-        <div className="grid grid-cols-1 gap-3">
-          <DrawerInfoCard label="Full Name" value={BO_getFullName(owner)} />
-          <DrawerInfoCard label="Address" value={owner.address ?? "-"} />
-          <DrawerInfoCard label="Contact Number" value={owner.contact_number ?? "-"} />
-        </div>
-      </DrawerSection>
-      <DrawerSection
-        icon={IoCalendarOutline}
-        title="Created Details"
-        subtitle="Record creation information"
-        fontFamily={BO_FONT}
-      >
-        <div className="grid grid-cols-1 gap-3">
-          <DrawerInfoCard label="Created By" value={RB_getCreatedByLabel(owner)} />
-          <DrawerInfoCard label="Date Added" value={BO_formatDate(owner.created_at)} />
-        </div>
-      </DrawerSection>
-    </DetailDrawer>
+        <DrawerSection
+          icon={IoDocumentTextOutline}
+          title="Owner Info"
+          subtitle="Registered details for this boat owner"
+          fontFamily={BO_FONT}
+        >
+          <div className="grid grid-cols-1 gap-3">
+            <DrawerInfoCard label="Full Name" value={BO_getFullName(owner)} />
+            <DrawerInfoCard label="Address" value={owner.address ?? "-"} />
+            <DrawerInfoCard label="Contact Number" value={owner.contact_number ?? "-"} />
+          </div>
+        </DrawerSection>
+        <DrawerSection
+          icon={IoCalendarOutline}
+          title="Created Details"
+          subtitle="Record creation information"
+          fontFamily={BO_FONT}
+        >
+          <div className="grid grid-cols-1 gap-3">
+            <DrawerInfoCard label="Created By" value={RB_getCreatedByLabel(owner)} />
+            <DrawerInfoCard label="Date Added" value={BO_formatDate(owner.created_at)} />
+          </div>
+        </DrawerSection>
+      </DetailDrawer>
+
+      <BO_TermsAndAgreementModal
+        owner={owner}
+        open={termsOpen}
+        onClose={() => setTermsOpen(false)}
+      />
+    </>
   );
 };
 
@@ -2397,6 +2569,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
   const [toast,         setToast]         = useState({ open: false, type: "success", title: "", message: "" });
   const [addModal,      setAddModal]      = useState(false);
   const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const isHeadViewOnly = isHeadRole();
   const [editOwner,     setEditOwner]     = useState(null);
   const [deleteOwner,   setDeleteOwner]   = useState(null);
   const [selectedOwner, setSelectedOwner] = useState(null);
@@ -2493,6 +2666,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
   }, [highlightedSearchResult, location.search]);
 
   const handleAdd = async (form) => {
+    if (isHeadViewOnly) return;
     if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; }
     setSaving(true);
     try {
@@ -2513,6 +2687,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
   };
 
   const handleEdit = async (form) => {
+    if (isHeadViewOnly) return;
     if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; }
     setSaving(true);
     try {
@@ -2539,6 +2714,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
   };
 
   const handleDelete = async () => {
+    if (isHeadViewOnly) return;
     if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; }
     setSaving(true);
     const fullName = BO_getFullName(deleteOwner);
@@ -2646,7 +2822,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
               title="Boat Owner Records"
               subtitle="All registered boat owners in the system"
               loading={fetching}
-              headerActionsSkeletonCount={3}
+              headerActionsSkeletonCount={isHeadViewOnly ? 2 : 3}
               pagination={{
                 meta: ownersMeta,
                 total: ownersMeta.total,
@@ -2682,14 +2858,16 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
                     options={BO_OWNER_STATUS_OPTIONS}
                     height={42}
                   />
-                  <button
-                    onClick={() => { clearUniversalHighlight(); if (!isTransactionLocked) setAddModal(true); else showToast("error", "Transactions Locked", transactionLockMessage); }}
-                    disabled={isTransactionLocked}
-                    className="ml-1 flex items-center gap-1.5 px-4 py-2 rounded-lg border-none bg-[#1a1f36] cursor-pointer text-[13px] font-semibold text-white hover:bg-[#2d3561] transition-colors disabled:cursor-not-allowed disabled:opacity-70"
-                    style={{ fontFamily: BO_FONT, height: 42 }}
-                  >
-                    <IoAddOutline className="text-[17px]" /> Add Owner
-                  </button>
+                  {!isHeadViewOnly ? (
+                    <button
+                      onClick={() => { clearUniversalHighlight(); if (!isTransactionLocked) setAddModal(true); else showToast("error", "Transactions Locked", transactionLockMessage); }}
+                      disabled={isTransactionLocked}
+                      className="ml-1 flex items-center gap-1.5 px-4 py-2 rounded-lg border-none bg-[#1a1f36] cursor-pointer text-[13px] font-semibold text-white hover:bg-[#2d3561] transition-colors disabled:cursor-not-allowed disabled:opacity-70"
+                      style={{ fontFamily: BO_FONT, height: 42 }}
+                    >
+                      <IoAddOutline className="text-[17px]" /> Add Owner
+                    </button>
+                  ) : null}
                 </>
               }
             >
@@ -2699,7 +2877,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
                     <col style={{ width: "24%" }} />
                     <col style={{ width: "26%" }} />
                     <col style={{ width: "22%" }} />
-                    <col style={{ width: "14%" }} />
+                    {!isHeadViewOnly ? <col style={{ width: "14%" }} /> : null}
                     <col style={{ width: "14%" }} />
                   </colgroup>
                   <thead>
@@ -2708,7 +2886,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
                       <BO_TH>Address</BO_TH>
                       <BO_TH>Contact</BO_TH>
                       <BO_TH>Usage Count</BO_TH>
-                      <BO_TH>Action</BO_TH>
+                      {!isHeadViewOnly ? <BO_TH>Action</BO_TH> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -2719,12 +2897,12 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
                           <td className="px-4 py-3"><div className="h-3 bg-slate-100 rounded w-24" /></td>
                           <td className="px-4 py-3"><div className="h-3 bg-slate-100 rounded w-36" /></td>
                           <td className="px-4 py-3"><div className="h-5 bg-slate-100 rounded w-16" /></td>
-                          <td className="px-4 py-3"><div className="flex gap-2"><div className="w-8 h-8 rounded-lg bg-slate-100" /><div className="w-8 h-8 rounded-lg bg-slate-100" /></div></td>
+                          {!isHeadViewOnly ? <td className="px-4 py-3"><div className="flex gap-2"><div className="w-8 h-8 rounded-lg bg-slate-100" /><div className="w-8 h-8 rounded-lg bg-slate-100" /></div></td> : null}
                         </tr>
                       ))
                     ) : paginated.length === 0 ? (
                       <tr>
-                        <td colSpan={5}>
+                        <td colSpan={isHeadViewOnly ? 4 : 5}>
                           <NoDataFound title={search || ownerStatusFilter !== "all" ? "No results found" : "No Data Found"} />
                         </td>
                       </tr>
@@ -2771,48 +2949,50 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
                                 />
                               </button>
                             </td>
-                            <td className="px-4 py-3 text-[13px]">
-                              <div className="flex items-center gap-2">
-                                <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
-                                  <button onClick={(e) => { e.stopPropagation(); if (!isTransactionLocked) openEditDrawer(owner); else showToast("error", "Transactions Locked", transactionLockMessage); }}
-                                    disabled={isTransactionLocked}
-                                    className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:opacity-60"
-                                    style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}>
-                                    <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
-                                  </button>
-                                </Tooltip>
-                                <Tooltip
-                                  title={
-                                    isTransactionLocked
-                                      ? transactionLockMessage
-                                      : isArchivedOwner
-                                        ? "Already archived"
-                                      : "Archive"
-                                  }
-                                >
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (isTransactionLocked || isArchivedOwner) return;
-                                      setDeleteOwner(owner);
-                                    }}
-                                    disabled={isTransactionLocked || isArchivedOwner}
-                                    className={`w-8 h-8 rounded-lg border flex items-center justify-center bg-white transition-colors ${
-                                      isTransactionLocked || isArchivedOwner
-                                        ? "cursor-not-allowed border-slate-200"
-                                        : "cursor-pointer border-red-300 hover:bg-red-50"
-                                    }`}
+                            {!isHeadViewOnly ? (
+                              <td className="px-4 py-3 text-[13px]">
+                                <div className="flex items-center gap-2">
+                                  <Tooltip title={isTransactionLocked ? transactionLockMessage : "Edit"}>
+                                    <button onClick={(e) => { e.stopPropagation(); if (!isTransactionLocked) openEditDrawer(owner); else showToast("error", "Transactions Locked", transactionLockMessage); }}
+                                      disabled={isTransactionLocked}
+                                      className="w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer bg-white hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:border-slate-200 disabled:opacity-60"
+                                      style={{ borderColor: isTransactionLocked ? undefined : "#1a1f36" }}>
+                                      <IoCreateOutline style={{ fontSize: "15px", color: isTransactionLocked ? "#94a3b8" : "#1a1f36" }} />
+                                    </button>
+                                  </Tooltip>
+                                  <Tooltip
+                                    title={
+                                      isTransactionLocked
+                                        ? transactionLockMessage
+                                        : isArchivedOwner
+                                          ? "Already archived"
+                                          : "Archive"
+                                    }
                                   >
-                                    <IoArchiveOutline
-                                      style={{
-                                        fontSize: "15px",
-                                        color: isTransactionLocked || isArchivedOwner ? "#94a3b8" : "#ef4444",
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (isTransactionLocked || isArchivedOwner) return;
+                                        setDeleteOwner(owner);
                                       }}
-                                    />
-                                  </button>
-                                </Tooltip>
-                              </div>
-                            </td>
+                                      disabled={isTransactionLocked || isArchivedOwner}
+                                      className={`w-8 h-8 rounded-lg border flex items-center justify-center bg-white transition-colors ${
+                                        isTransactionLocked || isArchivedOwner
+                                          ? "cursor-not-allowed border-slate-200"
+                                          : "cursor-pointer border-red-300 hover:bg-red-50"
+                                      }`}
+                                    >
+                                      <IoArchiveOutline
+                                        style={{
+                                          fontSize: "15px",
+                                          color: isTransactionLocked || isArchivedOwner ? "#94a3b8" : "#ef4444",
+                                        }}
+                                      />
+                                    </button>
+                                  </Tooltip>
+                                </div>
+                              </td>
+                            ) : null}
                           </tr>
                         );
                       })
@@ -2828,14 +3008,14 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
         </div>
       </div>
 
-      <BO_OwnerDrawer
+      {!isHeadViewOnly ? <BO_OwnerDrawer
         open={addModal}
         onClose={() => setAddModal(false)}
         onSave={handleAdd}
         saving={saving}
-      />
+      /> : null}
 
-      <BO_OwnerDrawer
+      {!isHeadViewOnly ? <BO_OwnerDrawer
         owner={editOwner}
         open={!!editOwner}
         onClose={() => setEditOwner(null)}
@@ -2845,10 +3025,10 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
         }}
         onSave={handleEdit}
         saving={saving}
-      />
+      /> : null}
 
       {/* Archive Confirmation Modal */}
-      {deleteOwner && (
+      {!isHeadViewOnly && deleteOwner && (
         <ArchiveModal
           open={!!deleteOwner}
           title="Archive Owner"
@@ -3343,16 +3523,24 @@ const BoatManagement = () => {
   const resolveBoatTab = useCallback((path) => {
     if (path === "/boat-type") return "/boat-type";
     if (path === "/boat-owners") return "/boat-owners";
+    if (path === "/registered-boats") return getCachedTab(BOAT_MANAGEMENT_TAB_STORAGE_KEY, BOAT_MANAGEMENT_TAB_KEYS, "/registered-boats");
     return "/registered-boats";
   }, []);
   const [activeBoatTab, setActiveBoatTab] = useState(() => resolveBoatTab(pathname));
 
   useEffect(() => {
-    setActiveBoatTab(resolveBoatTab(pathname));
-  }, [pathname, resolveBoatTab]);
+    const nextTab = resolveBoatTab(pathname);
+    setActiveBoatTab(nextTab);
+    cacheTab(BOAT_MANAGEMENT_TAB_STORAGE_KEY, nextTab, BOAT_MANAGEMENT_TAB_KEYS);
+
+    if (pathname === "/registered-boats" && nextTab !== pathname) {
+      navigate(nextTab, { replace: true });
+    }
+  }, [navigate, pathname, resolveBoatTab]);
 
   const handleBoatTabChange = useCallback((nextTab) => {
     setActiveBoatTab(nextTab);
+    cacheTab(BOAT_MANAGEMENT_TAB_STORAGE_KEY, nextTab, BOAT_MANAGEMENT_TAB_KEYS);
 
     if (pathname !== nextTab) {
       navigate(nextTab);

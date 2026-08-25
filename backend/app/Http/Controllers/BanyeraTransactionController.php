@@ -2,14 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MasterDataUpdated;
+use App\Events\TransactionUpdated;
 use App\Models\BanyeraItem;
 use App\Models\BanyeraTransaction;
 use App\Models\BillItem;
 use App\Models\Boat;
+use App\Models\BoatOwnerSignatureAudit;
 use App\Models\Fee;
 use App\Models\FishClassification;
 use App\Services\ActivityLogService;
+use App\Services\VoidRequestNotificationService;
 use Carbon\Carbon;
+use Cloudinary\Cloudinary;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +26,59 @@ use Illuminate\Validation\Rule;
 class BanyeraTransactionController extends Controller
 {
     private ?bool $banyeraItemsHasDaugColumn = null;
+
+    private function cloudinaryUrl(): ?string
+    {
+        $cloudinaryUrl = config('services.cloudinary.url');
+        if ($cloudinaryUrl) {
+            return $cloudinaryUrl;
+        }
+
+        $cloudName = config('services.cloudinary.cloud_name');
+        $apiKey = config('services.cloudinary.api_key');
+        $apiSecret = config('services.cloudinary.api_secret');
+
+        if (! $cloudName || ! $apiKey || ! $apiSecret) {
+            return null;
+        }
+
+        return sprintf('cloudinary://%s:%s@%s', $apiKey, $apiSecret, $cloudName);
+    }
+
+    private function uploadSignatureToCloudinary(string $signatureDataUrl): array
+    {
+        if (! str_starts_with(trim($signatureDataUrl), 'data:image/')) {
+            return [
+                'url' => $signatureDataUrl,
+                'public_id' => null,
+            ];
+        }
+
+        $cloudinaryUrl = $this->cloudinaryUrl();
+        if (! $cloudinaryUrl) {
+            abort(500, 'Cloudinary is not configured. Please set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.');
+        }
+
+        $upload = (new Cloudinary($cloudinaryUrl))->uploadApi()->upload(
+            $signatureDataUrl,
+            [
+                'folder' => 'Opol Fish Port/Signature',
+                'resource_type' => 'image',
+            ]
+        );
+
+        $url = $upload['secure_url'] ?? $upload['url'] ?? null;
+        $publicId = $upload['public_id'] ?? null;
+
+        if (! $url || ! $publicId) {
+            abort(500, 'Cloudinary upload did not return complete signature image details.');
+        }
+
+        return [
+            'url' => $url,
+            'public_id' => $publicId,
+        ];
+    }
 
     private function manilaNow(): Carbon
     {
@@ -112,6 +170,17 @@ class BanyeraTransactionController extends Controller
         ]);
     }
 
+    private function withoutSignatureDataUrls(array $payload): array
+    {
+        unset($payload['owner_signature_data_url']);
+
+        if (isset($payload['boat']['owner']) && is_array($payload['boat']['owner'])) {
+            unset($payload['boat']['owner']['owner_signature_data_url']);
+        }
+
+        return $payload;
+    }
+
     private function applyBoatFilter($query, Request $request): void
     {
         $boatId = trim((string) $request->query('boat_id', ''));
@@ -139,13 +208,14 @@ class BanyeraTransactionController extends Controller
     private function resolveActiveBoatForBanyera(int $boatId): ?Boat
     {
         return Boat::query()
+            ->with('owner')
             ->where('status', 'active')
             ->find($boatId);
     }
 
     private function formatBanyeraDateLabel($value): string
     {
-        return $value ? Carbon::parse($value, 'Asia/Manila')->format('F j, Y') : 'blank';
+        return $value ? Carbon::parse($value, 'Asia/Manila')->format('F j, Y') : '';
     }
 
     private function formatBanyeraDateValue($value): ?string
@@ -326,8 +396,10 @@ class BanyeraTransactionController extends Controller
                 ->select([
                     'banyera_transactions.banyera_id',
                     'banyera_transactions.boat_id',
+                    'banyera_transactions.owner_id',
                     'banyera_transactions.transaction_date',
                     'banyera_transactions.total_fee',
+                    'banyera_transactions.owner_signature_signed_at',
                     'banyera_transactions.voided_at',
                     'banyera_transactions.created_at',
                 ])
@@ -520,12 +592,16 @@ class BanyeraTransactionController extends Controller
             user: Auth::user()
         );
 
-        return response()->json($this->transformClassification($classification), 201);
+        $payload = $this->transformClassification($classification);
+        broadcast(new MasterDataUpdated('fish_classifications', 'created', $payload));
+
+        return response()->json($payload, 201);
     }
 
     public function updateClassification(Request $request, $id)
     {
         $classification = FishClassification::query()->findOrFail($id);
+        $previousClassificationName = $classification->classification_name;
 
         $validated = $request->validate([
             'classification_name' => [
@@ -549,11 +625,14 @@ class BanyeraTransactionController extends Controller
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Banyera',
-            details: 'Updated fish classification "' . $classification->classification_name . '".',
+            details: 'Updated fish classification "' . $classification->classification_name . '" in classification name from "' . $previousClassificationName . '" to "' . $classification->classification_name . '".',
             user: Auth::user()
         );
 
-        return response()->json($this->transformClassification($classification));
+        $payload = $this->transformClassification($classification);
+        broadcast(new MasterDataUpdated('fish_classifications', 'updated', $payload));
+
+        return response()->json($payload);
     }
 
     public function destroyClassification($id)
@@ -569,6 +648,8 @@ class BanyeraTransactionController extends Controller
             details: 'Archived fish classification "' . $classificationName . '".',
             user: Auth::user()
         );
+
+        broadcast(new MasterDataUpdated('fish_classifications', 'archived', ['classification_id' => $classification->classification_id]));
 
         return response()->json(['message' => 'Fish classification archived successfully.']);
     }
@@ -590,9 +671,12 @@ class BanyeraTransactionController extends Controller
             user: Auth::user()
         );
 
+        $payload = $this->transformClassification($classification);
+        broadcast(new MasterDataUpdated('fish_classifications', 'restored', $payload));
+
         return response()->json([
             'message' => 'Fish classification restored successfully.',
-            'classification' => $this->transformClassification($classification),
+            'classification' => $payload,
         ]);
     }
 
@@ -634,6 +718,9 @@ class BanyeraTransactionController extends Controller
             'items.*.fee_id' => 'required|integer|exists:fees,fee_id',
             'items.*.subtotal' => 'nullable|numeric|min:0',
             'items.*.daug' => 'nullable|numeric|min:0',
+            'owner_signature_data_url' => 'nullable|string|max:2000000',
+            'owner_signature_signed_at' => 'nullable|date',
+            'owner_signature_save_for_future' => 'nullable|boolean',
         ]);
 
         $transactionDate = $validated['transaction_date'] ?? $this->manilaNow()->format('Y-m-d H:i:s');
@@ -647,7 +734,9 @@ class BanyeraTransactionController extends Controller
             ], 422);
         }
 
-        if (!$this->resolveActiveBoatForBanyera((int) $validated['boat_id'])) {
+        $boat = $this->resolveActiveBoatForBanyera((int) $validated['boat_id']);
+
+        if (!$boat) {
             return response()->json([
                 'message' => 'Only active boats can be used for Banyera transactions.',
                 'errors' => [
@@ -658,18 +747,53 @@ class BanyeraTransactionController extends Controller
 
         if ($this->banyeraExistsForBoatOnDate($validated['boat_id'], $transactionDate)) {
             return response()->json([
+                'code' => 'duplicate_record',
                 'message' => 'A banyera record already exists for this boat on this date.',
             ], 422);
         }
 
-        $transaction = DB::transaction(function () use ($validated, $transactionDate) {
+        $transaction = DB::transaction(function () use ($validated, $transactionDate, $boat) {
             $itemPayload = $this->normalizeBanyeraItemPayload($validated['items'] ?? []);
             $totalFee = $this->calculateBanyeraItemsTotal($itemPayload);
+            $signatureSignedAt = isset($validated['owner_signature_signed_at'])
+                ? Carbon::parse($validated['owner_signature_signed_at'], 'Asia/Manila')->format('Y-m-d H:i:s')
+                : null;
+            $transactionSignatureDataUrl = $validated['owner_signature_data_url'] ?? null;
+            $permanentSignaturePublicId = null;
+
+            if (
+                !empty($validated['owner_signature_data_url']) &&
+                !empty($validated['owner_signature_save_for_future']) &&
+                $boat->owner
+            ) {
+                $uploadedSignature = $this->uploadSignatureToCloudinary($validated['owner_signature_data_url']);
+                $transactionSignatureDataUrl = $uploadedSignature['url'];
+                $permanentSignaturePublicId = $uploadedSignature['public_id'];
+
+                $boat->owner->update([
+                    'owner_signature_data_url' => $transactionSignatureDataUrl,
+                    'owner_signature_public_id' => $permanentSignaturePublicId,
+                    'owner_signature_signed_at' => $signatureSignedAt ?? Carbon::now('Asia/Manila')->format('Y-m-d H:i:s'),
+                    'owner_signature_updated_by' => Auth::id(),
+                ]);
+                BoatOwnerSignatureAudit::create([
+                    'owner_id' => $boat->owner->owner_id,
+                    'signature_data_url' => $transactionSignatureDataUrl,
+                    'signature_public_id' => $permanentSignaturePublicId,
+                    'signed_at' => $boat->owner->owner_signature_signed_at,
+                    'inspector_id' => Auth::id(),
+                ]);
+            }
 
             $transaction = BanyeraTransaction::create([
                 'boat_id' => $validated['boat_id'],
+                'owner_id' => $boat->owner_id,
                 'transaction_date' => $transactionDate,
                 'total_fee' => $totalFee,
+                'owner_signature_data_url' => $transactionSignatureDataUrl,
+                'owner_signature_signed_at' => !empty($transactionSignatureDataUrl)
+                    ? ($signatureSignedAt ?? Carbon::now('Asia/Manila')->format('Y-m-d H:i:s'))
+                    : null,
                 'created_by' => Auth::id(),
             ]);
 
@@ -682,8 +806,31 @@ class BanyeraTransactionController extends Controller
         });
 
         $this->appendTransactionState($transaction);
+        $payload = $this->transformTransaction($transaction);
+        $boatName = trim((string) ($payload['boat']['boat_name'] ?? 'Unknown boat'));
+        $totalFee = number_format((float) ($payload['total_fee'] ?? $transaction->total_fee ?? 0), 2);
 
-        return response()->json($this->transformTransaction($transaction), 201);
+        app(ActivityLogService::class)->log(
+            action: 'INSERT',
+            module: 'Banyera',
+            details: 'Created banyera transaction for boat "' . $boatName . '" with total fee PHP ' . $totalFee . '.',
+            user: Auth::user()
+        );
+
+        broadcast(new TransactionUpdated('banyera', 'created', $this->withoutSignatureDataUrls($payload)));
+
+        return response()->json($payload, 201);
+    }
+
+    public function show($id)
+    {
+        $transaction = BanyeraTransaction::query()
+            ->forTableIndex(true)
+            ->findOrFail($id);
+
+        $this->appendTransactionState($transaction);
+
+        return response()->json($this->transformTransaction($transaction));
     }
 
     public function update(Request $request, $id)
@@ -839,17 +986,17 @@ class BanyeraTransactionController extends Controller
             $beforeState,
             $afterState,
             [
-                'boat' => 'Boat',
-                'transaction_date' => 'Date',
-                'items' => 'Banyera items',
-                'total_fee' => 'Total fee',
+                'boat' => 'boat',
+                'transaction_date' => 'date',
+                'items' => 'banyera items',
+                'total_fee' => 'total fee',
             ]
         );
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Banyera',
-            details: 'Updated banyera transaction #' . $transaction->banyera_id . ($changeDetails !== '' ? ': ' . $changeDetails . '.' : '.'),
+            details: 'Updated banyera transaction #' . $transaction->banyera_id . ($changeDetails !== '' ? ' in ' . $changeDetails . '.' : '.'),
             user: Auth::user()
         );
 
@@ -901,9 +1048,13 @@ class BanyeraTransactionController extends Controller
             user: Auth::user()
         );
 
+        $payload = $this->transformTransaction($transaction);
+        broadcast(new TransactionUpdated('banyera', 'updated', $this->withoutSignatureDataUrls($payload)));
+        app(VoidRequestNotificationService::class)->notifyRequester('banyera', $transaction);
+
         return response()->json([
             'message' => 'Banyera transaction voided successfully.',
-            'transaction' => $this->transformTransaction($transaction),
+            'transaction' => $payload,
         ]);
     }
 
@@ -952,9 +1103,12 @@ class BanyeraTransactionController extends Controller
             user: Auth::user()
         );
 
+        $payload = $this->transformTransaction($transaction);
+        broadcast(new TransactionUpdated('banyera', 'updated', $this->withoutSignatureDataUrls($payload)));
+
         return response()->json([
             'message' => 'Banyera transaction restored successfully.',
-            'transaction' => $this->transformTransaction($transaction),
+            'transaction' => $payload,
         ]);
     }
 
@@ -984,6 +1138,8 @@ class BanyeraTransactionController extends Controller
                     'owner_id' => $transaction->boat->owner->owner_id,
                     'owner_firstname' => $transaction->boat->owner->owner_firstname,
                     'owner_lastname' => $transaction->boat->owner->owner_lastname,
+                    'owner_signature_data_url' => $transaction->boat->owner->owner_signature_data_url,
+                    'owner_signature_signed_at' => $transaction->boat->owner->owner_signature_signed_at,
                     'deleted_at' => $transaction->boat->owner->deleted_at ?? null,
                     'full_name' => $transaction->boat->owner->full_name ?? trim(($transaction->boat->owner->owner_firstname ?? '') . ' ' . ($transaction->boat->owner->owner_lastname ?? '')),
                 ] : null,
@@ -1033,8 +1189,11 @@ class BanyeraTransactionController extends Controller
         return [
             'banyera_id' => $transaction->banyera_id,
             'boat_id' => $transaction->boat_id,
+            'owner_id' => $transaction->owner_id ?? $transaction->boat?->owner_id ?? null,
             'transaction_date' => $transaction->transaction_date,
             'total_fee' => number_format((float) ($transaction->total_fee ?? 0), 2),
+            'owner_signature_data_url' => $transaction->owner_signature_data_url ?? $transaction->boat?->owner?->owner_signature_data_url ?? null,
+            'owner_signature_signed_at' => $transaction->owner_signature_signed_at ?? $transaction->boat?->owner?->owner_signature_signed_at ?? null,
             'createdBy' => $createdBy,
             'void_reason' => $transaction->void_reason ?? null,
             'voided_at' => $transaction->voided_at ?? null,

@@ -1,12 +1,14 @@
 import api from "../../api/axios";
-import { clearStoredAuth } from "./auth";
+import { clearStoredAuth, getStoredToken } from "./auth";
 
 export async function logoutUser() {
-  try {
-    await api.post("/logout");
-  } catch {
-    // We still clear local auth state even if the backend call fails.
-  } finally {
-    clearStoredAuth();
-  }
+  const token = getStoredToken();
+
+  clearStoredAuth();
+
+  void api.post("/logout", undefined, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  }).catch(() => {
+    // Local auth is already cleared, so logout should stay instant even if this fails.
+  });
 }

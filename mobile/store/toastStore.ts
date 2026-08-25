@@ -14,6 +14,14 @@ type ToastStore = {
   clearToast: () => void;
 };
 
+const normalizeToastMessage = (message: string) => {
+  if (message === "Loaded saved boats for offline use.") {
+    return "Transaction is offline now. You can add data as draft.";
+  }
+
+  return message;
+};
+
 export const useToastStore = create<ToastStore>((set) => ({
   toast: null,
   showToast: (type, message) =>
@@ -21,7 +29,7 @@ export const useToastStore = create<ToastStore>((set) => ({
       toast: {
         id: Date.now(),
         type,
-        message,
+        message: normalizeToastMessage(message),
       },
     }),
   clearToast: () => set({ toast: null }),

@@ -40,6 +40,7 @@ import TitlePage from "../../components/TitlePage";
 import NoDataFound from "../../components/NoDataFound";
 import { showAddedToast, showBottomToast } from "../../store/bottomToastStore";
 import api from "../../api/axios";
+import { getEcho } from "../../lib/realtime";
 import { USERS_QUERY_KEY, useUsersPageQuery } from "../../hooks/useUsersQuery";
 import { useSidebar } from "../../store/sidebarStore";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
@@ -64,7 +65,19 @@ const ROLE_OPTIONS = [
   { value: "inspector", label: "Inspector" },
 ];
 
-const USER_CREATION_ROLE_OPTIONS = ROLE_OPTIONS.filter((option) => option.value !== "head");
+const getManageableRoleOptions = (role) => {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+
+  if (normalizedRole === "head") {
+    return ROLE_OPTIONS.filter((option) => option.value === "coordinator");
+  }
+
+  if (normalizedRole === "coordinator") {
+    return ROLE_OPTIONS.filter((option) => option.value === "inspector");
+  }
+
+  return [];
+};
 
 const GENDER_OPTIONS = [
   { value: "male", label: "Male" },
@@ -78,13 +91,20 @@ const STATUS_FILTER_OPTIONS = [
 ];
 
 const ACCOUNT_STATUS_LEGEND = [
-  { key: "active", label: "Active", color: "#16a34a" },
+  { key: "online", label: "Online", color: "#16a34a" },
+  { key: "offline", label: "Offline", color: "#f59e0b" },
   { key: "deactivated", label: "Deactivated", color: "#dc2626" },
 ];
 
-const ROLE_FILTER_OPTIONS = [
+const ACCOUNT_PRESENCE_STYLES = {
+  online: { label: "Online", text: "#15803d", bg: "#f0fdf4", border: "#bbf7d0", dot: "#22c55e" },
+  offline: { label: "Offline", text: "#b45309", bg: "#fffbeb", border: "#fde68a", dot: "#f59e0b" },
+  deactivated: { label: "Deactivated", text: "#dc2626", bg: "#fef2f2", border: "#fecaca", dot: "#ef4444" },
+};
+
+const getRoleFilterOptions = (role) => [
   { value: "all", label: "All Roles" },
-  ...ROLE_OPTIONS,
+  ...getManageableRoleOptions(role),
 ];
 
 const PAGE_SIZE = 10;
@@ -166,6 +186,53 @@ const ModalInput = ({ label, value, onChange, placeholder, type = "text", icon: 
   </div>
 );
 
+const ReadOnlyModalInput = ({ label, value, placeholder = "-", required = false, error = "" }) => (
+  <div>
+    <p className="m-0 mb-2 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82" }}>
+      {label}{required && <span className="text-red-500 ml-0.5"> *</span>}
+    </p>
+    <div className={`modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border border-slate-200 bg-slate-100 px-4 transition-all ${error ? "modal-field-control-error" : ""}`}>
+      <input
+        readOnly
+        value={value}
+        placeholder={placeholder}
+        className="w-full cursor-default border-none bg-transparent text-[14px] font-medium text-[#0d1117] outline-none placeholder:font-normal placeholder:text-slate-400"
+        style={{ fontFamily: FONT }}
+      />
+    </div>
+  </div>
+);
+
+const GenderCardSelect = ({ value, onChange, error = "", required = false }) => (
+  <div>
+    <p className="m-0 mb-2 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82" }}>
+      Gender{required && <span className="text-red-500 ml-0.5"> *</span>}
+    </p>
+    <div className={`grid grid-cols-2 gap-3 ${error ? "modal-field-control-error" : ""}`}>
+      {GENDER_OPTIONS.map((option) => {
+        const selected = value === option.value;
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className="flex h-[46px] items-center justify-center rounded-[10px] border px-4 text-[13px] font-normal transition-colors cursor-pointer"
+            style={{
+              borderColor: error ? "#fca5a5" : selected ? "#1a1f36" : "#e2e8f0",
+              backgroundColor: selected ? "#1a1f36" : "#ffffff",
+              color: selected ? "#ffffff" : "#1a1f36",
+              fontFamily: FONT,
+            }}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
+
 const formatDate = (value) => {
   if (!value) return "—";
   return new Date(value).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
@@ -184,7 +251,38 @@ const formatDateTime = (value) => {
 
 const getFullName = (user) => user?.full_name || `${user?.first_name ?? ""} ${user?.last_name ?? ""}`.trim() || "—";
 
-const getAccountLabel = (user) => user?.role_label || user?.role || "User";
+const getAccountLabel = (user) => {
+  const roleLabel = String(user?.role_label || "").trim();
+  if (roleLabel) return roleLabel;
+
+  const role = String(user?.role || "").trim().toLowerCase();
+  if (role === "coordinator") return "Coordinator";
+  if (role === "inspector") return "Inspector";
+  if (role === "head") return "Head";
+
+  return "User";
+};
+
+const getAccountPresenceStatus = (user, onlineUserIds) => {
+  if (user?.status === "deactivated") return "deactivated";
+
+  return onlineUserIds.has(String(user?.user_id ?? user?.id ?? "")) ? "online" : "offline";
+};
+
+const AccountPresencePill = ({ user, onlineUserIds }) => {
+  const presenceStatus = getAccountPresenceStatus(user, onlineUserIds);
+  const tone = ACCOUNT_PRESENCE_STYLES[presenceStatus] || ACCOUNT_PRESENCE_STYLES.offline;
+
+  return (
+    <span
+      className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold"
+      style={{ color: tone.text, backgroundColor: tone.bg, border: `1px solid ${tone.border}` }}
+    >
+      <span aria-hidden="true" className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: tone.dot }} />
+      {tone.label}
+    </span>
+  );
+};
 
 const useDebounce = (value, delay = 300) => {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -195,6 +293,72 @@ const useDebounce = (value, delay = 300) => {
   }, [delay, value]);
 
   return debouncedValue;
+};
+
+const useAccountsPresence = () => {
+  const [onlineUserIds, setOnlineUserIds] = useState(() => new Set());
+
+  useEffect(() => {
+    const echo = getEcho();
+    if (!echo) return undefined;
+
+    const normalizePresenceId = (user) => String(user?.user_id ?? user?.id ?? "");
+    const channel = echo.join("accounts.online");
+    const statusChannel = echo.channel("accounts.status");
+
+    channel.here((users = []) => {
+      setOnlineUserIds(new Set(users.map(normalizePresenceId).filter(Boolean)));
+    });
+
+    channel.joining((user) => {
+      const userId = normalizePresenceId(user);
+      if (!userId) return;
+
+      setOnlineUserIds((current) => {
+        const next = new Set(current);
+        next.add(userId);
+        return next;
+      });
+    });
+
+    channel.leaving((user) => {
+      const userId = normalizePresenceId(user);
+      if (!userId) return;
+
+      setOnlineUserIds((current) => {
+        const next = new Set(current);
+        next.delete(userId);
+        return next;
+      });
+    });
+
+    statusChannel.listen(".updated", (payload) => {
+      const account = payload?.account ?? payload?.record ?? payload;
+      const userId = normalizePresenceId(account);
+      const presenceStatus = String(account?.presence_status ?? "").toLowerCase();
+
+      if (!userId) return;
+
+      setOnlineUserIds((current) => {
+        const next = new Set(current);
+
+        if (presenceStatus === "online") {
+          next.add(userId);
+        } else if (presenceStatus === "offline" || account?.status === "deactivated") {
+          next.delete(userId);
+        }
+
+        return next;
+      });
+    });
+
+    return () => {
+      echo.leave("accounts.online");
+      echo.leave("accounts.status");
+    };
+  }, []);
+
+  return onlineUserIds;
 };
 
 
@@ -229,12 +393,14 @@ const StatusToggle = ({ active, loading, disabled = false, disabledReason = "", 
   </button>
 );
 
-const AddUserModal = ({ open, onClose, onSave, saving, error, setError }) => {
+const AddUserModal = ({ open, onClose, onSave, saving, error, setError, roleOptions }) => {
+  const defaultRole = roleOptions[0]?.value ?? "";
+  const defaultRoleLabel = roleOptions[0]?.label ?? "";
   const [form, setForm] = useState({
     first_name: "",
     last_name: "",
     email: "",
-    role: "",
+    role: defaultRole,
     gender: "",
     contact_number: "",
     birthday: "",
@@ -251,7 +417,7 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError }) => {
         first_name: "",
         last_name: "",
         email: "",
-        role: "",
+        role: defaultRole,
         gender: "",
         contact_number: "",
         birthday: "",
@@ -262,7 +428,7 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError }) => {
       setShowPassword(false);
       setShowConfirmPassword(false);
     }
-  }, [open]);
+  }, [defaultRole, open]);
 
   const updateFormField = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -284,6 +450,10 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError }) => {
     >
           <div className="flex flex-col gap-5">
             <div>
+              <ReadOnlyModalInput label="Role" value={defaultRoleLabel} placeholder="No allowed role" error={error?.role?.[0]} />
+              <FieldError message={error?.role?.[0]} />
+            </div>
+            <div>
               <ModalInput label="First Name" required icon={IoPersonOutline} value={form.first_name} onChange={(e) => updateFormField("first_name", e.target.value)} placeholder="Enter first name" error={error?.first_name?.[0]} />
               <FieldError message={error?.first_name?.[0]} />
             </div>
@@ -292,17 +462,12 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError }) => {
               <FieldError message={error?.last_name?.[0]} />
             </div>
             <div>
-              <p className="m-0 mb-2 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82" }}>Role <span className="text-red-500 ml-0.5"> *</span></p>
-              <div className={error?.role?.[0] ? "modal-field-control-error" : ""}>
-                <FilterSelect width="100%" height={46} value={form.role || undefined} options={USER_CREATION_ROLE_OPTIONS} placeholder="Select role" onChange={(value) => updateFormField("role", value ?? "")} getPopupContainer={() => document.body} placement="bottomLeft" />
-              </div>
-              <FieldError message={error?.role?.[0]} />
-            </div>
-            <div>
-              <p className="m-0 mb-2 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82" }}>Gender <span className="text-red-500 ml-0.5"> *</span></p>
-              <div className={error?.gender?.[0] ? "modal-field-control-error" : ""}>
-                <FilterSelect width="100%" height={46} value={form.gender || undefined} options={GENDER_OPTIONS} placeholder="Select gender" allowClear onChange={(value) => updateFormField("gender", value ?? "")} getPopupContainer={() => document.body} placement="bottomLeft" />
-              </div>
+              <GenderCardSelect
+                value={form.gender}
+                onChange={(value) => updateFormField("gender", value)}
+                error={error?.gender?.[0]}
+                required
+              />
               <FieldError message={error?.gender?.[0]} />
             </div>
             <div>
@@ -428,10 +593,12 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError }) => {
   );
 };
 
-const SendUserEmailModal = ({ open, onClose, onSend, sending, error, setError }) => {
+const SendUserEmailModal = ({ open, onClose, onSend, sending, error, setError, roleOptions }) => {
+  const defaultRole = roleOptions[0]?.value ?? "";
+  const defaultRoleLabel = roleOptions[0]?.label ?? "";
   const [form, setForm] = useState({
     email: "",
-    role: "",
+    role: defaultRole,
     password: "",
     password_confirmation: "",
   });
@@ -443,14 +610,14 @@ const SendUserEmailModal = ({ open, onClose, onSend, sending, error, setError })
       const generated = generatePasswordValue();
       setForm({
         email: "",
-        role: "",
+        role: defaultRole,
         password: generated,
         password_confirmation: generated,
       });
       setShowPassword(false);
       setError({});
     }
-  }, [open, setError]);
+  }, [defaultRole, open, setError]);
 
   const updateInviteField = (field, value) => {
     setForm((prev) => {
@@ -482,20 +649,8 @@ const SendUserEmailModal = ({ open, onClose, onSend, sending, error, setError })
       saveButtonWidth="130px"
     >
             <div className="grid grid-cols-1 gap-5">
-              <div>
-                <p className="m-0 mb-2 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82" }}>Role <span className="text-red-500 ml-0.5"> *</span></p>
-              <div className={error?.role?.[0] ? "modal-field-control-error" : ""}>
-                <FilterSelect
-                  width="100%"
-                  height={46}
-                  value={form.role || undefined}
-                  options={USER_CREATION_ROLE_OPTIONS}
-                  placeholder="Select role"
-                  onChange={(value) => updateInviteField("role", value ?? "")}
-                  getPopupContainer={() => document.body}
-                  placement="bottomLeft"
-                />
-              </div>
+            <div>
+              <ReadOnlyModalInput label="Role" value={defaultRoleLabel} placeholder="No allowed role" error={error?.role?.[0]} />
               <FieldError message={error?.role?.[0]} />
             </div>
             <div>
@@ -562,7 +717,7 @@ const SendUserEmailModal = ({ open, onClose, onSend, sending, error, setError })
   );
 };
 
-const AccountDetailsDrawer = ({ user, open, onClose }) => {
+const AccountDetailsDrawer = ({ user, open, onClose, onlineUserIds }) => {
   if (!user) return null;
 
   return (
@@ -600,7 +755,7 @@ const AccountDetailsDrawer = ({ user, open, onClose }) => {
                     <p className="m-0 break-words text-[13px] font-medium text-slate-700">{value}</p>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <StatusPill status={user.role} label={user.role_label} />
-                      <StatusPill status={user.status} />
+                      <AccountPresencePill user={user} onlineUserIds={onlineUserIds} />
                     </div>
                   </div>
                 ) : value
@@ -638,6 +793,18 @@ const SuperManageAccounts = () => {
   const didRunTableFilterResetRef = useRef(false);
   const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
   const debouncedSearch = useDebounce(search, SEARCH_DEBOUNCE_MS);
+  const onlineUserIds = useAccountsPresence();
+  const storedUser = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "null");
+    } catch {
+      return null;
+    }
+  }, []);
+  const currentUserRole = String(storedUser?.role || "").trim().toLowerCase();
+  const manageableRoleOptions = useMemo(() => getManageableRoleOptions(currentUserRole), [currentUserRole]);
+  const roleFilterOptions = useMemo(() => getRoleFilterOptions(currentUserRole), [currentUserRole]);
+  const managedRoleLabel = manageableRoleOptions[0]?.label ?? "Accounts";
   const rawHighlightedUserId = getAccountHighlightId({ highlightedSearchResult, search: location.search });
   const highlightToken = rawHighlightedUserId
     ? `${rawHighlightedUserId}|${location.search}|${highlightedSearchResult?.group || ""}`
@@ -667,13 +834,8 @@ const SuperManageAccounts = () => {
     );
   }, [highlightToken, highlightedSearchResult, location.pathname, location.search, navigate]);
   const currentUserId = useMemo(() => {
-    try {
-      const storedUser = JSON.parse(localStorage.getItem("user") || "null");
-      return storedUser?.user_id ?? null;
-    } catch {
-      return null;
-    }
-  }, []);
+    return storedUser?.user_id ?? null;
+  }, [storedUser]);
   const usersQuery = useUsersPageQuery({
     page: currentPage,
     perPage: PAGE_SIZE,
@@ -778,6 +940,15 @@ const SuperManageAccounts = () => {
     setRequestedPage(totalPages);
     setCurrentPage(totalPages);
   }, [requestedPage, totalPages]);
+
+  useEffect(() => {
+    const validRoleFilterValues = new Set(roleFilterOptions.map((option) => option.value));
+    if (validRoleFilterValues.has(roleFilter)) return;
+
+    setRoleFilter("all");
+    setRequestedPage(1);
+    setCurrentPage(1);
+  }, [roleFilter, roleFilterOptions]);
 
   const stats = useMemo(() => ([
     {
@@ -980,7 +1151,7 @@ const SuperManageAccounts = () => {
           <main className="min-w-0 flex-1 overflow-y-auto bg-white px-6 py-6 xl:px-8">
             <div className="mx-auto w-full max-w-[1440px]">
             <div className="mb-5 flex items-center justify-between">
-              <TitlePage title="Accounts" subtitle="Manage all registered system users" loading={isUsersTableLoading} />
+              <TitlePage title="Accounts" subtitle={`Manage ${managedRoleLabel.toLowerCase()} accounts`} loading={isUsersTableLoading} />
               <Breadcrumbs items={[{ label: "Dashboard", to: "/dashboard" }, { label: "Accounts" }]} fontFamily={FONT} loading={isUsersTableLoading} />
             </div>
 
@@ -998,8 +1169,8 @@ const SuperManageAccounts = () => {
               rightContent={<Legend items={ACCOUNT_STATUS_LEGEND} loading={isUsersTableLoading} />}
             >
             <TableCard
-              title="Account Directory Records"
-              subtitle="All user accounts stored in the system"
+              title="Account Directory"
+              subtitle="Inspector accounts in the system"
               loading={isUsersTableLoading}
               headerActionsSkeletonCount={4}
               bodyClassName="overflow-x-auto"
@@ -1042,7 +1213,7 @@ const SuperManageAccounts = () => {
                       setRequestedPage(1);
                       setCurrentPage(1);
                     }}
-                    options={ROLE_FILTER_OPTIONS}
+                    options={roleFilterOptions}
                     height={42}
                     minWidth={150}
                   />
@@ -1050,10 +1221,10 @@ const SuperManageAccounts = () => {
                     type="button"
                     onClick={() => { if (!isTransactionLocked) setSendEmailModalOpen(true); else showToast("error", "Transactions Locked", transactionLockMessage); }}
                     disabled={isTransactionLocked}
-                    className="flex h-[42px] w-[112px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-4 text-[13px] font-semibold cursor-pointer transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-70"
-                    style={{ fontFamily: FONT, color: "#1a1f36" }}
+                    className="flex h-[42px] w-[112px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
+                    style={{ fontFamily: FONT }}
                   >
-                    <IoPaperPlaneOutline className="flex-shrink-0 text-[20px]" /> Add User
+                    <IoPaperPlaneOutline className="flex-shrink-0 text-[16px]" /> Add User
                   </button>
                   <button
                     onClick={() => { if (!isTransactionLocked) setAddModalOpen(true); else showToast("error", "Transactions Locked", transactionLockMessage); }}
@@ -1061,7 +1232,7 @@ const SuperManageAccounts = () => {
                     className="flex h-[42px] w-[112px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
                     style={{ fontFamily: FONT }}
                   >
-                    <IoAddOutline className="flex-shrink-0 text-[21px]" /> Add User
+                    <IoAddOutline className="flex-shrink-0 text-[16px]" /> Add User
                   </button>
                 </>
               }
@@ -1117,7 +1288,7 @@ const SuperManageAccounts = () => {
                             <div className="flex items-center gap-2">
                               <span
                                 className="inline-flex h-2.5 w-2.5 rounded-full"
-                                style={{ backgroundColor: user.status === "active" ? "#16a34a" : "#dc2626" }}
+                                style={{ backgroundColor: ACCOUNT_PRESENCE_STYLES[getAccountPresenceStatus(user, onlineUserIds)]?.dot ?? "#f59e0b" }}
                               />
                               <p className="m-0 text-[13px]" style={{ color: "#1a1f36" }}>{user.email}</p>
                             </div>
@@ -1149,9 +1320,9 @@ const SuperManageAccounts = () => {
         </div>
       </div>
 
-      <AddUserModal open={addModalOpen} onClose={() => { if (!saving) { setAddModalOpen(false); setFormErrors({}); } }} onSave={handleAddUser} saving={saving} error={formErrors} setError={setFormErrors} />
-      <SendUserEmailModal open={sendEmailModalOpen} onClose={() => { if (!sendingInvite) { setSendEmailModalOpen(false); setSendInviteErrors({}); } }} onSend={handleSendInvite} sending={sendingInvite} error={sendInviteErrors} setError={setSendInviteErrors} />
-      <AccountDetailsDrawer user={selectedUser} open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      <AddUserModal open={addModalOpen} onClose={() => { if (!saving) { setAddModalOpen(false); setFormErrors({}); } }} onSave={handleAddUser} saving={saving} error={formErrors} setError={setFormErrors} roleOptions={manageableRoleOptions} />
+      <SendUserEmailModal open={sendEmailModalOpen} onClose={() => { if (!sendingInvite) { setSendEmailModalOpen(false); setSendInviteErrors({}); } }} onSend={handleSendInvite} sending={sendingInvite} error={sendInviteErrors} setError={setSendInviteErrors} roleOptions={manageableRoleOptions} />
+      <AccountDetailsDrawer user={selectedUser} open={drawerOpen} onClose={() => setDrawerOpen(false)} onlineUserIds={onlineUserIds} />
     </ConfigProvider>
   );
 };

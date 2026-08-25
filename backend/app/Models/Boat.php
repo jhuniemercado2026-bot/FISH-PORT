@@ -67,7 +67,8 @@ class Boat extends Model
         return [
             'owner' => fn ($ownerQuery) => $ownerQuery
                 ->withTrashed()
-                ->select('owner_id', 'owner_firstname', 'owner_lastname', 'contact_number', 'address'),
+                ->select('owner_id', 'owner_firstname', 'owner_lastname', 'contact_number', 'address', 'owner_signature_data_url', 'owner_signature_public_id', 'owner_signature_signed_at', 'owner_signature_updated_by')
+                ->with('ownerSignatureUpdatedByUser:user_id,first_name,last_name,email'),
             'boatType' => fn ($typeQuery) => $typeQuery
                 ->withTrashed()
                 ->select('boat_type_id', 'type_name'),

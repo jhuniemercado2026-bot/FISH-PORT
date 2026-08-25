@@ -9,8 +9,8 @@ const normalizeVehicleTypesResponse = (payload) => {
 
 export const FEES_DATA_QUERY_KEY = ["fees-data"];
 export const FEE_TYPE_OPTIONS = [
-  { value: "Banyera", label: "Banyera" },
   { value: "Docking", label: "Docking" },
+  { value: "Banyera", label: "Banyera" },
   { value: "Vehicle Ticket Daily", label: "Vehicle Ticket Daily" },
   { value: "Vehicle Ticket Annual", label: "Vehicle Ticket Annual" },
 ];

@@ -30,6 +30,7 @@ class ActivityLog extends Model
     {
         return $query->select([
             'id',
+            'user_id',
             'created_at',
             'user_name',
             'user_role',

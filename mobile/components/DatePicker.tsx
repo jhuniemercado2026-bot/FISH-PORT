@@ -126,10 +126,8 @@ export default function DatePicker({
   const currentYear = new Date().getFullYear();
   const currentYearStart = new Date(currentYear, 0, 1);
   const currentYearEnd = new Date(currentYear, 11, 31, 23, 59, 59, 999);
-  const effectiveMinDate =
-    minDate && minDate > currentYearStart ? minDate : currentYearStart;
-  const effectiveMaxDate =
-    maxDate && maxDate < currentYearEnd ? maxDate : currentYearEnd;
+  const effectiveMinDate = minDate ?? currentYearStart;
+  const effectiveMaxDate = maxDate ?? currentYearEnd;
 
   const resolvedValue = useMemo(() => {
     if (value) {

@@ -2,8 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MasterDataUpdated;
+use App\Events\TransactionUpdated;
 use App\Models\VehicleTicket;
 use App\Services\ActivityLogService;
+use App\Services\VoidRequestNotificationService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -223,10 +226,14 @@ class VehicleTicketController extends Controller
             'official_receipt_no' => [
                 'nullable',
                 Rule::requiredIf(fn () => ($request->input('ticket_type') ?? null) === 'annual'),
-                'digits:6',
+                'digits:7',
                 Rule::unique('vehicle_tickets', 'official_receipt_no'),
             ],
-            'vehicle_type_id' => 'required|exists:vehicle_types,vehicle_type_id',
+            'vehicle_type_id' => [
+                'required',
+                'integer',
+                Rule::exists('vehicle_types', 'vehicle_type_id')->whereNull('deleted_at'),
+            ],
             'plate_number' => 'nullable|string|max:50',
             'driver_name' => 'nullable|string|max:150',
             'ticket_type' => 'required|in:annual,daily',
@@ -288,6 +295,10 @@ class VehicleTicketController extends Controller
             user: Auth::user()
         );
 
+        broadcast(new TransactionUpdated('tickets', 'created', $ticket->toArray()));
+        broadcast(new TransactionUpdated('tickets', 'updated', $ticket->toArray()));
+        broadcast(new MasterDataUpdated('annual_vehicle_tickets', 'changed', $ticket->toArray()));
+
         return response()->json($ticket, 201);
     }
 
@@ -321,6 +332,7 @@ class VehicleTicketController extends Controller
     public function update(Request $request, $id)
     {
         $ticket = VehicleTicket::findOrFail($id);
+        $this->loadTicketRelations($ticket);
 
         if (($ticket->ticket_type ?? null) === 'daily') {
             return response()->json([
@@ -355,11 +367,15 @@ class VehicleTicketController extends Controller
             'official_receipt_no' => [
                 'nullable',
                 Rule::requiredIf(fn () => ($request->input('ticket_type') ?? null) === 'annual'),
-                'digits:6',
+                'digits:7',
                 Rule::unique('vehicle_tickets', 'official_receipt_no')
                     ->ignore($ticket->ticket_id, 'ticket_id'),
             ],
-            'vehicle_type_id' => 'required|exists:vehicle_types,vehicle_type_id',
+            'vehicle_type_id' => [
+                'required',
+                'integer',
+                Rule::exists('vehicle_types', 'vehicle_type_id')->whereNull('deleted_at'),
+            ],
             'plate_number' => 'nullable|string|max:50',
             'driver_name' => 'nullable|string|max:150',
             'ticket_type' => 'required|in:annual,daily',
@@ -401,6 +417,19 @@ class VehicleTicketController extends Controller
             ], 422);
         }
 
+        $beforeState = [
+            'ticket_type' => $ticket->ticket_type,
+            'vehicle_type' => $ticket->vehicleType?->type_name ?? ('Vehicle type #' . $ticket->vehicle_type_id),
+            'plate_number' => $ticket->plate_number,
+            'driver_name' => $ticket->driver_name,
+            'control_number' => $ticket->control_number,
+            'official_receipt_no' => $ticket->official_receipt_no,
+            'fee' => $ticket->fee?->fee_type_name ?? ('Fee #' . $ticket->fee_id),
+            'ticket_fee' => number_format((float) $ticket->ticket_fee, 2),
+            'ticket_date' => $ticket->ticket_date?->toDateString(),
+            'end_date' => $ticket->end_date?->toDateString(),
+        ];
+
         $ticket->update([
             ...$validated,
             'control_number' => ($validated['ticket_type'] ?? null) === 'annual' ? ($validated['control_number'] ?? null) : null,
@@ -414,13 +443,45 @@ class VehicleTicketController extends Controller
         $this->loadTicketRelations($ticket);
         $this->prepareTicketForResponse($ticket);
 
+        $changeDetails = app(ActivityLogService::class)->describeChanges(
+            $beforeState,
+            [
+                'ticket_type' => $ticket->ticket_type,
+                'vehicle_type' => $ticket->vehicleType?->type_name ?? ('Vehicle type #' . $ticket->vehicle_type_id),
+                'plate_number' => $ticket->plate_number,
+                'driver_name' => $ticket->driver_name,
+                'control_number' => $ticket->control_number,
+                'official_receipt_no' => $ticket->official_receipt_no,
+                'fee' => $ticket->fee?->fee_type_name ?? ('Fee #' . $ticket->fee_id),
+                'ticket_fee' => number_format((float) $ticket->ticket_fee, 2),
+                'ticket_date' => $ticket->ticket_date?->toDateString(),
+                'end_date' => $ticket->end_date?->toDateString(),
+            ],
+            [
+                'ticket_type' => 'ticket type',
+                'vehicle_type' => 'vehicle type',
+                'plate_number' => 'plate number',
+                'driver_name' => 'driver name',
+                'control_number' => 'control number',
+                'official_receipt_no' => 'official receipt no.',
+                'fee' => 'fee',
+                'ticket_fee' => 'ticket fee',
+                'ticket_date' => 'ticket date',
+                'end_date' => 'end date',
+            ]
+        );
+
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Vehicle Tickets',
             details: 'Updated ' . $ticket->ticket_type . ' vehicle ticket' .
-                ($ticket->control_number ? ' "' . $ticket->control_number . '"' : '') . '.',
+                ($ticket->control_number ? ' "' . $ticket->control_number . '"' : '') .
+                ($changeDetails !== '' ? ' in ' . $changeDetails . '.' : '.'),
             user: Auth::user()
         );
+
+        broadcast(new TransactionUpdated('tickets', 'updated', $ticket->toArray()));
+        broadcast(new MasterDataUpdated('annual_vehicle_tickets', 'changed', $ticket->toArray()));
 
         return response()->json($ticket);
     }
@@ -457,6 +518,10 @@ class VehicleTicketController extends Controller
             user: Auth::user()
         );
 
+        broadcast(new TransactionUpdated('tickets', 'updated', $ticket->toArray()));
+        broadcast(new MasterDataUpdated('annual_vehicle_tickets', 'changed', $ticket->toArray()));
+        app(VoidRequestNotificationService::class)->notifyRequester('tickets', $ticket);
+
         return response()->json([
             'message' => 'Vehicle ticket voided successfully.',
             'ticket' => $ticket,
@@ -489,6 +554,9 @@ class VehicleTicketController extends Controller
                 ($ticket->control_number ? ' "' . $ticket->control_number . '"' : '') . '.',
             user: Auth::user()
         );
+
+        broadcast(new TransactionUpdated('tickets', 'updated', $ticket->toArray()));
+        broadcast(new MasterDataUpdated('annual_vehicle_tickets', 'changed', $ticket->toArray()));
 
         return response()->json([
             'message' => 'Vehicle ticket restored successfully.',

@@ -11,11 +11,17 @@ import {
 } from "react-native";
 import { buildApiHeaders, getApiBaseUrl } from "../api/axios";
 import { getAuthToken, setAuthSession } from "../api/auth";
+import { clearOfflineResources } from "../utils/offlineMasterData";
 
 type SignOutModalProps = {
   visible: boolean;
   onClose: () => void;
 };
+
+const wait = (milliseconds: number) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 
 export default function SignOutModal({ visible, onClose }: SignOutModalProps) {
   const router = useRouter();
@@ -24,20 +30,23 @@ export default function SignOutModal({ visible, onClose }: SignOutModalProps) {
   const handleConfirmSignOut = async () => {
     setIsSigningOut(true);
 
-    try {
-      const token = getAuthToken();
-      if (token) {
-        await fetch(`${getApiBaseUrl()}/logout`, {
-          method: "POST",
-          headers: buildApiHeaders(token),
-        }).catch(() => null);
-      }
-    } finally {
-      setAuthSession(null);
-      setIsSigningOut(false);
-      onClose();
-      router.replace("/(login)/login");
+    const token = getAuthToken();
+
+    void clearOfflineResources();
+
+    if (token) {
+      void fetch(`${getApiBaseUrl()}/logout`, {
+        method: "POST",
+        headers: buildApiHeaders(token),
+      }).catch(() => null);
     }
+
+    await wait(450);
+
+    setAuthSession(null);
+    setIsSigningOut(false);
+    onClose();
+    router.replace("/(login)/login");
   };
 
   return (
@@ -54,8 +63,12 @@ export default function SignOutModal({ visible, onClose }: SignOutModalProps) {
           onPress={onClose}
         >
           <Pressable
-            className="w-full max-w-[280px] overflow-hidden rounded-[10px] border border-[#E8E1E6] bg-white p-5 shadow-sm shadow-black/10"
+            className="w-full max-w-[280px] overflow-hidden rounded-[10px] border border-[#E8E1E6] bg-white p-5"
             onPress={(event) => event.stopPropagation()}
+            style={{
+              boxShadow: "0px 4px 8px rgba(0, 0, 0, 0.06)",
+              elevation: 3,
+            }}
           >
             <Text
               className="text-center text-[18px] text-[#1A1F36]"

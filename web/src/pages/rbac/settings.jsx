@@ -17,7 +17,6 @@ import {
 import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
 import BirthdayPicker from "../../components/BirthdayPicker";
-import FilterSelect from "../../components/FilterSelect";
 import Modal, { ModalFieldError, ModalTextInput } from "../../components/Modal";
 import Spinner from "../../components/Spinner";
 import Breadcrumbs from "../../components/Breadcrumbs";
@@ -31,6 +30,10 @@ import { useFiscalYearStore, getFiscalYearOptions } from "../../store/fiscalYear
 
 const ROLE_LABELS = { head: "Head of MEEO", coordinator: "Coordinator", inspector: "Inspector" };
 const GENDER_LABELS = { male: "Male", female: "Female" };
+const GENDER_OPTIONS = [
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+];
 const FONT = "'Montserrat', sans-serif";
 const PERSONAL_MODAL_LABEL_CLASS = "uppercase";
 const PERSONAL_MODAL_LABEL_STYLE = { color: "#6F6F82", fontSize: "11px" };
@@ -47,6 +50,8 @@ const EMPTY_PASSWORD_ERRORS = { current: "", new_pass: "", confirm: "" };
 const EMPTY_VERIFICATION_CODE = ["", "", "", "", "", ""];
 const PASSWORD_CODE_RESEND_COOLDOWN_SECONDS = 59;
 const PASSWORD_CODE_RESEND_DAILY_LIMIT = 3;
+const VERIFICATION_CODE_LIMIT_MESSAGE =
+  "You have reached the verification code limit for today. Please use the latest verification code sent to your email. This code expires within this day.";
 const EMPTY_PERSONAL_ERRORS = {
   first_name: "",
   last_name: "",
@@ -62,6 +67,43 @@ const InfoRow = ({ label, value }) => (
   <div>
     <p className="m-0 mb-1 text-[11px] font-semibold uppercase" style={{ color: "#8C8CA0" }}>{label}</p>
     <p className="m-0 text-[15px] font-medium text-slate-700">{value || "-"}</p>
+  </div>
+);
+
+const RequiredLabel = ({ children }) => (
+  <>
+    {children}
+    <span className="text-red-500 ml-0.5"> *</span>
+  </>
+);
+
+const PersonalGenderCardSelect = ({ value, onChange, error = "" }) => (
+  <div>
+    <p className={`m-0 mb-2 font-semibold ${PERSONAL_MODAL_LABEL_CLASS}`} style={PERSONAL_MODAL_LABEL_STYLE}>
+      <RequiredLabel>Gender</RequiredLabel>
+    </p>
+    <div className="grid grid-cols-2 gap-3">
+      {GENDER_OPTIONS.map((option) => {
+        const selected = value === option.value;
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className="flex h-[46px] items-center justify-center rounded-[10px] border px-4 text-[13px] font-normal transition-colors cursor-pointer"
+            style={{
+              borderColor: error ? "#fca5a5" : selected ? "#1a1f36" : "#e2e8f0",
+              backgroundColor: selected ? "#1a1f36" : "#ffffff",
+              color: selected ? "#ffffff" : "#1a1f36",
+              fontFamily: FONT,
+            }}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
   </div>
 );
 
@@ -83,8 +125,8 @@ const DataActionCard = ({ icon: Icon, title, description, actionLabel, actionIco
         type="button"
         onClick={onAction}
         disabled={disabled || loading}
-        className="inline-flex h-10 flex-shrink-0 items-center justify-center gap-2 rounded-xl border-2 bg-white px-4 text-[12px] font-semibold text-[#1a1f36] cursor-pointer transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-        style={{ borderColor: "#1a1f36", fontFamily: FONT, minWidth: 132 }}
+        className="cursor-pointer inline-flex flex-shrink-0 items-center justify-center gap-2 rounded-[10px] bg-white px-6 py-2 text-[14px] font-medium transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        style={{ border: "2px solid #1a1f36", color: "#1a1f36", fontFamily: FONT, minWidth: 132 }}
       >
         {loading ? <Spinner size={4} /> : (
           <>
@@ -211,9 +253,10 @@ const UserProfileTab = ({ showToast }) => {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useSettingsQuery();
   const {
-    isTransactionLocked,
+    transactionLock,
     transactionLockMessage,
   } = useTransactionLockQuery();
+  const isTransactionLocked = Boolean(transactionLock && transactionLock.applies_to !== "transactions");
   const profile = data?.user ?? null;
   const [saving,            setSaving]            = useState(false);
   const [showPersonalModal, setShowPersonalModal] = useState(false);
@@ -451,11 +494,28 @@ const UserProfileTab = ({ showToast }) => {
       setShowPwCodeModal(true);
     } catch (err) {
       const backendErrors = err.response?.data?.errors || {};
+      const remainingResends = err.response?.data?.remaining_resends;
       setPwFieldErrors({
         current: backendErrors.current_password?.[0] || "",
         new_pass: backendErrors.new_password?.[0] || "",
         confirm: backendErrors.new_password_confirmation?.[0] || "",
       });
+      if (
+        remainingResends === 0 &&
+        !backendErrors.current_password &&
+        !backendErrors.new_password &&
+        !backendErrors.new_password_confirmation
+      ) {
+        setPwCode([...EMPTY_VERIFICATION_CODE]);
+        setPwCodeErr(VERIFICATION_CODE_LIMIT_MESSAGE);
+        setPwErr("");
+        setPwResendCountdown(0);
+        setPwResendCount(PASSWORD_CODE_RESEND_DAILY_LIMIT);
+        setShowPwModal(false);
+        setShowPwFields({ current: false, new_pass: false, confirm: false });
+        setShowPwCodeModal(true);
+        return;
+      }
       setPwErr(err.response?.data?.message || "Failed to send the verification code.");
     } finally {
       setSaving(false);
@@ -601,7 +661,11 @@ const UserProfileTab = ({ showToast }) => {
         setPwResendCount(PASSWORD_CODE_RESEND_DAILY_LIMIT - remainingResends);
       }
 
-      setPwCodeErr(err.response?.data?.message || "Failed to resend the verification code.");
+      setPwCodeErr(
+        remainingResends === 0
+          ? VERIFICATION_CODE_LIMIT_MESSAGE
+          : err.response?.data?.message || "Failed to resend the verification code."
+      );
     } finally {
       setResendingPwCode(false);
     }
@@ -661,7 +725,7 @@ const UserProfileTab = ({ showToast }) => {
                         const isCurrentYear = year === String(new Date().getFullYear());
                         const fiscalYearToastMessage = isCurrentYear
                           ? `Operational pages will show and save records under fiscal year ${year}.`
-                          : `Fiscal year ${year} is view-only. Records will display but cannot be saved.`;
+                          : `Transactions in ${year} is for viewing only.`;
                         showInfoToast("Fiscal Year Set", fiscalYearToastMessage);
                       }}
                       className="block w-full border-none px-3 py-2 text-left text-[12px] font-medium text-slate-700 hover:bg-slate-50"
@@ -688,23 +752,27 @@ const UserProfileTab = ({ showToast }) => {
             <h3 className="m-0 text-[14px] font-medium uppercase" style={{ color: "#1a1f36" }}>Personal Information</h3>
             <p className="m-0 text-[12px] mt-0.5 text-slate-700">Your basic info and contact details</p>
           </div>
-          <button onClick={() => {
-            if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; }
-            setPersonalErrors(EMPTY_PERSONAL_ERRORS);
-            setTmpP({
-              first_name: profile.first_name,
-              last_name: profile.last_name,
-              email: profile.email,
-              gender: profile.gender || "",
-              contact_number: profile.contact_number,
-              birthday: profile.birthday ? profile.birthday.slice(0, 10) : "",
-              address: profile.address,
-            });
-            setShowPersonalModal(true);
-          }}
+          <button
+            onClick={() => {
+              if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; }
+              setPersonalErrors(EMPTY_PERSONAL_ERRORS);
+              setTmpP({
+                first_name: profile.first_name,
+                last_name: profile.last_name,
+                email: profile.email,
+                gender: profile.gender || "",
+                contact_number: profile.contact_number,
+                birthday: profile.birthday ? profile.birthday.slice(0, 10) : "",
+                address: profile.address,
+              });
+              setShowPersonalModal(true);
+            }}
             disabled={isTransactionLocked}
-            className="flex items-center justify-center w-9 h-9 rounded-xl border-2 cursor-pointer bg-white disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "#1a1f36", color: "#1a1f36" }}>
-            <IoCreateOutline style={{ fontSize: "20px", color: isTransactionLocked ? "#94a3b8" : undefined }} />
+            className="cursor-pointer rounded-[10px] bg-white px-6 py-2 text-[14px] font-medium transition-colors inline-flex items-center gap-2"
+            style={{ border: "2px solid #1a1f36", color: "#1a1f36", fontFamily: FONT, opacity: isTransactionLocked ? 0.5 : 1 }}
+          >
+            <IoCreateOutline className="text-[15px]" />
+            Edit
           </button>
         </div>
         <div className="px-6 pt-4 pb-5 grid grid-cols-2 gap-5">
@@ -727,10 +795,14 @@ const UserProfileTab = ({ showToast }) => {
               <h3 className="m-0 text-[14px] font-medium uppercase" style={{ color: "#1a1f36" }}>Security</h3>
               <p className="m-0 text-[12px] mt-0.5 text-slate-700">Manage your account password</p>
             </div>
-            <button onClick={() => { if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; } setPwErr(""); setPwCode([...EMPTY_VERIFICATION_CODE]); setPwCodeErr(""); setPwFieldErrors(EMPTY_PASSWORD_ERRORS); setTmpPw(EMPTY_PASSWORD_FORM); setShowPwCodeModal(false); setShowPwFields({ current: false, new_pass: false, confirm: false }); setShowPwModal(true); }}
+            <button
+              onClick={() => { if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; } setPwErr(""); setPwCode([...EMPTY_VERIFICATION_CODE]); setPwCodeErr(""); setPwFieldErrors(EMPTY_PASSWORD_ERRORS); setTmpPw(EMPTY_PASSWORD_FORM); setShowPwCodeModal(false); setShowPwFields({ current: false, new_pass: false, confirm: false }); setShowPwModal(true); }}
               disabled={isTransactionLocked}
-              className="flex items-center justify-center w-9 h-9 rounded-xl border-2 cursor-pointer bg-white disabled:cursor-not-allowed disabled:opacity-60" style={{ borderColor: "#1a1f36", color: "#1a1f36" }}>
-              <IoCreateOutline style={{ fontSize: "20px", color: isTransactionLocked ? "#94a3b8" : undefined }} />
+              className="cursor-pointer rounded-[10px] bg-white px-6 py-2 text-[14px] font-medium transition-colors inline-flex items-center gap-2"
+              style={{ border: "2px solid #1a1f36", color: "#1a1f36", fontFamily: FONT, opacity: isTransactionLocked ? 0.5 : 1 }}
+            >
+              <IoCreateOutline className="text-[15px]" />
+              Edit
             </button>
           </div>
         </div>
@@ -738,9 +810,9 @@ const UserProfileTab = ({ showToast }) => {
         {canRecoverDatabase && (
           <DataActionCard
             icon={IoCloudUploadOutline}
-            title="Recovery"
-            description="Recover the database from a selected SQL file."
-            actionLabel="Recover File"
+            title="Restore Backup"
+            description="Upload a SQL backup file to restore the database."
+            actionLabel="Upload Backup"
             actionIcon={IoCloudUploadOutline}
             loading={recoveryLoading}
             disabled={false}
@@ -762,13 +834,13 @@ const UserProfileTab = ({ showToast }) => {
 
       {pendingRecoveryFile && (
         <Modal
-          title="Recover Database"
+          title="Restore Database"
           onClose={() => {
             if (!recoveryLoading) setPendingRecoveryFile(null);
           }}
           onSave={handleRecoverDatabase}
           saving={recoveryLoading}
-          saveLabel="Recover"
+          saveLabel="Restore"
           savingLabel=""
           saveButtonWidth="118px"
           closeLabel="Cancel"
@@ -778,9 +850,9 @@ const UserProfileTab = ({ showToast }) => {
             <div className="flex items-start gap-3">
               <IoAlertCircleOutline className="mt-0.5 flex-shrink-0 text-[20px] text-amber-600" />
               <div className="min-w-0">
-                <p className="m-0 text-[14px] font-semibold text-[#1a1f36]">Confirm database recovery</p>
+                <p className="m-0 text-[14px] font-semibold text-[#1a1f36]">Confirm database restore</p>
                 <p className="m-0 mt-1 text-[13px] leading-6 text-slate-700">
-                  This will recover the database using the selected SQL file. A safety backup will be created before recovery starts.
+                  This will restore the database using the selected SQL backup file. A safety backup will be created before the restore starts.
                 </p>
               </div>
             </div>
@@ -798,40 +870,26 @@ const UserProfileTab = ({ showToast }) => {
         <Modal title="Edit Personal Information" onClose={() => setShowPersonalModal(false)} onSave={savePersonal} saving={saving}>
           <div className="settings-personal-placeholders flex flex-col gap-5">
           <div className="grid grid-cols-2 gap-4">
-            <ModalTextInput label="First Name" value={tmpP.first_name} error={personalErrors.first_name} onChange={e => { const value = e.target.value; setTmpP(p => ({ ...p, first_name: value })); setPersonalErrors((current) => ({ ...current, first_name: "" })); }} placeholder="First name" labelClassName={PERSONAL_MODAL_LABEL_CLASS} labelStyle={PERSONAL_MODAL_LABEL_STYLE} />
-            <ModalTextInput label="Last Name"  value={tmpP.last_name}  error={personalErrors.last_name} onChange={e => { const value = e.target.value; setTmpP(p => ({ ...p, last_name: value })); setPersonalErrors((current) => ({ ...current, last_name: "" })); }}  placeholder="Last name" labelClassName={PERSONAL_MODAL_LABEL_CLASS} labelStyle={PERSONAL_MODAL_LABEL_STYLE} />
+            <ModalTextInput label={<RequiredLabel>First Name</RequiredLabel>} value={tmpP.first_name} error={personalErrors.first_name} onChange={e => { const value = e.target.value; setTmpP(p => ({ ...p, first_name: value })); setPersonalErrors((current) => ({ ...current, first_name: "" })); }} placeholder="First name" labelClassName={PERSONAL_MODAL_LABEL_CLASS} labelStyle={PERSONAL_MODAL_LABEL_STYLE} />
+            <ModalTextInput label={<RequiredLabel>Last Name</RequiredLabel>}  value={tmpP.last_name}  error={personalErrors.last_name} onChange={e => { const value = e.target.value; setTmpP(p => ({ ...p, last_name: value })); setPersonalErrors((current) => ({ ...current, last_name: "" })); }}  placeholder="Last name" labelClassName={PERSONAL_MODAL_LABEL_CLASS} labelStyle={PERSONAL_MODAL_LABEL_STYLE} />
           </div>
           <div>
-            <p className={`m-0 mb-2 font-semibold ${PERSONAL_MODAL_LABEL_CLASS}`} style={PERSONAL_MODAL_LABEL_STYLE}>Gender</p>
-            <FilterSelect
-              width="100%"
-              height={46}
-              showSearch
-              allowClear
-              placeholder="Select Gender"
-              optionFilterProp="label"
-              value={tmpP.gender || undefined}
-              placement="bottomLeft"
-              getPopupContainer={() => document.body}
+            <PersonalGenderCardSelect
+              value={tmpP.gender || ""}
+              error={personalErrors.gender}
               onChange={(value) => {
-                setTmpP((p) => ({ ...p, gender: value ?? "" }));
+                setTmpP((p) => ({ ...p, gender: value }));
                 setPersonalErrors((current) => ({ ...current, gender: "" }));
               }}
-              options={[
-                { value: "male", label: "Male" },
-                { value: "female", label: "Female" },
-              ]}
-              filterOption={(input, option) => (option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
-              onClear={() => setPersonalErrors((current) => ({ ...current, gender: "" }))}
             />
             <ModalFieldError message={personalErrors.gender} />
           </div>
-          <ModalTextInput label="Email Address"  value={tmpP.email}          error={personalErrors.email} onChange={() => {}}          placeholder="email@example.com" type="email" icon={IoMailOutline} disabled labelClassName={PERSONAL_MODAL_LABEL_CLASS} labelStyle={PERSONAL_MODAL_LABEL_STYLE} />
-          <ModalTextInput label="Contact Number" value={tmpP.contact_number} error={personalErrors.contact_number} onChange={e => { const value = e.target.value.replace(/\D/g, '').slice(0, 11); setTmpP(p => ({ ...p, contact_number: value })); setPersonalErrors((current) => ({ ...current, contact_number: "" })); }} placeholder="09XXXXXXXXX" icon={IoCallOutline} labelClassName={PERSONAL_MODAL_LABEL_CLASS} labelStyle={PERSONAL_MODAL_LABEL_STYLE} />
+          <ModalTextInput label={<RequiredLabel>Email Address</RequiredLabel>}  value={tmpP.email}          error={personalErrors.email} onChange={() => {}}          placeholder="email@example.com" type="email" icon={IoMailOutline} readOnly wrapperClassName="!bg-slate-100 !border-slate-200" inputClassName="cursor-default" labelClassName={PERSONAL_MODAL_LABEL_CLASS} labelStyle={PERSONAL_MODAL_LABEL_STYLE} />
+          <ModalTextInput label={<RequiredLabel>Contact Number</RequiredLabel>} value={tmpP.contact_number} error={personalErrors.contact_number} onChange={e => { const value = e.target.value.replace(/\D/g, '').slice(0, 11); setTmpP(p => ({ ...p, contact_number: value })); setPersonalErrors((current) => ({ ...current, contact_number: "" })); }} placeholder="09XXXXXXXXX" icon={IoCallOutline} labelClassName={PERSONAL_MODAL_LABEL_CLASS} labelStyle={PERSONAL_MODAL_LABEL_STYLE} />
        
        {/* -- Birthday Field -- */}
 <div>
-  <p className={`m-0 mb-2 font-semibold ${PERSONAL_MODAL_LABEL_CLASS}`} style={PERSONAL_MODAL_LABEL_STYLE}>Birthday</p>
+  <p className={`m-0 mb-2 font-semibold ${PERSONAL_MODAL_LABEL_CLASS}`} style={PERSONAL_MODAL_LABEL_STYLE}><RequiredLabel>Birthday</RequiredLabel></p>
   <BirthdayPicker
     value={tmpP.birthday || ""}
     onChange={(_, currentDateString) => {
@@ -844,7 +902,7 @@ const UserProfileTab = ({ showToast }) => {
   />
   <ModalFieldError message={personalErrors.birthday} />
 </div>
-          <ModalTextInput label="Address"        value={tmpP.address ?? ""}   error={personalErrors.address} onChange={e => { const value = e.target.value; setTmpP(p => ({ ...p, address: value })); setPersonalErrors((current) => ({ ...current, address: "" })); }}        placeholder="e.g. Opol, Misamis Oriental" icon={IoLocationOutline} labelClassName={PERSONAL_MODAL_LABEL_CLASS} labelStyle={PERSONAL_MODAL_LABEL_STYLE} />
+          <ModalTextInput label={<RequiredLabel>Address</RequiredLabel>}        value={tmpP.address ?? ""}   error={personalErrors.address} onChange={e => { const value = e.target.value; setTmpP(p => ({ ...p, address: value })); setPersonalErrors((current) => ({ ...current, address: "" })); }}        placeholder="e.g. Opol, Misamis Oriental" icon={IoLocationOutline} labelClassName={PERSONAL_MODAL_LABEL_CLASS} labelStyle={PERSONAL_MODAL_LABEL_STYLE} />
           </div>
         </Modal>
         </ConfigProvider>
@@ -859,7 +917,7 @@ const UserProfileTab = ({ showToast }) => {
           ].map(({ label, key, placeholder }) => (
             <ModalTextInput
               key={key}
-              label={label}
+              label={<RequiredLabel>{label}</RequiredLabel>}
               error={pwFieldErrors[key]}
               type={showPwFields[key] ? "text" : "password"}
               autoComplete="new-password"
@@ -948,17 +1006,17 @@ const UserProfileTab = ({ showToast }) => {
                   {pwResendCountdown}
                 </span>
               ) : pwResendCount >= PASSWORD_CODE_RESEND_DAILY_LIMIT ? (
-                <span className="font-semibold uppercase text-slate-400">
-                  Click to resend
+                <span className="font-normal text-slate-400">
+                  Resend
                 </span>
               ) : (
                 <button
                   type="button"
                   onClick={resendPwCode}
                   disabled={resendingPwCode}
-                  className="inline-flex items-center justify-center border-none bg-transparent p-0 font-semibold uppercase text-[#2563eb] cursor-pointer transition hover:text-[#1d4ed8] disabled:cursor-not-allowed disabled:text-slate-400"
+                  className="inline-flex items-center justify-center border-none bg-transparent p-0 font-normal text-[#2563eb] cursor-pointer transition hover:text-[#1d4ed8] disabled:cursor-not-allowed disabled:text-slate-400"
                 >
-                  Click to resend
+                  Resend
                 </button>
               )}
             </p>

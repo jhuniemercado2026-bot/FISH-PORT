@@ -66,6 +66,7 @@ class FeeTypeController extends Controller
     public function update(Request $request, $id)
     {
         $feeType = FeeType::findOrFail($id);
+        $previousFeeName = $feeType->fee_name;
 
         $validated = $request->validate([
             'fee_name' => 'required|string|max:100|unique:fee_types,fee_name,' . $id . ',fee_type_id',
@@ -80,7 +81,7 @@ class FeeTypeController extends Controller
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Set Fees',
-            details: 'Updated fee type "' . $feeType->fee_name . '".',
+            details: 'Updated fee type "' . $feeType->fee_name . '" in fee name from "' . $previousFeeName . '" to "' . $feeType->fee_name . '".',
             user: Auth::user()
         );
 

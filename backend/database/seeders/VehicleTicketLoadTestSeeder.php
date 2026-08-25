@@ -14,7 +14,18 @@ use Illuminate\Support\Facades\Hash;
 
 class VehicleTicketLoadTestSeeder extends Seeder
 {
-    private const VEHICLE_TYPE_COUNT = 10;
+    private const VEHICLE_TYPE_NAMES = [
+        'Tricab',
+        'Rela',
+        'Motorcycle',
+        'Multicab',
+        'Private Car',
+        'Van',
+        'Pickup',
+        'Truck',
+        'Delivery Van',
+        'Tricycle',
+    ];
     private const YEAR_TARGETS = [
         2025 => 500,
         2026 => 1000,
@@ -54,11 +65,25 @@ class VehicleTicketLoadTestSeeder extends Seeder
             ]
         );
 
-        $vehicleTypes = collect(range(1, self::VEHICLE_TYPE_COUNT))->map(function (int $number) use ($user) {
-            $vehicleType = VehicleType::withTrashed()->firstOrCreate(
-                ['type_name' => sprintf('Vehicle Ticket Load Type %02d', $number)],
-                ['created_by' => $user->user_id]
-            );
+        $vehicleTypes = collect(self::VEHICLE_TYPE_NAMES)->map(function (string $typeName, int $index) use ($user) {
+            $oldTypeName = sprintf('Vehicle Ticket Load Type %02d', $index + 1);
+            $vehicleType = VehicleType::withTrashed()->where('type_name', $typeName)->first();
+
+            if (!$vehicleType) {
+                $vehicleType = VehicleType::withTrashed()->where('type_name', $oldTypeName)->first();
+
+                if ($vehicleType) {
+                    $vehicleType->type_name = $typeName;
+                    $vehicleType->save();
+                }
+            }
+
+            if (!$vehicleType) {
+                $vehicleType = VehicleType::create([
+                    'type_name' => $typeName,
+                    'created_by' => $user->user_id,
+                ]);
+            }
 
             if ($vehicleType->trashed()) {
                 $vehicleType->restore();

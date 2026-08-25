@@ -33,6 +33,7 @@ class Notification extends Model
     {
         static::created(fn (Notification $notification) => static::broadcastNotificationUpdate($notification));
         static::updated(fn (Notification $notification) => static::broadcastNotificationUpdate($notification));
+        static::deleted(fn (Notification $notification) => static::broadcastNotificationUpdate($notification));
     }
 
     private static function broadcastNotificationUpdate(Notification $notification): void

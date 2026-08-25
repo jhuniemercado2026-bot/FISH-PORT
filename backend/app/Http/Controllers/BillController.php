@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\TransactionUpdated;
 use App\Models\Bill;
 use App\Models\BillItem;
 use App\Models\BanyeraTransaction;
@@ -440,6 +441,10 @@ class BillController extends Controller
             user: Auth::user()
         );
 
+        $billPayload = $this->transformBill($bill)->toArray();
+
+        broadcast(new TransactionUpdated('billing', 'created', $billPayload));
+
         if ($request->boolean('minimal')) {
             return response()->json([
                 'bill_id' => $bill->bill_id,
@@ -450,7 +455,7 @@ class BillController extends Controller
             ], 201);
         }
 
-        return response()->json($this->transformBill($bill), 201);
+        return response()->json($billPayload, 201);
     }
 
     public function show($id)
@@ -508,18 +513,22 @@ class BillController extends Controller
             $beforeState,
             $afterState,
             [
-                'boat' => 'Boat',
-                'total_amount' => 'Total amount',
-                'items' => 'Bill items',
+                'boat' => 'boat',
+                'total_amount' => 'total amount',
+                'items' => 'bill items',
             ]
         );
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Billing',
-            details: 'Updated billing record #' . ($bill->bill_reference_no ?? $bill->bill_id) . ($changeDetails !== '' ? ': ' . $changeDetails . '.' : '.'),
+            details: 'Updated billing record #' . ($bill->bill_reference_no ?? $bill->bill_id) . ($changeDetails !== '' ? ' in ' . $changeDetails . '.' : '.'),
             user: Auth::user()
         );
+
+        $billPayload = $this->transformBill($bill)->toArray();
+
+        broadcast(new TransactionUpdated('billing', 'updated', $billPayload));
 
         if ($request->boolean('minimal')) {
             return response()->json([
@@ -531,7 +540,7 @@ class BillController extends Controller
             ]);
         }
 
-        return response()->json($this->transformBill($bill));
+        return response()->json($billPayload);
     }
 
     public function destroy($id)
@@ -545,6 +554,12 @@ class BillController extends Controller
             details: 'Archived billing record #' . ($bill->bill_reference_no ?? $bill->bill_id) . ' for boat "' . ($bill->boat?->boat_name ?? 'Unknown boat') . '".',
             user: Auth::user()
         );
+
+        broadcast(new TransactionUpdated('billing', 'updated', [
+            'bill_id' => $bill->bill_id,
+            'boat_id' => $bill->boat_id,
+            'deleted_at' => optional($bill->deleted_at)->toIso8601String(),
+        ]));
 
         return response()->json(['message' => 'Billing record archived successfully.']);
     }
