@@ -76,8 +76,12 @@ export default function ProfileScreen() {
             >
               Profile
             </Text>
-            <Pressable className="h-11 w-11 items-center justify-center" hitSlop={10}>
-              <Ionicons name="settings-outline" size={22} color="#FFFFFF" />
+            <Pressable
+              className="h-11 w-11 items-center justify-center"
+              hitSlop={10}
+              onPress={() => router.push("/(tabs)/profile/[id]?id=1")}
+            >
+              <Ionicons name="create-outline" size={22} color="#FFFFFF" />
             </Pressable>
           </View>
         </View>

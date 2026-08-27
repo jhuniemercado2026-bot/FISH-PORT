@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { getAuthToken } from "../../api/auth";
 import { buildApiHeaders, getApiBaseUrl } from "../../api/axios";
 import NotificationModal from "../../components/NotificationModal";
+import { useNotificationStore } from "../../store/notificationStore";
 import { useToastStore } from "../../store/toastStore";
 import {
   getOfflineResourceArray,
@@ -215,6 +216,7 @@ const wait = (milliseconds: number) =>
 export default function NotificationsScreen() {
   const authToken = getAuthToken();
   const showToast = useToastStore((state) => state.showToast);
+  const setUnreadCount = useNotificationStore((state) => state.setUnreadCount);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasLoadedNotifications, setHasLoadedNotifications] = useState(false);
@@ -279,8 +281,12 @@ export default function NotificationsScreen() {
         setIsLoading(false);
       }
     },
-    [authToken, showToast]
+    [authToken, setUnreadCount, showToast]
   );
+
+  useEffect(() => {
+    setUnreadCount(notifications.filter((item) => !item.is_read).length);
+  }, [notifications, setUnreadCount]);
 
   useEffect(() => {
     let isMounted = true;

@@ -2323,7 +2323,7 @@ const SuperBilling = () => {
         setFieldErrors({});
         setFormError("");
       } catch (error) {
-        console.error("Failed to sync edited billing record from Reverb:", error);
+        console.error("Failed to sync edited billing record from Pusher:", error);
       }
     };
 

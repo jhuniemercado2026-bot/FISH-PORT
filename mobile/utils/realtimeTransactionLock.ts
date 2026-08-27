@@ -1,4 +1,3 @@
-import { getApiBaseUrl } from "../api/axios";
 import type { TransactionLockState } from "../store/historyStore";
 
 type TransactionLockPayload = {
@@ -9,7 +8,6 @@ type RealtimeOptions = {
   onUpdate: (transactionLock: TransactionLockState | null, payload: TransactionLockPayload) => void;
 };
 
-const DEFAULT_REVERB_APP_KEY = "tjcu6zpw8pmx5epf8g1g";
 const TRANSACTION_LOCK_CHANNEL = "transaction-lock";
 
 const parseEventData = (data: unknown) => {
@@ -22,25 +20,21 @@ const parseEventData = (data: unknown) => {
   }
 };
 
-const getApiHost = () => {
-  try {
-    return new URL(getApiBaseUrl()).hostname;
-  } catch {
-    return "localhost";
-  }
-};
-
-const buildReverbUrl = () => {
-  const appKey =
-    process.env.EXPO_PUBLIC_REVERB_APP_KEY?.trim() || DEFAULT_REVERB_APP_KEY;
+const buildPusherUrl = () => {
+  const appKey = process.env.EXPO_PUBLIC_PUSHER_APP_KEY?.trim();
   const scheme =
-    process.env.EXPO_PUBLIC_REVERB_SCHEME?.trim() ||
-    (getApiBaseUrl().startsWith("https://") ? "https" : "http");
-  const host = process.env.EXPO_PUBLIC_REVERB_HOST?.trim() || getApiHost();
-  const port = process.env.EXPO_PUBLIC_REVERB_PORT?.trim() || "8080";
+    process.env.EXPO_PUBLIC_PUSHER_SCHEME?.trim() || "https";
+  const cluster =
+    process.env.EXPO_PUBLIC_PUSHER_APP_CLUSTER?.trim() || "mt1";
+  const host =
+    process.env.EXPO_PUBLIC_PUSHER_HOST?.trim() || `ws-${cluster}.pusher.com`;
+  const port = process.env.EXPO_PUBLIC_PUSHER_PORT?.trim();
   const wsScheme = scheme === "https" ? "wss" : "ws";
 
-  return `${wsScheme}://${host}:${port}/app/${appKey}?protocol=7&client=react-native&version=1.0.0&flash=false`;
+  if (!appKey) return null;
+
+  const portSegment = port ? `:${port}` : "";
+  return `${wsScheme}://${host}${portSegment}/app/${appKey}?protocol=7&client=react-native&version=1.0.0&flash=false`;
 };
 
 export function startTransactionLockRealtime({ onUpdate }: RealtimeOptions) {
@@ -87,7 +81,10 @@ export function startTransactionLockRealtime({ onUpdate }: RealtimeOptions) {
     if (closedByCaller) return;
 
     try {
-      socket = new WebSocket(buildReverbUrl());
+      const pusherUrl = buildPusherUrl();
+      if (!pusherUrl) return;
+
+      socket = new WebSocket(pusherUrl);
     } catch {
       scheduleReconnect();
       return;

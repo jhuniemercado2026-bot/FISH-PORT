@@ -105,8 +105,6 @@ export const getActivityLogsQueryOptions = ({
   },
   staleTime: 5 * 60 * 1000,
   gcTime: 30 * 60 * 1000,
-  initialData: () => emptyActivityLogsData(perPage),
-  initialDataUpdatedAt: 0,
   placeholderData: (previousData) => previousData,
   refetchOnReconnect: true,
   refetchOnWindowFocus: false,

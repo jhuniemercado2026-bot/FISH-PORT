@@ -30,6 +30,11 @@ const getHeaderLogoBuffer = async () => {
 
 const excelColumnWidthToPixels = (width = 8.43) => Math.floor(width * 7 + 5);
 
+const getColumnRangePixelWidth = (worksheet, startColumn, endColumn) =>
+  Array.from({ length: endColumn - startColumn + 1 }, (_, index) =>
+    excelColumnWidthToPixels(worksheet.getColumn(startColumn + index).width),
+  ).reduce((sum, width) => sum + width, 0);
+
 const getCenteredImageTopLeftColumn = (worksheet, startColumn, endColumn, imageWidth) => {
   const columnWidths = Array.from({ length: endColumn - startColumn + 1 }, (_, index) =>
     excelColumnWidthToPixels(worksheet.getColumn(startColumn + index).width),
@@ -51,6 +56,17 @@ const getCenteredImageTopLeftColumn = (worksheet, startColumn, endColumn, imageW
 const getCenteredImageTopLeftRow = (rowHeight, imageHeight) => {
   const rowHeightPx = rowHeight * (96 / 72);
   return Math.max(0, (rowHeightPx - imageHeight) / 2 / rowHeightPx);
+};
+
+const getContainedImageSize = ({ maxWidth, maxHeight, width, height, padding = 12 }) => {
+  const availableWidth = Math.max(1, maxWidth - padding * 2);
+  const availableHeight = Math.max(1, maxHeight - padding * 2);
+  const scale = Math.min(1, availableWidth / width, availableHeight / height);
+
+  return {
+    width: Math.round(width * scale),
+    height: Math.round(height * scale),
+  };
 };
 
 const getValueLength = (value) => {
@@ -168,27 +184,48 @@ export const createExcelExportBlob = async ({
       font: { ...defaultFont, size: 14, bold: true },
     },
   ];
-  const logoSize = { width: 190, height: 73 };
+  const baseLogoSize = { width: 190, height: 73 };
+  const logoEndColumn = Math.max(1, Math.floor(columns.length / 2));
+  const hasSeparateHeaderTextCell = columns.length > logoEndColumn;
+  const textStartColumn = hasSeparateHeaderTextCell ? logoEndColumn + 1 : 1;
 
   worksheet.spliceRows(1, 0, spacerRow);
-  const mergedHeaderRow = worksheet.getRow(1);
-  mergedHeaderRow.height = 76;
+  const topHeaderRow = worksheet.getRow(1);
+  topHeaderRow.height = 76;
 
   const headerLogoBuffer = await getHeaderLogoBuffer();
-  const logoEndColumn = Math.min(
-    Math.max(1, Math.ceil(columns.length * 0.45)),
-    Math.max(1, columns.length - 1),
-  );
-  const textStartColumn = columns.length > 1 ? logoEndColumn + 1 : 1;
+  worksheet.mergeCells(1, 1, 1, logoEndColumn);
 
-  if (columns.length > 1) {
-    worksheet.mergeCells(1, 1, 1, logoEndColumn);
+  if (hasSeparateHeaderTextCell) {
     worksheet.mergeCells(1, textStartColumn, 1, columns.length);
-  } else {
-    worksheet.mergeCells(1, 1, 1, columns.length);
   }
 
+  for (let columnIndex = 1; columnIndex <= columns.length; columnIndex += 1) {
+    const cell = topHeaderRow.getCell(columnIndex);
+    cell.border = borderStyle;
+    cell.alignment = {
+      horizontal: "center",
+      vertical: "middle",
+      wrapText: true,
+    };
+  }
+
+  const headerTextCell = topHeaderRow.getCell(textStartColumn);
+  headerTextCell.value = { richText: topHeaderRichText };
+  headerTextCell.alignment = {
+    horizontal: "center",
+    vertical: "middle",
+    wrapText: true,
+  };
+
   if (headerLogoBuffer) {
+    const logoHeaderWidth = getColumnRangePixelWidth(worksheet, 1, logoEndColumn);
+    const logoHeaderHeight = topHeaderRow.height * (96 / 72);
+    const logoSize = getContainedImageSize({
+      ...baseLogoSize,
+      maxWidth: logoHeaderWidth,
+      maxHeight: logoHeaderHeight,
+    });
     const logoImageId = workbook.addImage({
       buffer: headerLogoBuffer,
       extension: "png",
@@ -197,29 +234,11 @@ export const createExcelExportBlob = async ({
     worksheet.addImage(logoImageId, {
       tl: {
         col: getCenteredImageTopLeftColumn(worksheet, 1, logoEndColumn, logoSize.width),
-        row: getCenteredImageTopLeftRow(mergedHeaderRow.height, logoSize.height),
+        row: getCenteredImageTopLeftRow(topHeaderRow.height, logoSize.height),
       },
       ext: logoSize,
     });
   }
-
-  for (let columnIndex = 1; columnIndex <= columns.length; columnIndex += 1) {
-    const cell = mergedHeaderRow.getCell(columnIndex);
-    cell.border = borderStyle;
-    cell.alignment = {
-      horizontal: columnIndex >= textStartColumn ? "center" : "center",
-      vertical: "middle",
-      wrapText: true,
-    };
-  }
-
-  const headerTextCell = mergedHeaderRow.getCell(textStartColumn);
-  headerTextCell.value = { richText: topHeaderRichText };
-  headerTextCell.alignment = {
-    horizontal: "center",
-    vertical: "middle",
-    wrapText: true,
-  };
 
   worksheet.spliceRows(2, 0, spacerRow);
 

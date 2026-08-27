@@ -35,6 +35,10 @@ return [
         'api_secret' => env('CLOUDINARY_API_SECRET'),
     ],
 
+    'hostinger_cron' => [
+        'token' => env('HOSTINGER_CRON_TOKEN'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

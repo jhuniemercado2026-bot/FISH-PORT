@@ -1,10 +1,8 @@
-import type { MasterDataUpdatePayload } from "../store/masterDataStore";
+import { getAuthSession } from "../api/auth";
 
 type RealtimeOptions = {
-  onUpdate: (payload: MasterDataUpdatePayload) => void;
+  onUpdate: () => void;
 };
-
-const MASTER_DATA_CHANNEL = "master-data";
 
 const parseEventData = (data: unknown) => {
   if (typeof data !== "string") return data;
@@ -33,12 +31,14 @@ const buildPusherUrl = () => {
   return `${wsScheme}://${host}${portSegment}/app/${appKey}?protocol=7&client=react-native&version=1.0.0&flash=false`;
 };
 
-export function startMasterDataRealtime({ onUpdate }: RealtimeOptions) {
+export function startNotificationsRealtime({ onUpdate }: RealtimeOptions) {
   const enabled =
     String(process.env.EXPO_PUBLIC_REALTIME_ENABLED ?? "true").toLowerCase() !==
     "false";
+  const userId = getAuthSession()?.user?.user_id;
+  const channelName = userId ? `notifications.${userId}` : "";
 
-  if (!enabled) {
+  if (!enabled || !channelName) {
     return () => {};
   }
 
@@ -67,7 +67,7 @@ export function startMasterDataRealtime({ onUpdate }: RealtimeOptions) {
       JSON.stringify({
         event: "pusher:subscribe",
         data: {
-          channel: MASTER_DATA_CHANNEL,
+          channel: channelName,
         },
       })
     );
@@ -96,13 +96,10 @@ export function startMasterDataRealtime({ onUpdate }: RealtimeOptions) {
       if (event.startsWith("pusher:")) return;
 
       const channel = String((payload as { channel?: string }).channel ?? "");
-      if (channel && channel !== MASTER_DATA_CHANNEL) return;
+      if (channel && channel !== channelName) return;
 
       if (event === "updated" || event === ".updated") {
-        const data = parseEventData((payload as { data?: unknown }).data);
-        if (data && typeof data === "object") {
-          onUpdate(data as MasterDataUpdatePayload);
-        }
+        onUpdate();
       }
     };
 

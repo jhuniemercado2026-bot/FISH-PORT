@@ -1,10 +1,59 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import { View } from "react-native";
+import { useEffect } from "react";
+import { AppState, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useNotificationStore } from "../../store/notificationStore";
+import { startNotificationsRealtime } from "../../utils/realtimeNotifications";
+
+function NotificationTabIcon({
+  color,
+  focused,
+  hasUnread,
+  size,
+}: {
+  color: string;
+  focused: boolean;
+  hasUnread: boolean;
+  size: number;
+}) {
+  return (
+    <View className="relative">
+      <Ionicons
+        name={focused ? "notifications" : "notifications-outline"}
+        size={size}
+        color={color}
+      />
+      {hasUnread ? (
+        <View className="absolute -right-1 top-0 h-2 w-2 rounded-full border border-white bg-[#F97316]" />
+      ) : null}
+    </View>
+  );
+}
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  const unreadCount = useNotificationStore((state) => state.unreadCount);
+  const refreshUnreadCount = useNotificationStore((state) => state.refreshUnreadCount);
+  const hasUnreadNotifications = unreadCount > 0;
+
+  useEffect(() => {
+    refreshUnreadCount();
+
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        refreshUnreadCount();
+      }
+    });
+
+    return () => appStateSubscription.remove();
+  }, [refreshUnreadCount]);
+
+  useEffect(() => {
+    return startNotificationsRealtime({
+      onUpdate: refreshUnreadCount,
+    });
+  }, [refreshUnreadCount]);
 
   return (
     <Tabs
@@ -65,10 +114,11 @@ export default function TabsLayout() {
         options={{
           title: "Notifications",
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons
-              name={focused ? "notifications" : "notifications-outline"}
-              size={size}
+            <NotificationTabIcon
               color={color}
+              focused={focused}
+              hasUnread={hasUnreadNotifications}
+              size={size}
             />
           ),
         }}
