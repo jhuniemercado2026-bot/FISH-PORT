@@ -16,7 +16,7 @@ class BoatTypeLoadTestSeeder extends Seeder
             [
                 'password' => Hash::make('password'),
                 'role' => 'inspector',
-                'status' => 'active',
+                'status' => 'offline',
                 'first_name' => 'Boat',
                 'last_name' => 'Type Test',
             ]

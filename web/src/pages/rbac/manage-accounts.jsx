@@ -40,8 +40,8 @@ import TitlePage from "../../components/TitlePage";
 import NoDataFound from "../../components/NoDataFound";
 import { showAddedToast, showBottomToast } from "../../store/bottomToastStore";
 import api from "../../api/axios";
-import { getEcho } from "../../lib/realtime";
 import { USERS_QUERY_KEY, useUsersPageQuery } from "../../hooks/useUsersQuery";
+import { useAccountPresenceStore } from "../../store/accountPresenceStore";
 import { useSidebar } from "../../store/sidebarStore";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
 
@@ -86,7 +86,8 @@ const GENDER_OPTIONS = [
 
 const STATUS_FILTER_OPTIONS = [
   { value: "all", label: "All Status" },
-  { value: "active", label: "Active" },
+  { value: "online", label: "Online" },
+  { value: "offline", label: "Offline" },
   { value: "deactivated", label: "Deactivated" },
 ];
 
@@ -265,8 +266,11 @@ const getAccountLabel = (user) => {
 
 const getAccountPresenceStatus = (user, onlineUserIds) => {
   if (user?.status === "deactivated") return "deactivated";
+  if (onlineUserIds.has(String(user?.user_id ?? user?.id ?? ""))) return "online";
+  if (user?.status === "online") return "online";
+  if (user?.status === "offline") return "offline";
 
-  return onlineUserIds.has(String(user?.user_id ?? user?.id ?? "")) ? "online" : "offline";
+  return "offline";
 };
 
 const AccountPresencePill = ({ user, onlineUserIds }) => {
@@ -296,69 +300,7 @@ const useDebounce = (value, delay = 300) => {
 };
 
 const useAccountsPresence = () => {
-  const [onlineUserIds, setOnlineUserIds] = useState(() => new Set());
-
-  useEffect(() => {
-    const echo = getEcho();
-    if (!echo) return undefined;
-
-    const normalizePresenceId = (user) => String(user?.user_id ?? user?.id ?? "");
-    const channel = echo.join("accounts.online");
-    const statusChannel = echo.channel("accounts.status");
-
-    channel.here((users = []) => {
-      setOnlineUserIds(new Set(users.map(normalizePresenceId).filter(Boolean)));
-    });
-
-    channel.joining((user) => {
-      const userId = normalizePresenceId(user);
-      if (!userId) return;
-
-      setOnlineUserIds((current) => {
-        const next = new Set(current);
-        next.add(userId);
-        return next;
-      });
-    });
-
-    channel.leaving((user) => {
-      const userId = normalizePresenceId(user);
-      if (!userId) return;
-
-      setOnlineUserIds((current) => {
-        const next = new Set(current);
-        next.delete(userId);
-        return next;
-      });
-    });
-
-    statusChannel.listen(".updated", (payload) => {
-      const account = payload?.account ?? payload?.record ?? payload;
-      const userId = normalizePresenceId(account);
-      const presenceStatus = String(account?.presence_status ?? "").toLowerCase();
-
-      if (!userId) return;
-
-      setOnlineUserIds((current) => {
-        const next = new Set(current);
-
-        if (presenceStatus === "online") {
-          next.add(userId);
-        } else if (presenceStatus === "offline" || account?.status === "deactivated") {
-          next.delete(userId);
-        }
-
-        return next;
-      });
-    });
-
-    return () => {
-      echo.leave("accounts.online");
-      echo.leave("accounts.status");
-    };
-  }, []);
-
-  return onlineUserIds;
+  return useAccountPresenceStore((state) => state.onlineUserIds);
 };
 
 
@@ -374,7 +316,7 @@ const StatusToggle = ({ active, loading, disabled = false, disabledReason = "", 
       opacity: loading || disabled ? 0.6 : 1,
       fontFamily: FONT,
     }}
-    title={disabled ? disabledReason || "Transactions are locked" : active ? "Deactivate user" : "Activate user"}
+    title={disabled ? disabledReason || "Transactions are locked" : active ? "Deactivate user" : "Reactivate user"}
   >
     <span
       className="absolute inset-y-1 flex w-[60px] items-center justify-center rounded-full text-[12px] font-semibold transition-all"
@@ -791,7 +733,7 @@ const SuperManageAccounts = () => {
   const [formErrors, setFormErrors] = useState({});
   const [sendInviteErrors, setSendInviteErrors] = useState({});
   const didRunTableFilterResetRef = useRef(false);
-  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery("accounts");
   const debouncedSearch = useDebounce(search, SEARCH_DEBOUNCE_MS);
   const onlineUserIds = useAccountsPresence();
   const storedUser = useMemo(() => {
@@ -870,7 +812,7 @@ const SuperManageAccounts = () => {
     from: 0,
     to: 0,
   };
-  const accountStats = usersQuery.data?.stats ?? { total: 0, active: 0, deactivated: 0 };
+  const accountStats = usersQuery.data?.stats ?? { total: 0, online: 0, offline: 0, deactivated: 0 };
   const filteredUsers = users;
   const hasActiveTableFilters = Boolean(
     search.trim() || statusFilter !== "all" || roleFilter !== "all"
@@ -952,25 +894,28 @@ const SuperManageAccounts = () => {
 
   const stats = useMemo(() => ([
     {
-      label: "Total Accounts",
+      title: "Total Accounts",
       value: accountStats.total,
       icon: IoPeopleOutline,
-      iconBg: "#dbeafe",
-      iconColor: "#1d4ed8",
+      tone: "navy",
     },
     {
-      label: "Active",
-      value: accountStats.active,
+      title: "Online",
+      value: accountStats.online,
       icon: IoCheckmarkOutline,
-      iconBg: "#dbeafe",
-      iconColor: "#1d4ed8",
+      tone: "green",
     },
     {
-      label: "Deactivated",
+      title: "Offline",
+      value: accountStats.offline,
+      icon: IoTimeOutline,
+      tone: "amber",
+    },
+    {
+      title: "Deactivated",
       value: accountStats.deactivated,
       icon: IoCloseOutline,
-      iconBg: "#dbeafe",
-      iconColor: "#1d4ed8",
+      tone: "red",
     },
   ]), [accountStats]);
 
@@ -1081,7 +1026,7 @@ const SuperManageAccounts = () => {
       showToast("error", "Transactions Locked", transactionLockMessage);
       return;
     }
-    const actionType = nextStatus === "active" ? "reactivate" : "deactivate";
+    const actionType = nextStatus === "offline" ? "reactivate" : "deactivate";
     setActionState({ type: actionType, userId: user.user_id });
 
     try {
@@ -1093,17 +1038,17 @@ const SuperManageAccounts = () => {
 
       showToast(
         "success",
-        nextStatus === "active" ? "User Activated" : "User Deactivated",
-        nextStatus === "active"
-          ? `${getAccountLabel(user)} account has been activated again.`
+        nextStatus === "offline" ? "User Reactivated" : "User Deactivated",
+        nextStatus === "offline"
+          ? `${getAccountLabel(user)} account has been reactivated and is now offline.`
           : `${getAccountLabel(user)} account has been deactivated.`
       );
       void queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY, refetchType: "active" });
     } catch (error) {
       showToast(
         "error",
-        nextStatus === "active" ? "Activate Failed" : "Deactivate Failed",
-        error.response?.data?.message ?? `Failed to ${nextStatus === "active" ? "activate" : "deactivate"} the user.`
+        nextStatus === "offline" ? "Reactivate Failed" : "Deactivate Failed",
+        error.response?.data?.message ?? `Failed to ${nextStatus === "offline" ? "reactivate" : "deactivate"} the user.`
       );
     } finally {
       setActionState({ type: "", userId: null });
@@ -1155,8 +1100,17 @@ const SuperManageAccounts = () => {
               <Breadcrumbs items={[{ label: "Dashboard", to: "/dashboard" }, { label: "Accounts" }]} fontFamily={FONT} loading={isUsersTableLoading} />
             </div>
 
-            <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-3">
-              {stats.map((item) => <OverviewCard key={item.label} {...item} loading={isUsersTableLoading} />)}
+            <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {stats.map((item) => (
+                <OverviewCard
+                  key={item.title}
+                  title={item.title}
+                  value={item.value}
+                  icon={item.icon}
+                  tone={item.tone}
+                  loading={isUsersTableLoading}
+                />
+              ))}
             </div>
 
             <Tabs
@@ -1300,11 +1254,11 @@ const SuperManageAccounts = () => {
                           <td className="px-4 py-3 text-[13px] whitespace-nowrap" style={{ color: "#1a1f36" }}>{formatDate(user.created_at)}</td>
                           <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                             <StatusToggle
-                              active={user.status === "active"}
+                              active={user.status !== "deactivated"}
                               loading={actionState.userId === user.user_id && (actionState.type === "deactivate" || actionState.type === "reactivate")}
                               disabled={isTransactionLocked}
                               disabledReason={transactionLockMessage}
-                              onToggle={() => handleUpdateUserStatus(user, user.status === "active" ? "deactivated" : "active")}
+                              onToggle={() => handleUpdateUserStatus(user, user.status === "deactivated" ? "offline" : "deactivated")}
                             />
                           </td>
                         </tr>

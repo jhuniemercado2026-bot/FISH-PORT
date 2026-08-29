@@ -43,7 +43,7 @@ class FeeLoadTestSeeder extends Seeder
             [
                 'password' => Hash::make('password'),
                 'role' => 'head',
-                'status' => 'active',
+                'status' => 'offline',
                 'first_name' => 'Fee',
                 'last_name' => 'Load Test',
                 'gender' => 'male',

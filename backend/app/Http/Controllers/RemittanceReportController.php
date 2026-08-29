@@ -31,7 +31,7 @@ class RemittanceReportController extends Controller
                 DB::raw("'payment' as source_type"),
                 'p.payment_id as source_id',
                 DB::raw("'Payment' as transaction"),
-                DB::raw("COALESCE(boat_type.type_name, '-') as type_name"),
+                DB::raw("COALESCE(boat.boat_name, '-') as type_name"),
                 'p.official_receipt_no',
                 'p.payment_date as collection_date',
                 'p.amount_paid as cash_received',

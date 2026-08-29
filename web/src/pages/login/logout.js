@@ -4,11 +4,13 @@ import { clearStoredAuth, getStoredToken } from "./auth";
 export async function logoutUser() {
   const token = getStoredToken();
 
-  clearStoredAuth();
-
-  void api.post("/logout", undefined, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  }).catch(() => {
-    // Local auth is already cleared, so logout should stay instant even if this fails.
-  });
+  try {
+    await api.post("/logout", undefined, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch {
+    // The browser session should still end even if the server logout request fails.
+  } finally {
+    clearStoredAuth();
+  }
 }

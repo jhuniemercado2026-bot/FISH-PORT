@@ -28,7 +28,7 @@ class PaymentLoadTestSeeder extends Seeder
             [
                 'password' => Hash::make('password'),
                 'role' => 'head',
-                'status' => 'active',
+                'status' => 'offline',
                 'first_name' => 'Payment',
                 'last_name' => 'Load Test',
                 'gender' => 'male',

@@ -17,12 +17,43 @@ const formatColumnHeader = (column) =>
 
 const A4_MARGIN_INCHES = 1 / 2.54;
 const MAX_A4_LANDSCAPE_WIDTH = 132;
+const HEADER_LOGO_PADDING = 12;
 
-const getHeaderLogoBuffer = async () => {
+const getImageDimensionsFromBlob = async (blob) => {
+  if (typeof createImageBitmap === "function") {
+    const bitmap = await createImageBitmap(blob);
+    const dimensions = { width: bitmap.width, height: bitmap.height };
+    bitmap.close?.();
+    return dimensions;
+  }
+
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(blob);
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Unable to load Excel header image."));
+    };
+    image.src = objectUrl;
+  });
+};
+
+const getHeaderLogoAsset = async () => {
   try {
     const response = await fetch("/images/header.png");
     if (!response.ok) return null;
-    return await response.arrayBuffer();
+    const blob = await response.blob();
+    const [buffer, dimensions] = await Promise.all([
+      blob.arrayBuffer(),
+      getImageDimensionsFromBlob(blob),
+    ]);
+
+    return { blob, buffer, ...dimensions };
   } catch {
     return null;
   }
@@ -35,29 +66,6 @@ const getColumnRangePixelWidth = (worksheet, startColumn, endColumn) =>
     excelColumnWidthToPixels(worksheet.getColumn(startColumn + index).width),
   ).reduce((sum, width) => sum + width, 0);
 
-const getCenteredImageTopLeftColumn = (worksheet, startColumn, endColumn, imageWidth) => {
-  const columnWidths = Array.from({ length: endColumn - startColumn + 1 }, (_, index) =>
-    excelColumnWidthToPixels(worksheet.getColumn(startColumn + index).width),
-  );
-  const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0);
-  let offset = Math.max(0, (totalWidth - imageWidth) / 2);
-
-  for (let index = 0; index < columnWidths.length; index += 1) {
-    const columnWidth = columnWidths[index] || 1;
-    if (offset <= columnWidth) {
-      return startColumn - 1 + index + offset / columnWidth;
-    }
-    offset -= columnWidth;
-  }
-
-  return startColumn - 1;
-};
-
-const getCenteredImageTopLeftRow = (rowHeight, imageHeight) => {
-  const rowHeightPx = rowHeight * (96 / 72);
-  return Math.max(0, (rowHeightPx - imageHeight) / 2 / rowHeightPx);
-};
-
 const getContainedImageSize = ({ maxWidth, maxHeight, width, height, padding = 12 }) => {
   const availableWidth = Math.max(1, maxWidth - padding * 2);
   const availableHeight = Math.max(1, maxHeight - padding * 2);
@@ -67,6 +75,73 @@ const getContainedImageSize = ({ maxWidth, maxHeight, width, height, padding = 1
     width: Math.round(width * scale),
     height: Math.round(height * scale),
   };
+};
+
+const canvasToArrayBuffer = (canvas) =>
+  new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("Unable to prepare Excel header image."));
+        return;
+      }
+
+      blob.arrayBuffer().then(resolve, reject);
+    }, "image/png");
+  });
+
+const loadImageElement = (blob) =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(blob);
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Unable to load Excel header image."));
+    };
+    image.src = objectUrl;
+  });
+
+const createPaddedHeaderLogoBuffer = async ({
+  asset,
+  leftSpace,
+  topSpace,
+  logoSize,
+}) => {
+  if (typeof document === "undefined") return asset.buffer;
+
+  try {
+    const renderScale = Math.max(
+      1,
+      asset.width / Math.max(1, logoSize.width),
+      asset.height / Math.max(1, logoSize.height),
+    );
+    const scaledLeftSpace = Math.round(leftSpace * renderScale);
+    const scaledTopSpace = Math.round(topSpace * renderScale);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(scaledLeftSpace + asset.width);
+    canvas.height = Math.round(scaledTopSpace + asset.height);
+
+    const context = canvas.getContext("2d");
+    if (!context) return asset.buffer;
+
+    const image =
+      typeof createImageBitmap === "function"
+        ? await createImageBitmap(asset.blob)
+        : await loadImageElement(asset.blob);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, scaledLeftSpace, scaledTopSpace, asset.width, asset.height);
+    image.close?.();
+
+    return await canvasToArrayBuffer(canvas);
+  } catch {
+    return asset.buffer;
+  }
 };
 
 const getValueLength = (value) => {
@@ -184,7 +259,6 @@ export const createExcelExportBlob = async ({
       font: { ...defaultFont, size: 14, bold: true },
     },
   ];
-  const baseLogoSize = { width: 190, height: 73 };
   const logoEndColumn = Math.max(1, Math.floor(columns.length / 2));
   const hasSeparateHeaderTextCell = columns.length > logoEndColumn;
   const textStartColumn = hasSeparateHeaderTextCell ? logoEndColumn + 1 : 1;
@@ -193,7 +267,7 @@ export const createExcelExportBlob = async ({
   const topHeaderRow = worksheet.getRow(1);
   topHeaderRow.height = 76;
 
-  const headerLogoBuffer = await getHeaderLogoBuffer();
+  const headerLogoAsset = await getHeaderLogoAsset();
   worksheet.mergeCells(1, 1, 1, logoEndColumn);
 
   if (hasSeparateHeaderTextCell) {
@@ -218,25 +292,39 @@ export const createExcelExportBlob = async ({
     wrapText: true,
   };
 
-  if (headerLogoBuffer) {
+  if (headerLogoAsset) {
     const logoHeaderWidth = getColumnRangePixelWidth(worksheet, 1, logoEndColumn);
     const logoHeaderHeight = topHeaderRow.height * (96 / 72);
     const logoSize = getContainedImageSize({
-      ...baseLogoSize,
+      width: headerLogoAsset.width,
+      height: headerLogoAsset.height,
       maxWidth: logoHeaderWidth,
       maxHeight: logoHeaderHeight,
+      padding: HEADER_LOGO_PADDING,
+    });
+    const logoLeftSpace = Math.max(0, (logoHeaderWidth - logoSize.width) / 2);
+    const logoTopSpace = Math.max(0, (logoHeaderHeight - logoSize.height) / 2);
+    const paddedLogoBuffer = await createPaddedHeaderLogoBuffer({
+      asset: headerLogoAsset,
+      leftSpace: logoLeftSpace,
+      topSpace: logoTopSpace,
+      logoSize,
     });
     const logoImageId = workbook.addImage({
-      buffer: headerLogoBuffer,
+      buffer: paddedLogoBuffer,
       extension: "png",
     });
 
     worksheet.addImage(logoImageId, {
       tl: {
-        col: getCenteredImageTopLeftColumn(worksheet, 1, logoEndColumn, logoSize.width),
-        row: getCenteredImageTopLeftRow(topHeaderRow.height, logoSize.height),
+        col: 0,
+        row: 0,
       },
-      ext: logoSize,
+      ext: {
+        width: Math.round(logoLeftSpace + logoSize.width),
+        height: Math.round(logoTopSpace + logoSize.height),
+      },
+      editAs: "oneCell",
     });
   }
 

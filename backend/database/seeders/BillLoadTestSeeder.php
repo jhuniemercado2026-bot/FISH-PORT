@@ -33,7 +33,7 @@ class BillLoadTestSeeder extends Seeder
             [
                 'password' => Hash::make('password'),
                 'role' => 'inspector',
-                'status' => 'active',
+                'status' => 'offline',
                 'first_name' => 'Bill',
                 'last_name' => 'Load Test',
                 'gender' => 'male',

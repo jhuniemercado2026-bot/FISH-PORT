@@ -36,6 +36,8 @@ import Breadcrumbs from "../../components/Breadcrumbs";
 import TitlePage from "../../components/TitlePage";
 import Card from "../../components/Card";
 import Modal from "../../components/Modal";
+import BreakdownBillModal from "../../components/BreakdownBillModal";
+import BreakdownBanyeraModal from "../../components/BreakdownBanyeraModal";
 import DetailDrawer, { DrawerInfoCard, DrawerSection } from "../../components/Drawer";
 import { useSidebar } from "../../store/sidebarStore";
 import { showAddedToast, showBottomToast, showNoChangesToast, showUpdatedToast } from "../../store/bottomToastStore";
@@ -973,7 +975,7 @@ const RecordPaymentModal = ({
 
   return (
     <Modal
-      title="Record Payment"
+      title="Payments"
       onClose={onClose}
       onSave={onSave}
       saving={saving}
@@ -1874,6 +1876,8 @@ const SuperBilling = () => {
   const [paymentModalFieldErrors, setPaymentModalFieldErrors] = useState({});
   const [paymentModalFormError, setPaymentModalFormError] = useState("");
   const [showCreateBillingModal, setShowCreateBillingModal] = useState(false);
+  const [breakdownBill, setBreakdownBill] = useState(null);
+  const [breakdownBanyera, setBreakdownBanyera] = useState(null);
   const [editingPayment, setEditingPayment] = useState(null);
   const [detailPayment, setDetailPayment] = useState(null);
   const [editPaymentForm, setEditPaymentForm] = useState({ official_receipt_no: "", remarks: "" });
@@ -1936,7 +1940,6 @@ const SuperBilling = () => {
     sort: "created_at_desc",
     paginated: false,
     includeBoats: false,
-    compact: true,
   }, {
     enabled: !isHeadViewOnly && isBillingFormActive && Boolean(selectedBillingBoatId),
     placeholderData: undefined,
@@ -2166,6 +2169,8 @@ const SuperBilling = () => {
     setEditingBillId(null);
     setFormError("");
     setSubmitMode(null);
+    setBreakdownBill(null);
+    setBreakdownBanyera(null);
     setShowCreateBillingModal(true);
   };
 
@@ -2178,6 +2183,8 @@ const SuperBilling = () => {
     setEditingBillId(null);
     setFormError("");
     setSubmitMode(null);
+    setBreakdownBill(null);
+    setBreakdownBanyera(null);
   };
 
   const boatMap = useMemo(
@@ -2352,6 +2359,7 @@ const SuperBilling = () => {
           boatId: String(record.boat_id ?? ""),
           sortDate: String(record.docking_date || ""),
           isBilled: Boolean(record.is_billed),
+          record,
         })),
       banyera: (banyeraTransactions ?? [])
         .filter(isActiveBillingLookupRecord)
@@ -2362,6 +2370,7 @@ const SuperBilling = () => {
           boatId: String(record.boat_id ?? ""),
           sortDate: String(record.transaction_date || ""),
           isBilled: Boolean(record.is_billed),
+          record,
         })),
     }),
     [banyeraTransactions, dockings],
@@ -2377,6 +2386,7 @@ const SuperBilling = () => {
         boatId: String(record.boat_id ?? ""),
         sortDate: String(record.docking_date || ""),
         isBilled: Boolean(record.is_billed),
+        record,
       })),
     banyera: (lookups.banyeraTransactions ?? [])
       .filter(isActiveBillingLookupRecord)
@@ -2387,6 +2397,7 @@ const SuperBilling = () => {
         boatId: String(record.boat_id ?? ""),
         sortDate: String(record.transaction_date || ""),
         isBilled: Boolean(record.is_billed),
+        record,
       })),
   });
 
@@ -3013,6 +3024,7 @@ const SuperBilling = () => {
       )
         .map((bill) => ({
           id: bill.bill_id,
+          bill,
           referenceNumber: formatReferenceNumber(bill.bill_reference_no),
           date: formatDisplayDate(bill.billing_date || bill.created_at),
           amount: Number(bill.total_amount || 0),
@@ -4107,8 +4119,8 @@ const SuperBilling = () => {
                           className="flex h-[42px] items-center justify-center gap-2 rounded-[10px] border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
                           style={{ fontFamily: FONT }}
                         >
-                          <IoCashOutline className="text-[16px]" />
-                          <span>Record Payment</span>
+                          <IoAddOutline className="text-[16px]" />
+                          <span>Create Payments</span>
                         </button>
                       ) : null}
                     </>
@@ -4488,9 +4500,11 @@ const SuperBilling = () => {
                             return record.boatId === billingForm.boat_id;
                           });
                           const typeLabel = TRANSACTION_TYPE_OPTIONS.find((option) => option.value === item.transaction_type)?.label || "";
+                          const selectedRecord = records.find((record) => String(record.value) === String(item.record_id));
                           const recordDate = formatLongDisplayDate(
-                            records.find((record) => String(record.value) === String(item.record_id))?.sortDate,
+                            selectedRecord?.sortDate,
                           ) || "";
+                          const canShowBanyeraBreakdown = item.transaction_type === "banyera" && selectedRecord?.record;
 
                           return (
                             <div
@@ -4501,7 +4515,20 @@ const SuperBilling = () => {
                                   "minmax(0,0.72fr) minmax(0,1fr) minmax(96px,0.72fr)",
                               }}
                             >
-                              <Input value={typeLabel} readOnly readOnlyPlain wrapperClassName="min-w-0" inputClassName="truncate text-[12px]" />
+                              {canShowBanyeraBreakdown ? (
+                                <Tooltip title="Click me">
+                                  <button
+                                    type="button"
+                                    onClick={() => setBreakdownBanyera(selectedRecord.record)}
+                                    className="flex h-[46px] w-full min-w-0 cursor-pointer items-center rounded-[10px] border border-slate-200 bg-white px-3.5 text-left text-[12px] font-semibold text-blue-600 transition-colors hover:border-blue-300 hover:bg-blue-50"
+                                    style={{ fontFamily: FONT }}
+                                  >
+                                    <span className="truncate">{typeLabel}</span>
+                                  </button>
+                                </Tooltip>
+                              ) : (
+                                <Input value={typeLabel} readOnly readOnlyPlain wrapperClassName="min-w-0" inputClassName="truncate text-[12px]" />
+                              )}
                               <Input value={recordDate} readOnly readOnlyPlain wrapperClassName="min-w-0" inputClassName="truncate text-[12px]" />
                               <Input value={item.amount} readOnly readOnlyPlain wrapperClassName="min-w-0" inputClassName="text-[12px]" />
                             </div>
@@ -4566,7 +4593,16 @@ const SuperBilling = () => {
                               "minmax(160px,1fr) minmax(160px,0.9fr) minmax(140px,0.8fr)",
                           }}
                         >
-                          <Input value={transaction.referenceNumber} readOnly readOnlyPlain />
+                          <Tooltip title="Click me">
+                            <button
+                              type="button"
+                              onClick={() => setBreakdownBill(transaction.bill)}
+                              className="flex h-[46px] w-full cursor-pointer items-center rounded-[10px] border border-slate-200 bg-white px-3.5 text-left text-[13px] font-semibold text-blue-600 transition-colors hover:border-blue-300 hover:bg-blue-50"
+                              style={{ fontFamily: FONT }}
+                            >
+                              <span className="truncate">{transaction.referenceNumber || "-"}</span>
+                            </button>
+                          </Tooltip>
                           <Input value={transaction.date} readOnly readOnlyPlain />
                           <Input
                             value={Number(transaction.amount || 0).toLocaleString("en-PH", {
@@ -4586,6 +4622,16 @@ const SuperBilling = () => {
           </div>
         </Modal>
       ) : null}
+      <BreakdownBillModal
+        open={Boolean(breakdownBill)}
+        bill={breakdownBill}
+        onClose={() => setBreakdownBill(null)}
+      />
+      <BreakdownBanyeraModal
+        open={Boolean(breakdownBanyera)}
+        transaction={breakdownBanyera}
+        onClose={() => setBreakdownBanyera(null)}
+      />
       {!isHeadViewOnly ? <RecordPaymentModal
         open={Boolean(paymentModalBill)}
         bill={paymentModalBill}

@@ -202,6 +202,21 @@ class BanyeraTransactionController extends Controller
             'transaction_date' => $this->formatBanyeraDateValue($transaction->transaction_date),
             'total_fee' => $transaction->total_fee,
             'is_billed' => (bool) ($transaction->billed_exists ?? false),
+            'items' => collect($transaction->items ?? [])->map(function ($item) {
+                return [
+                    'item_id' => $item->item_id,
+                    'banyera_id' => $item->banyera_id,
+                    'classification_id' => $item->classification_id,
+                    'quantity' => $item->quantity,
+                    'fee_id' => $item->fee_id,
+                    'subtotal' => number_format((float) ($item->subtotal ?? 0), 2),
+                    'daug' => $item->daug,
+                    'classification' => $item->classification ? [
+                        'classification_id' => $item->classification->classification_id,
+                        'classification_name' => $item->classification->classification_name,
+                    ] : null,
+                ];
+            })->values()->all(),
         ];
     }
 
@@ -403,7 +418,11 @@ class BanyeraTransactionController extends Controller
                     'banyera_transactions.voided_at',
                     'banyera_transactions.created_at',
                 ])
-                ->with('boat:boat_id,boat_name')
+                ->with([
+                    'boat:boat_id,boat_name',
+                    'items:item_id,banyera_id,classification_id,quantity,fee_id,subtotal,daug',
+                    'items.classification:classification_id,classification_name',
+                ])
                 ->withExists(['billItems as billed_exists'])
                 ->when(!$includeVoided, fn ($filtered) => $filtered->whereNull('banyera_transactions.voided_at'))
                 ->tableFilters(

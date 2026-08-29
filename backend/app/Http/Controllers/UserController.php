@@ -163,7 +163,7 @@ class UserController extends Controller
         $user = User::create([
             ...$validated,
             'password'   => Hash::make($validated['password']),
-            'status'     => 'active',
+            'status'     => 'offline',
             'created_by' => auth()->id(),
         ]);
 
@@ -200,7 +200,7 @@ class UserController extends Controller
                 'email' => $validated['email'],
                 'password' => Hash::make($validated['password']),
                 'role' => $validated['role'],
-                'status' => 'active',
+                'status' => 'offline',
                 'first_name' => '',
                 'last_name' => '',
                 'created_by' => auth()->id(),
@@ -269,7 +269,7 @@ class UserController extends Controller
             'email'          => 'sometimes|email|max:150|unique:users,email,' . $id . ',user_id',
             'password'       => 'nullable|string|min:8|confirmed',
             'role'           => 'sometimes|in:head,coordinator,inspector',
-            'status'         => 'sometimes|in:active,deactivated',
+            'status'         => 'sometimes|in:online,offline,deactivated',
             'first_name'     => 'sometimes|string|max:100',
             'last_name'      => 'sometimes|string|max:100',
             'gender'         => 'nullable|in:male,female',
@@ -570,7 +570,7 @@ class UserController extends Controller
         $user = User::findOrFail($id);
         $this->abortIfCannotManageTarget(request(), $user);
 
-        $user->update(['status' => 'active']);
+        $user->update(['status' => 'offline']);
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
@@ -646,7 +646,8 @@ class UserController extends Controller
 
         return [
             'total' => (clone $query)->count(),
-            'active' => (clone $query)->where('status', 'active')->count(),
+            'online' => (clone $query)->where('status', 'online')->count(),
+            'offline' => (clone $query)->where('status', 'offline')->count(),
             'deactivated' => (clone $query)->where('status', 'deactivated')->count(),
         ];
     }

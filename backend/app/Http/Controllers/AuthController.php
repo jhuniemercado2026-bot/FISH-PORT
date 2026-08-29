@@ -68,6 +68,8 @@ class AuthController extends Controller
             user: $user
         );
 
+        $user->update(['status' => 'online']);
+        $user->refresh();
         $this->broadcastAccountStatus($user, 'online');
 
         return response()->json([
@@ -296,10 +298,14 @@ class AuthController extends Controller
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Security',
-            details: 'User "' . $user->email . '" signed out.',
+            details: 'User "' . $user->email . '" logged out successfully.',
             user: $user
         );
 
+        if ($user->status !== 'deactivated') {
+            $user->update(['status' => 'offline']);
+            $user->refresh();
+        }
         $this->broadcastAccountStatus($user, 'offline');
 
         // Revoke only the current token

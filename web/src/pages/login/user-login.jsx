@@ -25,6 +25,7 @@ import {
   getStoredUser,
 } from "./auth";
 import Spinner from "../../components/Spinner";
+import { notifyRealtimeAuthChanged } from "../../lib/realtime";
 
 const FORCED_LOGOUT_MESSAGE_KEY = "forcedLogoutMessage";
 
@@ -449,6 +450,7 @@ const Login = () => {
       const normalizedUser = normalizeProfileImageUrl(data.user);
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(normalizedUser));
+      notifyRealtimeAuthChanged();
 
       navigate("/dashboard", { replace: true });
     } catch (error) {

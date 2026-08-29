@@ -39,7 +39,7 @@ class SendInspectorRemittanceReminders extends Command
         User::query()
             ->whereIn('user_id', $collectorIds)
             ->where('role', 'inspector')
-            ->where('status', 'active')
+            ->where('status', 'online')
             ->whereHas('tokens', function ($query) {
                 $query->where(function ($tokenQuery) {
                     $tokenQuery

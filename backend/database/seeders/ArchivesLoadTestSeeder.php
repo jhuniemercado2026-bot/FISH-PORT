@@ -29,7 +29,7 @@ class ArchivesLoadTestSeeder extends Seeder
             [
                 'password' => Hash::make('password'),
                 'role' => 'inspector',
-                'status' => 'active',
+                'status' => 'offline',
                 'first_name' => 'Archives',
                 'last_name' => 'Load Test',
                 'gender' => 'male',

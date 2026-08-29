@@ -83,7 +83,9 @@ const Modal = ({
   minimumSavingMs = 2000,
   showSavingSpinner = true,
   showFooter = true,
+  showFooterActions = true,
   footerLeftContent = null,
+  footerRightContent = null,
   bodyClassName = "",
   contentClassName = "",
 }) => {
@@ -268,6 +270,9 @@ const Modal = ({
         {showFooter ? (
           <div className="flex flex-col gap-4 border-t border-slate-200 px-8 py-5 sm:flex-row sm:items-center sm:justify-between">
             {footerLeftContent ? <div className="min-w-0">{footerLeftContent}</div> : <div />}
+            {footerRightContent ? (
+              <div className="ml-auto min-w-0">{footerRightContent}</div>
+            ) : showFooterActions ? (
             <div className="flex justify-end gap-3">
               <button
                 onClick={onCancel ?? onClose}
@@ -306,6 +311,7 @@ const Modal = ({
                 ) : saveLabel}
               </button>
             </div>
+            ) : null}
           </div>
         ) : null}
       </div>

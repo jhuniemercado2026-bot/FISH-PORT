@@ -13,6 +13,7 @@ use App\Services\TransactionLockService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class RemittanceController extends Controller
 {
@@ -156,7 +157,7 @@ class RemittanceController extends Controller
 
         return User::query()
             ->where('role', $approverRole)
-            ->where('status', 'active')
+            ->whereIn('status', ['online', 'offline'])
             ->orderBy('user_id')
             ->pluck('user_id')
             ->all();
@@ -274,6 +275,9 @@ class RemittanceController extends Controller
                 ? 0
                 : $this->calculateDateAmount($date, $this->collectionUserIdForRemittance($request->user())),
             'has_submitted_remittance' => $hasSubmittedRemittance,
+            'breakdown' => $hasSubmittedRemittance
+                ? []
+                : $this->dateCollectionBreakdown($date, $this->collectionUserIdForRemittance($request->user())),
             'remittance_progress' => $this->remittanceProgressForDate($date),
         ]);
     }
@@ -590,6 +594,52 @@ class RemittanceController extends Controller
             ->sum('amount_paid');
 
         return round($ticketsTotal + $paymentsTotal, 2);
+    }
+
+    private function dateCollectionBreakdown(string $date, ?int $createdBy = null): array
+    {
+        $payments = DB::table('payments as p')
+            ->join('bills as b', 'b.bill_id', '=', 'p.bill_id')
+            ->leftJoin('boats as boat', 'boat.boat_id', '=', 'b.boat_id')
+            ->leftJoin('boat_types as boat_type', 'boat_type.boat_type_id', '=', 'boat.boat_type_id')
+            ->whereDate('p.payment_date', $date)
+            ->when($createdBy, fn ($query) => $query->where('p.received_by', $createdBy))
+            ->select([
+                DB::raw("'Payment' as transaction"),
+                DB::raw("COALESCE(boat.boat_name, '-') as type_name"),
+                'p.amount_paid as cash_received',
+                DB::raw('COALESCE(p.payment_date, p.created_at) as sort_date'),
+                'p.created_at as sort_created_at',
+                'p.payment_id as source_id',
+            ]);
+
+        $tickets = DB::table('vehicle_tickets as vt')
+            ->leftJoin('vehicle_types as vehicle_type', 'vehicle_type.vehicle_type_id', '=', 'vt.vehicle_type_id')
+            ->whereDate('vt.ticket_date', $date)
+            ->when($createdBy, fn ($query) => $query->where('vt.created_by', $createdBy))
+            ->whereNull('vt.voided_at')
+            ->select([
+                DB::raw("CASE vt.ticket_type WHEN 'annual' THEN 'Annual Vehicle Ticket' ELSE 'Daily Vehicle Ticket' END as transaction"),
+                DB::raw("COALESCE(vehicle_type.type_name, '-') as type_name"),
+                'vt.ticket_fee as cash_received',
+                DB::raw('COALESCE(vt.ticket_date, vt.created_at) as sort_date'),
+                'vt.created_at as sort_created_at',
+                'vt.ticket_id as source_id',
+            ]);
+
+        return DB::query()
+            ->fromSub($payments->unionAll($tickets), 'collections')
+            ->orderByDesc('sort_date')
+            ->orderByDesc('sort_created_at')
+            ->orderByDesc('source_id')
+            ->get()
+            ->map(fn ($row) => [
+                'transaction' => $row->transaction,
+                'type_name' => $row->type_name,
+                'cash_received' => (float) $row->cash_received,
+            ])
+            ->values()
+            ->all();
     }
 
     private function collectionUserIdForRemittance(?User $user): ?int

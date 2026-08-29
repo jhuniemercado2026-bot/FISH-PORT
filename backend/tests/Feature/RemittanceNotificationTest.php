@@ -25,9 +25,9 @@ class RemittanceNotificationTest extends TestCase
 
     public function test_coordinator_remittance_notifies_active_heads(): void
     {
-        $coordinator = User::factory()->create(['role' => 'coordinator', 'status' => 'active']);
-        $head = User::factory()->create(['role' => 'head', 'status' => 'active']);
-        $inspector = User::factory()->create(['role' => 'inspector', 'status' => 'active']);
+        $coordinator = User::factory()->create(['role' => 'coordinator', 'status' => 'offline']);
+        $head = User::factory()->create(['role' => 'head', 'status' => 'offline']);
+        $inspector = User::factory()->create(['role' => 'inspector', 'status' => 'offline']);
         $date = now('Asia/Manila')->toDateString();
         $this->createVehicleTicketCollection($coordinator, $date, 150);
 
@@ -52,9 +52,9 @@ class RemittanceNotificationTest extends TestCase
 
     public function test_inspector_remittance_notifies_active_coordinators(): void
     {
-        $inspector = User::factory()->create(['role' => 'inspector', 'status' => 'active']);
-        $coordinator = User::factory()->create(['role' => 'coordinator', 'status' => 'active']);
-        $head = User::factory()->create(['role' => 'head', 'status' => 'active']);
+        $inspector = User::factory()->create(['role' => 'inspector', 'status' => 'offline']);
+        $coordinator = User::factory()->create(['role' => 'coordinator', 'status' => 'offline']);
+        $head = User::factory()->create(['role' => 'head', 'status' => 'offline']);
         $date = now('Asia/Manila')->toDateString();
         $this->createVehicleTicketCollection($inspector, $date, 75);
 
@@ -80,10 +80,10 @@ class RemittanceNotificationTest extends TestCase
     public function test_remittance_reminder_notifies_only_online_inspectors_with_unsubmitted_ticket_collections(): void
     {
         $date = now('Asia/Manila')->toDateString();
-        $onlinePendingInspector = User::factory()->create(['role' => 'inspector', 'status' => 'active']);
-        $offlineInspector = User::factory()->create(['role' => 'inspector', 'status' => 'active']);
-        $alreadySubmittedInspector = User::factory()->create(['role' => 'inspector', 'status' => 'active']);
-        $coordinator = User::factory()->create(['role' => 'coordinator', 'status' => 'active']);
+        $onlinePendingInspector = User::factory()->create(['role' => 'inspector', 'status' => 'online']);
+        $offlineInspector = User::factory()->create(['role' => 'inspector', 'status' => 'offline']);
+        $alreadySubmittedInspector = User::factory()->create(['role' => 'inspector', 'status' => 'online']);
+        $coordinator = User::factory()->create(['role' => 'coordinator', 'status' => 'online']);
 
         $onlinePendingInspector->createToken('test-online-inspector');
         $alreadySubmittedInspector->createToken('test-submitted-inspector');

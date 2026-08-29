@@ -21,7 +21,7 @@ class DatabaseSeeder extends Seeder
         ], [
             'password' => Hash::make('password123'),
             'role' => 'head',
-            'status' => 'active',
+            'status' => 'offline',
             'first_name' => 'Jhunie',
             'last_name' => 'Mercado',
         ]);
@@ -31,7 +31,7 @@ class DatabaseSeeder extends Seeder
         ], [
             'password' => bcrypt('password'),
             'role' => 'head',
-            'status' => 'active',
+            'status' => 'offline',
             'first_name' => 'Test',
             'last_name' => 'User',
         ]);
@@ -41,7 +41,7 @@ class DatabaseSeeder extends Seeder
         ], [
             'password' => Hash::make('password123'),
             'role' => 'head',
-            'status' => 'active',
+            'status' => 'offline',
             'first_name' => 'Jhunie',
             'last_name' => 'Mercado',
         ]);

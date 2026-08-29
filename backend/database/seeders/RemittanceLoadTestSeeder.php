@@ -27,7 +27,7 @@ class RemittanceLoadTestSeeder extends Seeder
             [
                 'password' => Hash::make('password'),
                 'role' => 'coordinator',
-                'status' => 'active',
+                'status' => 'offline',
                 'first_name' => 'Remittance',
                 'last_name' => 'Load Test',
                 'gender' => 'female',

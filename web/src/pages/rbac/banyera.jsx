@@ -1423,7 +1423,8 @@ const SuperBanyera = () => {
   const [voidReasonCustom, setVoidReasonCustom] = useState("");
   const [voidReasonError, setVoidReasonError] = useState("");
   const didRunTransactionFilterResetRef = useRef(false);
-  const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const transactionLockResource = activeTab === "classifications" ? "fish-classifications" : null;
+  const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery(transactionLockResource);
   const isHeadViewOnly = isHeadRole();
   const debouncedSearch = useDebouncedValue(search, 350);
   const debouncedPage = useDebouncedValue(currentPage, 180);

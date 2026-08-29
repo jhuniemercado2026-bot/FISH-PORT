@@ -20,7 +20,7 @@ class UniversalSearchControllerTest extends TestCase
             'email' => 'search@example.com',
             'password' => bcrypt('secret123'),
             'role' => 'head',
-            'status' => 'active',
+            'status' => 'offline',
             'first_name' => 'Search',
             'last_name' => 'User',
         ]);

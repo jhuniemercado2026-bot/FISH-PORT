@@ -22,7 +22,7 @@ class AuthControllerTest extends TestCase
             'email' => 'coordinator@example.com',
             'password' => bcrypt('secret123'),
             'role' => 'coordinator',
-            'status' => 'active',
+            'status' => 'offline',
         ]);
 
         $existingToken = $user->createToken('web-session')->plainTextToken;
@@ -44,7 +44,7 @@ class AuthControllerTest extends TestCase
 
     public function test_billing_creation_rejects_voided_transactions(): void
     {
-        $user = User::factory()->create(['role' => 'coordinator', 'status' => 'active']);
+        $user = User::factory()->create(['role' => 'coordinator', 'status' => 'offline']);
         $boatOwner = BoatOwner::factory()->create();
         $boatType = BoatType::factory()->create();
         $boat = Boat::factory()->create([

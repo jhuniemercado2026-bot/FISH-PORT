@@ -132,7 +132,7 @@ class User extends Authenticatable
 
     public function isActive(): bool
     {
-        return $this->status === 'active';
+        return $this->status !== 'deactivated';
     }
 
     public function scopeForTableIndex(Builder $query, array $options = []): Builder

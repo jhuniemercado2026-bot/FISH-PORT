@@ -25,6 +25,7 @@ import TitlePage from "../../components/TitlePage";
 import NoDataFound from "../../components/NoDataFound";
 import Card from "../../components/Card";
 import Modal, { ModalFieldError } from "../../components/Modal";
+import BreakdownRemittanceModal from "../../components/BreakdownRemittanceModal";
 import Spinner from "../../components/Spinner";
 import { useSidebar } from "../../store/sidebarStore";
 import { showBottomToast } from "../../store/bottomToastStore";
@@ -223,6 +224,7 @@ const SuperCollections = ({ initialTab }) => {
   const [remittingRemittanceId, setRemittingRemittanceId] = useState(null);
   const [unremittingRemittanceId, setUnremittingRemittanceId] = useState(null);
   const [showCreateRemittanceModal, setShowCreateRemittanceModal] = useState(false);
+  const [showRemittanceBreakdown, setShowRemittanceBreakdown] = useState(false);
   const [createRemittanceForm, setCreateRemittanceForm] = useState(getDefaultCreateRemittanceForm);
   const [createRemittanceErrors, setCreateRemittanceErrors] = useState({});
   const [submitRemittanceLoading, setSubmitRemittanceLoading] = useState(false);
@@ -371,6 +373,7 @@ const SuperCollections = ({ initialTab }) => {
     if (hasTodayDailyRemittance) return 0;
     return Number(todayCollectionData?.amount ?? 0);
   }, [hasTodayDailyRemittance, todayCollectionData?.amount]);
+  const todayCollectionBreakdown = todayCollectionData?.breakdown ?? [];
   const remittanceProgress = todayCollectionData?.remittance_progress ?? {};
   const remittanceProgressPercentage = Math.min(
     Math.max(Number(remittanceProgress?.percentage ?? 0), 0),
@@ -702,6 +705,7 @@ const SuperCollections = ({ initialTab }) => {
   const closeCreateRemittanceModal = () => {
     if (submitRemittanceLoading || createRemittanceMutation.isPending) return;
     setShowCreateRemittanceModal(false);
+    setShowRemittanceBreakdown(false);
     setCreateRemittanceForm(getDefaultCreateRemittanceForm());
     setCreateRemittanceErrors({});
   };
@@ -973,7 +977,7 @@ const SuperCollections = ({ initialTab }) => {
                     <thead>
                       <tr>
                         <TH>Transaction</TH>
-                        <TH>Boat Type/Vehicle Type</TH>
+                        <TH>Boat Name/Vehicle Type</TH>
                         <TH>Official Receipt No.</TH>
                         <TH>Date</TH>
                         <TH className="text-right">Cash Received (₱)</TH>
@@ -1261,12 +1265,16 @@ const SuperCollections = ({ initialTab }) => {
                     <div className="space-y-4">
                       <div>
                         <RemittanceFormLabel>Today's Collection</RemittanceFormLabel>
-                        <input
-                          type="text"
-                          value={formatPeso(previewRemittanceAmount)}
-                          readOnly
-                          className="h-[46px] w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3.5 text-[13px] font-medium text-[#1a1f36] outline-none"
-                        />
+                        <Tooltip title="Click me">
+                          <button
+                            type="button"
+                            onClick={() => setShowRemittanceBreakdown(true)}
+                            className="flex h-[46px] w-full cursor-pointer items-center rounded-[12px] border border-slate-200 bg-slate-50 px-3.5 text-left text-[13px] font-medium text-blue-600 outline-none transition-colors hover:border-blue-300 hover:bg-blue-50"
+                            style={{ fontFamily: FONT }}
+                          >
+                            <span className="truncate">{formatPeso(previewRemittanceAmount)}</span>
+                          </button>
+                        </Tooltip>
                       </div>
                       <ModalFieldError message={createRemittanceErrors.date} />
 
@@ -1376,6 +1384,12 @@ const SuperCollections = ({ initialTab }) => {
                 </div>
               </Modal>
             ) : null}
+            <BreakdownRemittanceModal
+              open={showRemittanceBreakdown}
+              rows={todayCollectionBreakdown}
+              totalAmount={previewRemittanceAmount}
+              onClose={() => setShowRemittanceBreakdown(false)}
+            />
             <RemittanceReportModal
               open={Boolean(selectedRemittanceReportDate)}
               pdfFile={selectedRemittanceReportPdfFile}

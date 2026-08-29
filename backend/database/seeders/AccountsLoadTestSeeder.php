@@ -23,7 +23,7 @@ class AccountsLoadTestSeeder extends Seeder
             [
                 'password' => Hash::make('password'),
                 'role' => 'inspector',
-                'status' => 'active',
+                'status' => 'offline',
                 'first_name' => 'Accounts',
                 'last_name' => 'Load Test',
                 'gender' => 'male',
@@ -56,7 +56,7 @@ class AccountsLoadTestSeeder extends Seeder
                 $role = $roles[$recordIndex % count($roles)];
                 $genders = ['male', 'female'];
                 $gender = $genders[$recordIndex % count($genders)];
-                $statuses = ['active', 'deactivated'];
+                $statuses = ['online', 'offline', 'deactivated'];
                 $status = $statuses[$recordIndex % count($statuses)];
 
                 $rows[] = [

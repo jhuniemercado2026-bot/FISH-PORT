@@ -15,7 +15,7 @@ class VehicleTicketControllerTest extends TestCase
 
     public function test_store_rejects_archived_vehicle_type(): void
     {
-        $user = User::factory()->create(['role' => 'coordinator', 'status' => 'active']);
+        $user = User::factory()->create(['role' => 'coordinator', 'status' => 'offline']);
         $vehicleType = VehicleType::create([
             'type_name' => 'Archived Test Vehicle',
             'created_by' => $user->user_id,

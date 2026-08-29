@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ACTIVITY_LOGS_QUERY_KEY } from "../hooks/useActivityLogsQuery";
+import { USERS_QUERY_KEY } from "../hooks/useUsersQuery";
 import { getEcho } from "../lib/realtime";
+import { accountPresenceActions } from "../store/accountPresenceStore";
 
 const PAGE_SIZE_FALLBACK = 10;
 
@@ -100,6 +102,103 @@ const canReceiveActivityLog = (log, user) => {
   return String(log?.user_id ?? "") === String(user?.user_id ?? "");
 };
 
+const getAccountStatusFromActivityLog = (log) => {
+  const module = String(log?.module || "").toLowerCase();
+  const details = String(log?.details || "");
+
+  if (module !== "security") return null;
+
+  const email = details.match(/User\s+"([^"]+)"/i)?.[1] || "";
+  const signedIn = /signed in successfully\./i.test(details);
+  const loggedOut = /logged out successfully\.|signed out\./i.test(details);
+
+  if (!signedIn && !loggedOut) return null;
+
+  return {
+    user_id: log?.user_id,
+    email,
+    status: signedIn ? "online" : "offline",
+  };
+};
+
+const matchesAccountStatusTarget = (user, target) => {
+  const userId = String(user?.user_id ?? user?.id ?? "");
+  const targetId = String(target?.user_id ?? target?.id ?? "");
+  const userEmail = String(user?.email || "").toLowerCase();
+  const targetEmail = String(target?.email || "").toLowerCase();
+
+  return (targetId && userId === targetId) || (targetEmail && userEmail === targetEmail);
+};
+
+const updateUserStatusList = (users, target) => {
+  let changed = false;
+  let previousStatus = "";
+
+  const nextUsers = users.map((user) => {
+    if (!matchesAccountStatusTarget(user, target) || user?.status === "deactivated") {
+      return user;
+    }
+
+    previousStatus = user.status;
+    changed = true;
+    return { ...user, status: target.status };
+  });
+
+  return { users: nextUsers, changed, previousStatus };
+};
+
+const adjustAccountStats = (stats, previousStatus, nextStatus) => {
+  if (!stats || !previousStatus || previousStatus === nextStatus || previousStatus === "deactivated") {
+    return stats;
+  }
+
+  return {
+    ...stats,
+    [previousStatus]: Math.max(0, Number(stats[previousStatus] || 0) - 1),
+    [nextStatus]: Number(stats[nextStatus] || 0) + 1,
+  };
+};
+
+const updateUsersDataFromActivityLog = (data, target) => {
+  if (!data) return data;
+
+  if (Array.isArray(data)) {
+    const result = updateUserStatusList(data, target);
+    return result.changed ? result.users : data;
+  }
+
+  if (!Array.isArray(data.users)) return data;
+
+  const result = updateUserStatusList(data.users, target);
+  if (!result.changed) return data;
+
+  return {
+    ...data,
+    users: result.users,
+    stats: adjustAccountStats(data.stats, result.previousStatus, target.status),
+  };
+};
+
+const updateAccountDirectoryFromActivityLog = (queryClient, log) => {
+  const accountStatus = getAccountStatusFromActivityLog(log);
+  if (!accountStatus) return;
+
+  if (accountStatus.status === "online") {
+    accountPresenceActions.setUserOnline(accountStatus);
+  } else {
+    accountPresenceActions.setUserOffline(accountStatus);
+  }
+
+  queryClient
+    .getQueryCache()
+    .findAll({ queryKey: USERS_QUERY_KEY })
+    .forEach((query) => {
+      queryClient.setQueryData(query.queryKey, (data) => updateUsersDataFromActivityLog(data, accountStatus));
+    });
+
+  void queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY, refetchType: "active" });
+};
+
 const upsertActivityLog = (data, log, filters = {}) => {
   if (!data || !matchesActivityFilters(log, filters)) return data;
 
@@ -140,6 +239,8 @@ export default function ActivityLogsRealtimeBridge() {
       if (!log?.id) return;
 
       if (!canReceiveActivityLog(log, getCurrentUser())) return;
+
+      updateAccountDirectoryFromActivityLog(queryClient, log);
 
       queryClient
         .getQueryCache()

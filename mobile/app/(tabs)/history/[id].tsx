@@ -1284,8 +1284,8 @@ export default function HistoryDetailScreen() {
                 </View>
               </View>
 
-              <View className="mb-4 flex-row gap-3">
-                <View className="flex-1">
+              <View className="mb-4 gap-3">
+                <View className="w-full">
                   <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
                     Date
                   </Text>
@@ -1295,7 +1295,7 @@ export default function HistoryDetailScreen() {
                     </Text>
                   </View>
                 </View>
-                <View className="flex-1">
+                <View className="w-full">
                   <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
                     Amount
                   </Text>

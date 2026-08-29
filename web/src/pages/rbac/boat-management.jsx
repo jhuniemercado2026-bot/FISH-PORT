@@ -83,6 +83,36 @@ const RB_getBoatImageSrc = (boat) => {
   if (/^https?:\/\//i.test(imagePath)) return imagePath;
   return `${api.defaults.baseURL.replace("/api", "")}/storage/${imagePath}`;
 };
+
+const uploadBoatImageInBackground = ({ queryClient, boat, imageFile, onUploaded }) => {
+  if (!boat?.boat_id || !imageFile) return;
+
+  const formData = new FormData();
+  formData.append("image", imageFile);
+
+  void api
+    .post(`/boats/${boat.boat_id}/upload-image`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    })
+    .then((response) => {
+      const updatedBoat = {
+        ...boat,
+        image_path: response.data?.image_path ?? boat.image_path,
+        image_public_id: response.data?.image_public_id ?? boat.image_public_id,
+      };
+
+      updateRegisteredBoatsDataCache(queryClient, updatedBoat);
+      onUploaded?.(updatedBoat);
+      showBottomToast("success", "Image Uploaded", "Boat image has been saved.");
+    })
+    .catch((error) => {
+      showBottomToast(
+        "error",
+        "Image Upload Failed",
+        error.response?.data?.message ?? "Boat was saved, but the image upload failed."
+      );
+    });
+};
 const RB_getCreatedByLabel = (boat) => {
   const createdBy = RB_getCreatedBy(boat);
   if (!createdBy) return "-";
@@ -515,7 +545,8 @@ const RB_TailDropdown = ({ value, onChange, options, height = 38 }) => (
 );
 
 
-const RB_EditBoatDrawer = ({ boat, open, onClose, onSuccess, onNoChanges, onError, boatTypes, owners }) => {
+const RB_EditBoatDrawer = ({ boat, open, onClose, onSuccess, onImageUploaded, onNoChanges, onError, boatTypes, owners }) => {
+  const queryClient = useQueryClient();
   const fileInputRef = useRef(null);
   const [formData,     setFormData]     = useState({ boat_name: "", boat_type_id: "", status: "active", owner_id: "" });
   const [imageFile,    setImageFile]    = useState(null);
@@ -562,8 +593,6 @@ const RB_EditBoatDrawer = ({ boat, open, onClose, onSuccess, onNoChanges, onErro
     searchLabel: RB_getBoatTypeLabel(type),
   }));
 
-  const selectedBoatTypeLabel =
-    boatTypeOptions.find((option) => String(option.value) === String(formData.boat_type_id))?.label || RB_getBoatTypeLabel(RB_getBoatType(boat));
   if (!boat) return null;
 
   const validate = () => {
@@ -603,15 +632,7 @@ const RB_EditBoatDrawer = ({ boat, open, onClose, onSuccess, onNoChanges, onErro
         owner_id: Number(formData.owner_id),
         status: formData.status,
       });
-      let uploadData = null;
-      if (imageFile) {
-        const fd = new FormData();
-        fd.append("image", imageFile);
-        const uploadResponse = await api.post(`/boats/${boat.boat_id}/upload-image`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-        uploadData = uploadResponse.data ?? null;
-      }
-
-      onSuccess?.({
+      const updatedBoat = {
         ...boat,
         ...(response?.data ?? {}),
         boat_id: boat.boat_id,
@@ -619,11 +640,20 @@ const RB_EditBoatDrawer = ({ boat, open, onClose, onSuccess, onNoChanges, onErro
         boat_name: response?.data?.boat_name ?? formData.boat_name.trim(),
         boat_type_id: response?.data?.boat_type_id ?? Number(formData.boat_type_id),
         owner_id: response?.data?.owner_id ?? Number(formData.owner_id),
-        image_path: uploadData?.image_path ?? response?.data?.image_path ?? boat.image_path,
-        image_public_id: uploadData?.image_public_id ?? response?.data?.image_public_id ?? boat.image_public_id,
+        image_path: response?.data?.image_path ?? boat.image_path,
+        image_public_id: response?.data?.image_public_id ?? boat.image_public_id,
         prev_status: boat.status || "active",
-      });
+      };
+
+      onSuccess?.(updatedBoat);
       onClose();
+
+      uploadBoatImageInBackground({
+        queryClient,
+        boat: updatedBoat,
+        imageFile,
+        onUploaded: onImageUploaded,
+      });
     } catch (err) {
       const message =
         err.response?.data?.errors?.image?.[0] ||
@@ -642,46 +672,81 @@ const RB_EditBoatDrawer = ({ boat, open, onClose, onSuccess, onNoChanges, onErro
   if (!open || !boat) return null;
 
   return (
-    <Modal
-      title="Edit Boat"
-      onClose={onClose}
-      onSave={handleSubmit}
-      saving={loading}
-      saveLabel="Save"
-      closeOnBackdrop
-      maxWidth="560px"
-      minimumSavingMs={0}
-    >
-      <div className="space-y-5">
+    <ConfigProvider theme={BA_antTheme}>
+      <style>{`
+        .boat-ant-select-dropdown {
+          border-radius: 10px !important;
+          overflow: hidden !important;
+          border: 1px solid #e5e7eb !important;
+          box-shadow: 0 4px 24px rgba(0,0,0,0.13) !important;
+          padding: 0 !important;
+          z-index: 11000 !important;
+        }
+        .boat-ant-select-dropdown .ant-select-item {
+          border-radius: 0 !important;
+          padding: 8px 12px !important;
+          font-family: ${BA_FONT} !important;
+          font-size: 13px !important;
+          font-weight: 500 !important;
+          color: #1a1f36 !important;
+        }
+        .boat-ant-select-dropdown .ant-select-item-option-selected {
+          background-color: #1a1f36 !important;
+          color: #ffffff !important;
+          font-weight: 400 !important;
+        }
+        .boat-ant-select-dropdown .ant-select-item-option-active:not(.ant-select-item-option-selected) {
+          background-color: #f8fafc !important;
+        }
+        .boat-ant-select-error .ant-select-selector,
+        .boat-ant-select-error.ant-select-focused .ant-select-selector,
+        .boat-ant-select-error.ant-select-open .ant-select-selector,
+        .boat-ant-select-error .ant-select-selector:hover {
+          border-color: #fca5a5 !important;
+        }
+      `}</style>
+      <Modal
+        title="Edit Boat"
+        onClose={loading ? undefined : onClose}
+        onCancel={onClose}
+        onSave={handleSubmit}
+        saving={loading}
+        saveDisabled={loading}
+        saveLabel="Save"
+        saveButtonWidth="170px"
+        closeButtonWidth="170px"
+        closeOnBackdrop
+        maxWidth="980px"
+        minimumSavingMs={0}
+        bodyClassName="max-h-[64vh] overflow-y-auto !p-5"
+      >
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
         <RB_FieldError msg={errors.submit} />
-        <div className="rounded-[10px] border border-slate-200 bg-white p-4">
-          <p
-            className="m-0 mb-2 text-[11px] font-semibold uppercase"
-            style={{ color: "#6F6F82", fontFamily: RB_FONT }}
-          >
-            Boat Image
-          </p>
-          <div>
+        <Card
+          icon={IoImageOutline}
+          title="BOAT IMAGE"
+          subtitle="Upload a photo of the boat."
+        >
             <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => handleImageChange(e.target.files[0])} className="hidden" />
             {imagePreview ? (
               <div className="flex flex-col gap-3">
-                <div className="relative overflow-hidden rounded-xl border border-gray-200 bg-black">
-                  <img src={imagePreview} alt="preview" className="block w-full object-contain" style={{ maxHeight: 220 }} />
+                <div className="relative overflow-hidden rounded-[10px] border border-gray-200 bg-black">
+                  <img src={imagePreview} alt="Boat preview" className="block w-full object-contain" style={{ maxHeight: 280 }} />
                   <div className="absolute left-0 right-0 top-0 flex items-center justify-between gap-2 px-3 py-2.5"
                     style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, transparent 100%)" }}
                   >
                     <div />
                     <div className="flex items-center gap-1.5">
-                      <button type="button" onClick={() => setLightboxOpen(true)} className="flex h-7 w-7 items-center justify-center rounded-lg border-none bg-white/20 text-white cursor-pointer transition-colors hover:bg-white/35">
+                      <button type="button" onClick={() => setLightboxOpen(true)} className="flex h-7 w-7 items-center justify-center rounded-[10px] border-none bg-white/20 text-white cursor-pointer transition-colors hover:bg-white/35">
                         <IoExpandOutline className="text-[14px]" />
                       </button>
-                      <button type="button" onClick={() => { setImagePreview(null); setImageFile(null); setLightboxOpen(false); }} className="flex h-7 w-7 items-center justify-center rounded-lg border-none bg-white/20 text-white cursor-pointer transition-colors hover:bg-red-500/70">
+                      <button type="button" onClick={() => { setImagePreview(null); setImageFile(null); setLightboxOpen(false); }} className="flex h-7 w-7 items-center justify-center rounded-[10px] border-none bg-white/20 text-white cursor-pointer transition-colors hover:bg-red-500/70">
                         <IoCloseOutline className="text-[14px]" />
                       </button>
                     </div>
                   </div>
                 </div>
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full rounded-[10px] border border-dashed border-gray-300 bg-[#fafbfc] py-2.5 text-[13px] font-medium text-gray-500 cursor-pointer transition-all hover:border-[#4096ff] hover:bg-blue-50 hover:text-[#4096ff]" style={{ fontFamily: RB_FONT }}>
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full rounded-[10px] border border-dashed border-gray-300 bg-[#fafbfc] py-2.5 text-[13px] font-medium text-gray-500 cursor-pointer transition-all hover:border-[#4096ff] hover:bg-blue-50 hover:text-[#4096ff]" style={{ fontFamily: BA_FONT }}>
                   Change Image
                 </button>
               </div>
@@ -691,88 +756,112 @@ const RB_EditBoatDrawer = ({ boat, open, onClose, onSuccess, onNoChanges, onErro
                 onDragOver={(e) => e.preventDefault()}
                 onMouseEnter={(e) => e.currentTarget.style.borderColor = "#4096ff"}
                 onMouseLeave={(e) => e.currentTarget.style.borderColor = "#d1d5db"}
-                className="flex cursor-pointer flex-col items-center gap-3 rounded-[10px] border-2 border-dashed border-gray-300 bg-[#fafbfc] px-5 py-10 transition-colors"
+                className="flex min-h-[252px] cursor-pointer flex-col items-center justify-center gap-3 rounded-[10px] border-2 border-dashed border-gray-300 bg-[#fafbfc] px-5 py-10 transition-colors hover:border-[#4096ff] hover:bg-blue-50"
               >
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50">
-                  <IoCloudUploadOutline className="text-blue-500 text-[22px]" />
+                <div className="flex h-[56px] w-[56px] items-center justify-center rounded-[10px] bg-blue-50">
+                  <IoCloudUploadOutline className="text-[26px] text-blue-500" />
                 </div>
-                <div className="text-center">
-                  <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: RB_FONT }}>Click to upload boat image</p>
-                </div>
+                <p className="m-0 text-center text-[11px] font-semibold uppercase" style={{ color: "#6F6F82" }}>Click to upload boat image</p>
               </div>
             )}
-          </div>
-        </div>
+        </Card>
 
-        <div className="rounded-[10px] border border-slate-200 bg-white p-4">
-          <div className="space-y-4">
-            <div>
-                <ModalTextInput label={<>Boat Name <span className="text-red-500">*</span></>} icon={IoBoatOutline} placeholder="Enter boat name" value={formData.boat_name}
-                  onChange={(e) => { setFormData(f => ({ ...f, boat_name: e.target.value })); setErrors(er => ({ ...er, boat_name: "" })); }} error={errors.boat_name} inputStyle={{ fontFamily: RB_FONT }} />
-            </div>
-            <div>
-              <RB_Label required>Boat Type</RB_Label>
-              <div className={errors.boat_type_id ? "modal-field-control-error" : ""}>
-                <FilterSelect width="100%" height={46}
-                  showSearch allowClear placeholder="Select boat type" optionFilterProp="searchLabel"
+        <div className="grid grid-cols-1 gap-6">
+          <Card icon={IoBoatOutline} title="BOAT INFORMATION" subtitle="Basic details about the boat.">
+            <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <BA_Label required>Boat Name</BA_Label>
+                <BA_Input
+                  placeholder="Enter boat name"
+                  value={formData.boat_name}
+                  onChange={(e) => { setFormData(f => ({ ...f, boat_name: e.target.value })); setErrors(er => ({ ...er, boat_name: "" })); }}
+                  error={Boolean(errors.boat_name)}
+                />
+                <BA_FieldError msg={errors.boat_name} />
+              </div>
+              <div>
+                <BA_Label required>Boat Type</BA_Label>
+                <FilterSelect
+                  className={`boat-ant-select ${errors.boat_type_id ? "boat-ant-select-error" : ""}`}
+                  popupClassName="boat-ant-select-dropdown"
+                  width="100%"
+                  height={46}
+                  style={{ width: "100%", height: 46, fontFamily: BA_FONT }}
+                  showSearch
+                  allowClear
+                  placeholder="Select boat type"
+                  optionFilterProp="searchLabel"
                   value={formData.boat_type_id || undefined}
                   onChange={(val) => { setFormData(f => ({ ...f, boat_type_id: val ?? "" })); setErrors(e => ({ ...e, boat_type_id: "" })); }}
+                  filterOption={(input, option) => (option?.searchLabel ?? "").toLowerCase().includes(input.toLowerCase())}
                   options={boatTypeOptions}
                   getPopupContainer={() => document.body}
                   placement="bottomLeft"
                   notFoundContent="No types found"
                 />
+                <BA_FieldError msg={errors.boat_type_id} />
               </div>
-              <RB_FieldError msg={errors.boat_type_id} />
             </div>
             <div>
-              <RB_Label>Status</RB_Label>
-              <div className="grid grid-cols-2 gap-2.5">
-                {RB_STATUS_OPTIONS.map(({ value, label, activeBorder, activeBg, activeText }) => (
-                  <button key={value} onClick={() => setFormData(f => ({ ...f, status: value }))}
-                    className={`w-full rounded-xl border-2 px-3 py-2.5 text-[11px] font-semibold uppercase cursor-pointer transition-all ${formData.status === value ? `${activeBorder} ${activeBg} ${activeText}` : "border-gray-200 bg-white text-slate-700 hover:bg-gray-50"}`}
-                    style={{ fontFamily: RB_FONT }}
-                  >{label}</button>
-                ))}
+              <BA_Label>Status</BA_Label>
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+                {BA_STATUS_OPTIONS.map((option) => {
+                  const active = formData.status === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setFormData(f => ({ ...f, status: option.value }))}
+                      className={`flex h-[46px] items-center justify-center rounded-[10px] border-2 px-3 text-[11px] font-semibold uppercase cursor-pointer transition-all ${active ? option.active : "border-gray-200 bg-white text-slate-700 hover:bg-gray-50"}`}
+                      style={{ fontFamily: BA_FONT }}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
-          </div>
-        </div>
+          </Card>
 
-        <div className="rounded-[10px] border border-slate-200 bg-white p-4">
-          <div className="space-y-4">
-            <div>
-              <RB_Label required>Boat Owner</RB_Label>
-              <div className={errors.owner_id ? "modal-field-control-error" : ""}>
-                <FilterSelect width="100%" height={46}
-                  showSearch allowClear placeholder="Choose existing owner" optionFilterProp="searchLabel"
-                  value={formData.owner_id || undefined}
-                  onChange={(val) => { setFormData(f => ({ ...f, owner_id: val ?? "" })); setErrors(e => ({ ...e, owner_id: "" })); }}
-                  options={ownerOptions}
-                  getPopupContainer={() => document.body}
-                  placement="bottomLeft"
-                  notFoundContent="No owners found"
-                />
-              </div>
-              <RB_FieldError msg={errors.owner_id} />
+          <Card icon={IoPersonOutline} title="OWNER INFORMATION" subtitle="Details about the boat owner.">
+            <div className="mb-4">
+              <BA_Label required>Owner Name</BA_Label>
+              <FilterSelect
+                className={`boat-ant-select ${errors.owner_id ? "boat-ant-select-error" : ""}`}
+                popupClassName="boat-ant-select-dropdown"
+                width="100%"
+                height={46}
+                style={{ width: "100%", height: 46, fontFamily: BA_FONT }}
+                showSearch
+                allowClear
+                placeholder="Select from registered boat owners"
+                optionFilterProp="searchLabel"
+                value={formData.owner_id || undefined}
+                onChange={(val) => { setFormData(f => ({ ...f, owner_id: val ?? "" })); setErrors(e => ({ ...e, owner_id: "" })); }}
+                filterOption={(input, option) => (option?.searchLabel ?? "").toLowerCase().includes(input.toLowerCase())}
+                options={ownerOptions}
+                getPopupContainer={() => document.body}
+                placement="bottomLeft"
+                notFoundContent="No owners found"
+              />
+              <BA_FieldError msg={errors.owner_id} />
             </div>
-            <div>
-              <RB_Label>Owner Address</RB_Label>
-              <div className="flex h-[46px] items-center gap-2.5 rounded-[10px] border border-slate-200 bg-slate-100 px-3.5">
-                <input readOnly value={selectedOwner?.address ?? ""} placeholder="Address" className="h-full w-full border-none bg-transparent text-[13px] font-medium text-[#0d1117] outline-none cursor-default placeholder:text-slate-400" style={{ fontFamily: RB_FONT }} />
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <BA_Label>Owner Address</BA_Label>
+                <BA_Input value={selectedOwner?.address ?? ""} readOnly wrapperClassName="!bg-slate-100" />
+              </div>
+              <div>
+                <BA_Label>Contact Number</BA_Label>
+                <BA_Input value={selectedOwner?.contact_number ?? ""} readOnly wrapperClassName="!bg-slate-100" />
               </div>
             </div>
-            <div>
-              <RB_Label>Contact Number</RB_Label>
-              <div className="flex h-[46px] items-center gap-2.5 rounded-[10px] border border-slate-200 bg-slate-100 px-3.5">
-                <input readOnly value={selectedOwner?.contact_number ?? ""} placeholder="Contact Number" className="h-full w-full border-none bg-transparent text-[13px] font-medium text-[#0d1117] outline-none cursor-default placeholder:text-slate-400" style={{ fontFamily: RB_FONT }} />
-              </div>
-            </div>
-          </div>
+          </Card>
         </div>
       </div>
+      </Modal>
       {lightboxOpen && imagePreview ? <BA_Lightbox src={imagePreview} onClose={() => setLightboxOpen(false)} /> : null}
-    </Modal>
+    </ConfigProvider>
   );
 };
 
@@ -803,7 +892,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
   const [statusFilter,   setStatusFilter]   = useState("all");
   const [ownerFilter,    setOwnerFilter]    = useState("all");
   const [boatTypeFilter, setBoatTypeFilter] = useState("all");
-  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery("boat-management");
   const [editDrawerOpen, setEditDrawerOpen] = useState(false);
   const [editingBoat,    setEditingBoat]    = useState(null);
   const [deleteModal,    setDeleteModal]    = useState({ open: false, boat: null });
@@ -997,6 +1086,21 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
 
   const handleEditNoChanges = () => {
     showToast("info", "No Changes Made", "No changes were made. The record remains the same.");
+  };
+
+  const handleBoatImageUploaded = (updatedBoat) => {
+    if (!updatedBoat?.boat_id) return;
+
+    setBoats((prev) => prev.map((boat) =>
+      String(boat.boat_id) === String(updatedBoat.boat_id)
+        ? { ...boat, ...updatedBoat }
+        : boat
+    ));
+    setSelectedBoat((prev) =>
+      prev && String(prev.boat_id) === String(updatedBoat.boat_id)
+        ? { ...prev, ...updatedBoat }
+        : prev
+    );
   };
 
   const ownerFilterOptions = RB_buildOwnerFilterOptions(owners);
@@ -1268,6 +1372,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
         open={editDrawerOpen}
         onClose={() => setEditDrawerOpen(false)}
         onSuccess={handleEditSuccess}
+        onImageUploaded={handleBoatImageUploaded}
         onNoChanges={handleEditNoChanges}
         onError={(message) => showToast("error", "Update Failed", message)}
         boatTypes={boatTypes}
@@ -1694,7 +1799,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
   const [requestedPage, setRequestedPage] = useState(1);
   const [currentPage,   setCurrentPage]   = useState(1);
   const [showAddModal,  setShowAddModal]  = useState(false);
-  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery("boat-management");
   const isHeadViewOnly = isHeadRole();
   const [editTarget,    setEditTarget]    = useState(null);
   const [deleteTarget,  setDeleteTarget]  = useState(null);
@@ -2568,7 +2673,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
   const [currentPage,   setCurrentPage]   = useState(1);
   const [toast,         setToast]         = useState({ open: false, type: "success", title: "", message: "" });
   const [addModal,      setAddModal]      = useState(false);
-  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery("boat-management");
   const isHeadViewOnly = isHeadRole();
   const [editOwner,     setEditOwner]     = useState(null);
   const [deleteOwner,   setDeleteOwner]   = useState(null);
@@ -3122,7 +3227,7 @@ const BA_Lightbox = ({ src, onClose }) => (
 
 const BA_AddBoatModal = ({ open, onClose, onSuccess, boatTypes = [], owners = [], loading = false }) => {
   const queryClient = useQueryClient();
-  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery("boat-management");
   const [submitting, setSubmitting] = useState(false);
   const [imageFile, setImageFile] = useState(null);
   const [lightbox, setLightbox] = useState(false);
@@ -3241,23 +3346,16 @@ const BA_AddBoatModal = ({ open, onClose, onSuccess, boatTypes = [], owners = []
         status: response.data?.status ?? form.status,
       };
 
-      if (imageFile) {
-        const formData = new FormData();
-        formData.append("image", imageFile);
-        const uploadResponse = await api.post(`/boats/${response.data.boat_id}/upload-image`, formData, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
-        createdBoat = {
-          ...createdBoat,
-          image_path: uploadResponse.data?.image_path ?? createdBoat.image_path,
-          image_public_id: uploadResponse.data?.image_public_id ?? createdBoat.image_public_id,
-        };
-      }
-
       addRegisteredBoatToDataCache(queryClient, createdBoat);
       handleReset();
       showAddedToast("Boat", "boat");
       onSuccess?.(createdBoat);
+      uploadBoatImageInBackground({
+        queryClient,
+        boat: createdBoat,
+        imageFile,
+        onUploaded: onSuccess,
+      });
     } catch (error) {
       showBottomToast("error", "Registration Failed", error.response?.data?.message ?? "Failed to register boat. Please try again.");
     } finally {

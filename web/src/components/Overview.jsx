@@ -10,16 +10,22 @@ const OverviewCard = ({
   label,
   value,
   icon: Icon,
+  iconBg,
+  iconColor,
   loading = false,
+  compact = false,
   className = "",
   style,
 }) => {
   const heading = title ?? label;
   const isLoading = loading || value === "...";
+  const paddingClass = compact ? "px-4 py-3" : "px-6 py-5";
+  const valueClass = compact ? "text-[24px]" : "text-[28px]";
+  const iconSizeClass = compact ? "h-9 w-9 rounded-xl" : "h-11 w-11 rounded-2xl";
 
   return (
     <div
-      className={`px-6 py-5 ${className}`.trim()}
+      className={`${paddingClass} ${className}`.trim()}
       style={{
         border: "1px solid #e5e7eb",
         borderRadius: "10px",
@@ -47,19 +53,19 @@ const OverviewCard = ({
             </>
           ) : (
             <>
-              <p className="m-0 text-[12px] font-medium text-slate-500">{heading}</p>
-              <p className="m-0 mt-2 text-[28px] font-bold leading-none text-[#0d1117]">{value}</p>
+              <p className="m-0 truncate text-[12px] font-medium text-slate-500">{heading}</p>
+              <p className={`m-0 mt-2 font-bold leading-none text-[#0d1117] ${valueClass}`}>{value}</p>
             </>
           )}
         </div>
         {isLoading ? (
-          <div className="overview-card__skeleton h-11 w-11 flex-shrink-0 rounded-2xl" />
+          <div className={`overview-card__skeleton flex-shrink-0 ${iconSizeClass}`} />
         ) : Icon ? (
           <div
-            className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl"
-            style={{ backgroundColor: ICON_STYLE.bg }}
+            className={`flex flex-shrink-0 items-center justify-center ${iconSizeClass}`}
+            style={{ backgroundColor: iconBg ?? ICON_STYLE.bg }}
           >
-            <Icon style={{ color: ICON_STYLE.icon, fontSize: 20 }} />
+            <Icon style={{ color: iconColor ?? ICON_STYLE.icon, fontSize: compact ? 18 : 20 }} />
           </div>
         ) : null}
       </div>

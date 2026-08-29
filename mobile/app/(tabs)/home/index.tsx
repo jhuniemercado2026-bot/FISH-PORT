@@ -371,11 +371,11 @@ const formatBanyeraDate = (value?: string | null) => {
   const parsed = parseDateTimeValue(value);
   if (!parsed) return "No date";
 
-  return new Intl.DateTimeFormat("en-PH", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(parsed.year, parsed.month - 1, parsed.day));
+  const monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(
+    new Date(parsed.year, parsed.month - 1, parsed.day)
+  );
+
+  return `${monthName} ${parsed.day}, ${parsed.year}`;
 };
 
 const formatBanyeraTime = (value?: string | null) => {

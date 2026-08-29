@@ -1976,7 +1976,6 @@ const SuperVehicleTickets = () => {
   const highlightedSearchResult = location.state?.universalSearchResult ?? null;
   const queryClient = useQueryClient();
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } = useSidebar();
-  const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery("vehicle-tickets");
   const isHeadViewOnly = isHeadRole();
 
   const initialActiveTab = getVehicleTicketTabFromLocation({
@@ -1993,6 +1992,8 @@ const SuperVehicleTickets = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [ticketPeriodFilter, setTicketPeriodFilter] = useState("all");
   const [activeTab, setActiveTab] = useState(initialActiveTab);
+  const transactionLockResource = activeTab === "types" ? "vehicle-type-records" : "vehicle-tickets";
+  const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery(transactionLockResource);
   const breadcrumbLabel = activeTab === "daily" ? "Daily Vehicle Tickets" : activeTab === "annual" ? "Annual Vehicle Tickets" : "Vehicle Types";
   const [requestedPage, setRequestedPage] = useState(1);
   const currentPage = useDebouncedValue(requestedPage, 150);

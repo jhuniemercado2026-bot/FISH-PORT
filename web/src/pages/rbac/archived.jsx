@@ -213,7 +213,7 @@ const SuperArchived = () => {
     skipFiscalYear: true,
   });
   const loadedContextRef = React.useRef({ tab: activeTab, search: activeSearchValue });
-  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery("archives");
 
   const currentMeta = RESOURCE_META[activeTab];
   const archiveBreadcrumbLabel = currentMeta?.label ?? "Archives";

@@ -76,7 +76,7 @@ export const getUsersPageQueryOptions = (queryFilters = {}) => {
           from: null,
           to: null,
         },
-        stats: res.data?.stats ?? { total: 0, active: 0, deactivated: 0 },
+        stats: res.data?.stats ?? { total: 0, online: 0, offline: 0, deactivated: 0 },
       };
     },
     staleTime: 5 * 60 * 1000,

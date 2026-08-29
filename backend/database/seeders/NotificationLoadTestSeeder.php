@@ -28,7 +28,7 @@ class NotificationLoadTestSeeder extends Seeder
             [
                 'password' => bcrypt('password'),
                 'role' => 'inspector',
-                'status' => 'active',
+                'status' => 'offline',
                 'first_name' => 'Notification',
                 'last_name' => 'Load Test',
                 'gender' => 'male',
