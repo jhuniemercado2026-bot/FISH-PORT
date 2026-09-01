@@ -26,6 +26,13 @@ type HistoryCacheData = {
   remittance: any[];
 };
 
+const parseMoneyValue = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const tabs: {
   key: TransactionType;
   label: string;
@@ -307,7 +314,7 @@ const createDraftCardData = (draft: OfflineTransactionDraft) => {
   if (draft.type === "banyera") {
     const items = Array.isArray(payload.items) ? payload.items : [];
     const totalFee = items.reduce(
-      (sum, item) => sum + Number(item?.subtotal ?? 0),
+      (sum, item) => sum + parseMoneyValue(item?.subtotal),
       0
     );
 
@@ -465,8 +472,9 @@ function TransactionCard({
     const boatName = data.boat?.boat_name || "Unknown Boat";
     const date = formatPhilippineDate(data.docking_date);
     const time = formatPhilippineTime(data.docking_date);
-    const fee = data.docking_fee
-      ? `₱${Number(data.docking_fee).toLocaleString("en-PH", {
+    const dockingFee = parseMoneyValue(data.docking_fee);
+    const fee = dockingFee > 0
+      ? `₱${dockingFee.toLocaleString("en-PH", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         })}`
@@ -514,8 +522,9 @@ function TransactionCard({
     const date = formatPhilippineDate(data.transaction_date);
     const time = formatPhilippineTime(data.transaction_date);
     const itemCount = data.items?.length || 0;
-    const fee = data.total_fee
-      ? `₱${Number(data.total_fee).toLocaleString("en-PH", {
+    const banyeraFee = parseMoneyValue(data.total_fee);
+    const fee = banyeraFee > 0
+      ? `₱${banyeraFee.toLocaleString("en-PH", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         })}`
@@ -568,8 +577,11 @@ function TransactionCard({
       "Vehicle";
     const transactionDate = data.transaction_date || data.ticket_date || data.created_at || data.docking_date;
     const date = formatPhilippineDate(transactionDate);
-    const fee = Number(data.total_fee && Number(data.total_fee) > 0 ? data.total_fee : data.ticket_fee || 0) > 0
-      ? `₱${Number(data.total_fee && Number(data.total_fee) > 0 ? data.total_fee : data.ticket_fee || 0).toLocaleString("en-PH", {
+    const ticketFee = parseMoneyValue(data.total_fee) > 0
+      ? parseMoneyValue(data.total_fee)
+      : parseMoneyValue(data.ticket_fee);
+    const fee = ticketFee > 0
+      ? `₱${ticketFee.toLocaleString("en-PH", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         })}`
@@ -615,7 +627,7 @@ function TransactionCard({
   if (type === "remittance") {
     const referenceNo = data.remittance_reference_no || "-";
     const date = formatPhilippineDate(data.date || data.created_at);
-    const amount = Number(data.amount || 0);
+    const amount = parseMoneyValue(data.amount);
 
     return (
       <Pressable

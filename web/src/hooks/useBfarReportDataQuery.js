@@ -12,13 +12,16 @@ export const getBfarReportQueryOptions = ({
   selectedDate,
   selectedMonth,
   selectedYear,
+  userId,
 } = {}) => ({
-  queryKey: ["bfar-report", { filterType, selectedDate, selectedMonth, selectedYear }],
+  queryKey: ["bfar-report", { filterType, selectedDate, selectedMonth, selectedYear, userId }],
   queryFn: async ({ signal }) => {
+    const withUser = (params) => (userId && userId !== "all" ? { ...params, user_id: userId } : params);
+
     if (filterType === "daily") {
       if (!selectedDate) return extractBfarReportPayload(null);
       const response = await api.get("/bfar-reports/daily", {
-        params: { date: selectedDate },
+        params: withUser({ date: selectedDate }),
         signal,
       });
       return extractBfarReportPayload(response.data);
@@ -27,7 +30,7 @@ export const getBfarReportQueryOptions = ({
     if (filterType === "monthly") {
       if (!selectedMonth || !selectedYear) return extractBfarReportPayload(null);
       const response = await api.get("/bfar-reports/monthly", {
-        params: { month: String(selectedMonth).split("-")[1], year: selectedYear },
+        params: withUser({ month: String(selectedMonth).split("-")[1], year: selectedYear }),
         signal,
       });
       return extractBfarReportPayload(response.data);
@@ -36,7 +39,7 @@ export const getBfarReportQueryOptions = ({
     if (filterType === "yearly") {
       if (!selectedYear) return extractBfarReportPayload(null);
       const response = await api.get("/bfar-reports/yearly", {
-        params: { year: selectedYear },
+        params: withUser({ year: selectedYear }),
         signal,
       });
       return extractBfarReportPayload(response.data);

@@ -16,9 +16,16 @@ const normalizeDateString = (value) => {
 
 const getTicketDate = (ticket) => normalizeDateString(ticket?.ticket_date ?? ticket?.rawTicketDate);
 
-const getTicketFee = (ticket) => Number(ticket?.ticket_fee ?? ticket?.ticketFee ?? 0);
+const parseMoneyValue = (value) => {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
-const adjustStatValue = (value, delta) => Math.max(0, Number(value ?? 0) + delta);
+const getTicketFee = (ticket) => parseMoneyValue(ticket?.ticket_fee ?? ticket?.ticketFee);
+
+const adjustStatValue = (value, delta) => Math.max(0, parseMoneyValue(value) + parseMoneyValue(delta));
 
 const normalizeTicketType = (ticketType) =>
   String(ticketType ?? "").trim().toLowerCase();

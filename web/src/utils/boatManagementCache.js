@@ -184,6 +184,7 @@ export const updateRegisteredBoatsDataCache = (queryClient, updatedBoat) => {
   try {
     void queryClient.invalidateQueries({ queryKey: ["registered-boats-data"], refetchType: "active" });
     void queryClient.invalidateQueries({ queryKey: ["boat-types"], refetchType: "active" });
+    void queryClient.invalidateQueries({ queryKey: ["boat-types-report"], refetchType: "active" });
     void queryClient.invalidateQueries({ queryKey: ["boat-owners"], refetchType: "active" });
   } catch (err) {
     // ignore invalidation errors

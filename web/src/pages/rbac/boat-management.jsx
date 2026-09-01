@@ -969,6 +969,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
     void queryClient.invalidateQueries({ queryKey: ["dockings-calendar"], refetchType: "active" });
     void queryClient.invalidateQueries({ queryKey: ["banyera-data"], refetchType: "active" });
     void queryClient.invalidateQueries({ queryKey: ["registered-boats-report"], refetchType: "active" });
+    void queryClient.invalidateQueries({ queryKey: ["boat-types-report"], refetchType: "active" });
   };
 
   useEffect(() => {
@@ -1054,6 +1055,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
         queryClient.invalidateQueries({ queryKey: ["dockings-calendar"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["banyera-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["registered-boats-report"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["boat-types-report"], refetchType: "active" }),
       ]);
     } catch (err) {
       showToast("error", "Archive Failed", err.response?.data?.message ?? "Failed to archive boat.");
@@ -1919,6 +1921,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
         queryClient.invalidateQueries({ queryKey: ["boat-types"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["dockings-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["registered-boats-report"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["boat-types-report"], refetchType: "active" }),
       ]);
     } catch (err) {
       setAddError(err.response?.data?.message ?? "Failed to add boat type.");
@@ -1956,6 +1959,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
         queryClient.invalidateQueries({ queryKey: ["boat-types"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["dockings-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["registered-boats-report"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["boat-types-report"], refetchType: "active" }),
       ]);
     } catch (err) {
       setEditError(err.response?.data?.message ?? "Failed to update boat type.");
@@ -1981,6 +1985,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
         queryClient.invalidateQueries({ queryKey: ["archives-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["dockings-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["registered-boats-report"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["boat-types-report"], refetchType: "active" }),
       ]);
     } catch (err) {
       showToast("error", "Archive Failed", err.response?.data?.message ?? "Failed to archive boat type.");
@@ -2783,6 +2788,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
       showAddedToast("Boat Owner", "boat owner");
       void queryClient.invalidateQueries({ queryKey: ["dockings-data"], refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: ["registered-boats-report"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["boat-types-report"], refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: ["owner-info-report"], refetchType: "active" });
     } catch (err) {
       showToast("error", "Failed to Add", err.response?.data?.message ?? "Failed to add owner.");
@@ -2809,6 +2815,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
         queryClient.invalidateQueries({ queryKey: ["boat-owners"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["dockings-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["registered-boats-report"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["boat-types-report"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["owner-info-report"], refetchType: "active" }),
       ]);
     } catch (err) {
@@ -2838,6 +2845,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
         queryClient.invalidateQueries({ queryKey: ["archives-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["dockings-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["registered-boats-report"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["boat-types-report"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["owner-info-report"], refetchType: "active" }),
       ]);
     } catch (err) {

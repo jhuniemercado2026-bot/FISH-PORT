@@ -387,6 +387,7 @@ const SuperArchived = () => {
         queryClient.invalidateQueries({ queryKey: ["archives-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["registered-boats-data"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["registered-boats-report"], refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["boat-types-report"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["owner-info-report"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["boat-types"], refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: ["boat-owners"], refetchType: "active" }),

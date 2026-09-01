@@ -88,6 +88,17 @@ const FILTER_SELECT_STYLES = `
   color: #ffffff !important;
   font-weight: 400 !important;
 }
+
+.universal-filter-select-dropdown.report-user-filter-dropdown .ant-select-item {
+  min-height: 54px !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.universal-filter-select-dropdown.report-user-filter-dropdown .ant-select-item-option-selected .report-user-option-name,
+.universal-filter-select-dropdown.report-user-filter-dropdown .ant-select-item-option-selected .report-user-option-role {
+  color: #ffffff !important;
+}
 `;
 
 const ensureFilterSelectStyles = () => {

@@ -3,9 +3,16 @@ const getManilaDateString = () =>
 
 const getBanyeraDate = (transaction) => String(transaction?.transaction_date ?? "").slice(0, 10);
 
-const getBanyeraFee = (transaction) => Number(transaction?.total_fee ?? transaction?.fee ?? 0);
+const parseMoneyValue = (value) => {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
-const adjustStatValue = (value, delta) => Math.max(0, Number(value ?? 0) + delta);
+const getBanyeraFee = (transaction) => parseMoneyValue(transaction?.total_fee ?? transaction?.fee);
+
+const adjustStatValue = (value, delta) => Math.max(0, parseMoneyValue(value) + parseMoneyValue(delta));
 
 const normalizeClassification = (classification) => classification?.data ?? classification;
 

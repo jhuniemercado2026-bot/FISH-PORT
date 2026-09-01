@@ -16,13 +16,19 @@ export const invalidateTodayCollection = (queryClient, date) => {
 
 export const adjustTodayCollection = (queryClient, date, delta) => {
   const normalizedDate = normalizeDateOnly(date);
-  const numericDelta = Number(delta || 0);
+  const parseMoneyValue = (value) => {
+    if (value === null || value === undefined || value === "") return 0;
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const numericDelta = parseMoneyValue(delta);
 
   if (!normalizedDate || !numericDelta) return;
 
   queryClient.setQueryData(["today-collection", { date: normalizedDate }], (previous) => ({
     ...(previous ?? {}),
     date: normalizedDate,
-    amount: Number(previous?.amount || 0) + numericDelta,
+    amount: parseMoneyValue(previous?.amount) + numericDelta,
   }));
 };

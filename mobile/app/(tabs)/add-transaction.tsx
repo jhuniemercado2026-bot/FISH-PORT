@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import type { BluetoothPrinter } from "@netinove/thermal-printer";
 import { getAuthSession, getAuthToken } from "../../api/auth";
 import { buildApiHeaders, getApiBaseUrl } from "../../api/axios";
 import ConsentModal, {
@@ -23,6 +24,9 @@ import ConsentModal, {
 import DatePicker from "../../components/DatePicker";
 import IncreaseDecreaseInput from "../../components/IncreaseDecreaseInput";
 import PlateNumberPicker from "../../components/PlateNumberPicker";
+import PrintPreviewModal, {
+  PrintPreviewLine,
+} from "../../components/PrintPreviewModal";
 import SearchFilter from "../../components/SearchFilter";
 import SignatureModal from "../../components/SignatureModal";
 import TimePicker from "../../components/TimePicker";
@@ -289,6 +293,18 @@ type TransactionLockState = {
   remittance_reference_no?: string | null;
 };
 
+type BanyeraPreviewLine = {
+  name: string;
+  quantity: number;
+  fee: number;
+  subtotal: number;
+  daug: number | null;
+};
+
+type SaveOptions = {
+  skipBanyeraPreview?: boolean;
+};
+
 function getFeeName(fee?: FeeOption | null) {
   return String(
     fee?.feeType?.fee_name ??
@@ -327,6 +343,205 @@ function isFeeActive(fee?: FeeOption | null) {
 
 function getFeeAmount(fee?: FeeOption | null) {
   return Number(fee?.amount ?? 0);
+}
+
+function formatPeso(amount: number) {
+  return `₱${amount.toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatPrinterPeso(amount: number) {
+  return `PHP ${amount.toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatPreviewDateTime(value: string) {
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/
+  );
+
+  if (!match) {
+    return value || "-";
+  }
+
+  const [, year, month, day, hour, minute] = match;
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute)
+  );
+
+  if (Number.isNaN(date.getTime())) {
+    return value || "-";
+  }
+
+  const dateText = date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  const timeText = date
+    .toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
+    .replace(/\s/g, "");
+
+  return `${dateText} - ${timeText}`;
+}
+
+function centerPrinterText(text: string, width = 32) {
+  const trimmed = text.trim();
+  const padding = Math.max(0, Math.floor((width - trimmed.length) / 2));
+  return `${" ".repeat(padding)}${trimmed}`;
+}
+
+function splitPrinterText(text: string, width = 32) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = "";
+
+  words.forEach((word) => {
+    const nextLine = line ? `${line} ${word}` : word;
+
+    if (nextLine.length <= width) {
+      line = nextLine;
+      return;
+    }
+
+    if (line) {
+      lines.push(line);
+    }
+
+    line = word.length <= width ? word : word.slice(0, width);
+  });
+
+  if (line) {
+    lines.push(line);
+  }
+
+  return lines.length ? lines : [""];
+}
+
+function padPrinterColumns(left: string, right: string, width = 32) {
+  const rightText = right.trim();
+  const maxLeftWidth = Math.max(1, width - rightText.length - 1);
+  const leftText = left.length > maxLeftWidth ? left.slice(0, maxLeftWidth) : left;
+  const gap = Math.max(1, width - leftText.length - rightText.length);
+
+  return `${leftText}${" ".repeat(gap)}${rightText}`;
+}
+
+function buildBanyeraReceiptText({
+  boatName,
+  boatType,
+  ownerName,
+  transactionDateTime,
+  lines,
+  totalFee,
+}: {
+  boatName: string;
+  boatType: string;
+  ownerName: string;
+  transactionDateTime: string;
+  lines: BanyeraPreviewLine[];
+  totalFee: number;
+}) {
+  const receiptLines = [
+    centerPrinterText("OPOL FISH PORT"),
+    centerPrinterText("BANYERA TRANSACTION"),
+    "-".repeat(32),
+    `Date: ${transactionDateTime || "-"}`,
+    ...splitPrinterText(`Boat: ${boatName || "-"}`),
+    ...splitPrinterText(`Type: ${boatType || "-"}`),
+    ...splitPrinterText(`Owner: ${ownerName || "-"}`),
+    "-".repeat(32),
+  ];
+
+  lines.forEach((line, index) => {
+    receiptLines.push(`${index + 1}. ${line.name || "Fish"}`);
+    receiptLines.push(
+      padPrinterColumns(
+        `${line.quantity} x ${formatPrinterPeso(line.fee)}`,
+        formatPrinterPeso(line.subtotal)
+      )
+    );
+
+    if (line.daug !== null && line.daug > 0) {
+      receiptLines.push(padPrinterColumns("Daug", formatPrinterPeso(line.daug)));
+    }
+  });
+
+  receiptLines.push(
+    "-".repeat(32),
+    padPrinterColumns("TOTAL", formatPrinterPeso(totalFee)),
+    "",
+    "Signature: ________________",
+    "",
+    "",
+    ""
+  );
+
+  return receiptLines.join("\n");
+}
+
+function findPreferredThermalPrinter(printers: BluetoothPrinter[]) {
+  const bondedPrinters = printers.filter((printer) => printer.bonded);
+  const pt210Printer = bondedPrinters.find((printer) => {
+    const name = printer.name.trim().toLowerCase();
+    return name.includes("pt-210") || name.includes("pt210");
+  });
+
+  if (pt210Printer) {
+    return pt210Printer;
+  }
+
+  return (
+    bondedPrinters.find((printer) => {
+      const name = printer.name.trim().toLowerCase();
+      return name.includes("printer") || name.includes("thermal");
+    }) ??
+    bondedPrinters[0] ??
+    null
+  );
+}
+
+async function printThermalText(text: string) {
+  const {
+    connect: connectThermalPrinter,
+    getBondedPrinters,
+    getConnectionState,
+    requestBluetoothPermissions,
+    writeText: writeThermalText,
+  } = await import("@netinove/thermal-printer");
+
+  const granted = await requestBluetoothPermissions();
+
+  if (!granted) {
+    throw new Error("Bluetooth permission was not granted.");
+  }
+
+  const printers = await getBondedPrinters();
+  const printer = findPreferredThermalPrinter(printers);
+
+  if (!printer) {
+    throw new Error("No paired Bluetooth thermal printer found.");
+  }
+
+  const connection = getConnectionState();
+
+  if (!connection.connected || connection.address !== printer.address) {
+    await connectThermalPrinter(printer.address);
+  }
+
+  await writeThermalText(text, { trailingLines: 3 });
 }
 
 function hasArchivedAt(value?: string | null) {
@@ -673,6 +888,8 @@ export default function AddTransactionScreen() {
   const [isSavingBanyeraSignature, setIsSavingBanyeraSignature] =
     useState(false);
   const [banyeraFieldErrors, setBanyeraFieldErrors] = useState<Record<string, string>>({});
+  const [isPrintingBanyeraPreview, setIsPrintingBanyeraPreview] = useState(false);
+  const [isBanyeraPrintPreviewOpen, setIsBanyeraPrintPreviewOpen] = useState(false);
   const [dockingFieldErrors, setDockingFieldErrors] = useState<Record<string, string>>({});
   const [boatSearch, setBoatSearch] = useState("");
   const [isBoatPickerOpen, setIsBoatPickerOpen] = useState(false);
@@ -1448,6 +1665,51 @@ export default function AddTransactionScreen() {
     const qty = Number(item.quantity) || 0;
     return sum + getFeeAmount(selectedBanyeraFee) * qty;
   }, 0);
+  const banyeraPreviewDateTime = buildTransactionDateTime(
+    banyeraYear,
+    banyeraMonth,
+    banyeraDay,
+    banyeraHour,
+    banyeraMinute,
+    banyeraMeridiem
+  );
+  const banyeraPreviewLines: BanyeraPreviewLine[] = banyeraItems.map((item) => {
+    const classification = classifications.find((entry) =>
+      matchesId(entry.classification_id, item.classification_id)
+    );
+    const quantity = Number(item.quantity) || 0;
+    const fee = getFeeAmount(selectedBanyeraFee);
+    const daug = item.daug ? Number(item.daug) : null;
+
+    return {
+      name: classification?.classification_name ?? "Select fish classification",
+      quantity,
+      fee,
+      subtotal: fee * quantity,
+      daug: daug !== null && !Number.isNaN(daug) ? daug : null,
+    };
+  });
+  const banyeraReceiptText = buildBanyeraReceiptText({
+    boatName: selectedBanyeraBoat?.boat_name ?? "",
+    boatType: selectedBanyeraBoatType,
+    ownerName: selectedBanyeraBoatOwner,
+    transactionDateTime: banyeraPreviewDateTime,
+    lines: banyeraPreviewLines,
+    totalFee: banyeraTotalFee,
+  });
+  const banyeraPrintPreviewDetails = [
+    { label: "Date", value: formatPreviewDateTime(banyeraPreviewDateTime) },
+    { label: "Boat", value: selectedBanyeraBoat?.boat_name || "-" },
+    { label: "Type", value: selectedBanyeraBoatType || "-" },
+    { label: "Owner", value: selectedBanyeraBoatOwner || "-" },
+  ];
+  const banyeraPrintPreviewLines: PrintPreviewLine[] = banyeraPreviewLines.map((line) => ({
+    name: line.name,
+    quantity: line.quantity,
+    feeText: formatPeso(line.fee),
+    subtotalText: formatPeso(line.subtotal),
+    daugText: line.daug !== null && line.daug > 0 ? formatPeso(line.daug) : null,
+  }));
 
   const selectedDockingBoat =
     boats.find((boat) => matchesId(boat.boat_id, dockingBoatId)) ?? null;
@@ -1677,12 +1939,13 @@ export default function AddTransactionScreen() {
     setBanyeraMeridiem(resetNow.meridiem === "PM" ? "PM" : "AM");
     setIsBanyeraDateAuto(true);
     setIsBanyeraTimeAuto(true);
-    setBanyeraItems([{ classification_id: "", quantity: "0" }]);
+    setBanyeraItems([{ classification_id: "", quantity: "0", daug: "" }]);
     setBanyeraOwnerSignature("");
     setBanyeraOwnerSignatureSaveForFuture(false);
     setPendingBanyeraOwnerSignature("");
     setIsBanyeraSignatureModalOpen(false);
     setIsBanyeraConsentModalOpen(false);
+    setIsBanyeraPrintPreviewOpen(false);
     setBanyeraFieldErrors({});
   }
 
@@ -1839,7 +2102,30 @@ export default function AddTransactionScreen() {
     setRemittanceFieldErrors({});
   }
 
-  async function handleSave() {
+  async function handlePrintBanyeraPreview() {
+    if (isPrintingBanyeraPreview) {
+      return;
+    }
+
+    setIsPrintingBanyeraPreview(true);
+
+    try {
+      await printThermalText(banyeraReceiptText);
+      showToast("success", "Banyera preview sent to PT-210 printer.");
+      await handleSave({ skipBanyeraPreview: true });
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Unable to print Banyera preview."
+      );
+    } finally {
+      setIsPrintingBanyeraPreview(false);
+    }
+  }
+
+  async function handleSave(options: SaveOptions = {}) {
     if (isSelectedTransactionLocked) {
       const lockMessage = transactionLock?.message || "Transactions are view-only at the moment.";
       setFormError(lockMessage);
@@ -2043,6 +2329,13 @@ export default function AddTransactionScreen() {
             daug: item.daug ? Number(item.daug) : null,
           })),
         };
+
+        if (!options.skipBanyeraPreview) {
+          setIsBanyeraPrintPreviewOpen(true);
+          return;
+        }
+
+        setIsBanyeraPrintPreviewOpen(false);
 
         const { queued, response, draft } = await submitOrQueueOfflineTransaction({
           type: "banyera",
@@ -3442,7 +3735,7 @@ export default function AddTransactionScreen() {
                 isSaveDisabled ? "bg-[#46506E]" : "bg-[#1A1F36]"
               }`}
               disabled={isSaveDisabled}
-              onPress={handleSave}
+              onPress={() => void handleSave()}
             >
               {isSubmitting ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
@@ -3458,6 +3751,22 @@ export default function AddTransactionScreen() {
           </View>
         </View>
       </ScrollView>
+      <PrintPreviewModal
+        visible={isBanyeraPrintPreviewOpen}
+        title="OPOL FISH PORT"
+        subtitle="BANYERA TRANSACTION"
+        details={banyeraPrintPreviewDetails}
+        lines={banyeraPrintPreviewLines}
+        totalText={formatPeso(banyeraTotalFee)}
+        printing={isPrintingBanyeraPreview}
+        saving={isSubmitting}
+        onClose={() => {
+          if (!isSubmitting && !isPrintingBanyeraPreview) {
+            setIsBanyeraPrintPreviewOpen(false);
+          }
+        }}
+        onPrint={handlePrintBanyeraPreview}
+      />
       <SignatureModal
         ownerName={selectedBanyeraBoatOwner}
         visible={isBanyeraSignatureModalOpen}

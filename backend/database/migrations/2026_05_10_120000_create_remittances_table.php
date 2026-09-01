@@ -15,7 +15,7 @@ return new class extends Migration
             $table->decimal('amount', 12, 2);
             $table->decimal('surplus', 12, 2)->default(0);
             $table->decimal('deficit', 12, 2)->default(0);
-            $table->enum('status', ['pending', 'remitted'])->default('pending');
+            $table->enum('status', ['Unchecked', 'Checked'])->default('Unchecked');
             $table->text('remarks')->nullable();
             $table->unsignedBigInteger('submitted_by');
             $table->timestamps();

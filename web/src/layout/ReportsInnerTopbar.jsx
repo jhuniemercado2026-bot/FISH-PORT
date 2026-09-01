@@ -1,7 +1,7 @@
 import React from "react";
 import "typeface-montserrat";
 import ReportDailyDatePicker from "../components/ReportDailyDatePicker";
-import FilterSelect from "../components/FilterSelect";
+import FilterButton from "../components/FilterButton";
 
 import { IoDocumentTextOutline, IoSyncOutline } from "react-icons/io5";
 
@@ -36,6 +36,16 @@ const ReportsInnerTopbar = ({
   isGenerating,
   isGenerateDisabled = false,
   isExportDisabled = false,
+  showUserFilter = false,
+  userFilterValue = "all",
+  userFilterOptions = [],
+  onUserFilterChange,
+  isUserFilterLoading = false,
+  showBoatFilter = false,
+  boatFilterValue = "all",
+  boatFilterOptions = [],
+  onBoatFilterChange,
+  isBoatFilterLoading = false,
 }) => {
   const isRevenueReport = activeReport === "revenue";
   const isDailyReport = activeReport === "daily";
@@ -45,6 +55,7 @@ const ReportsInnerTopbar = ({
   const isYearlyReport = activeReport === "yearly";
 
   const isRegisteredBoatsReport = activeReport === "registered-boats";
+  const isBoatTypesReport = activeReport === "boat-types";
   const isOwnerInfoReport = activeReport === "owner-info";
   const isVehicleTypesReport = activeReport === "vehicle-types";
   const isBfarReport = activeReport === "fisheries-bfar";
@@ -65,11 +76,13 @@ const ReportsInnerTopbar = ({
     isDailyVehicleTicketReport ||
     isVehicleTicketReport ||
     isVehicleTypesReport ||
+    isBoatTypesReport ||
     isFeesReport;
 
   const activeFilterType =
     isVehicleTicketReport ||
     isVehicleTypesReport ||
+    isBoatTypesReport ||
     isFeesReport
       ? "yearly"
       : isRevenueReport
@@ -87,7 +100,7 @@ const ReportsInnerTopbar = ({
       : remittanceFilterType;
 
   const onFilterTypeChange =
-    isVehicleTicketReport || isVehicleTypesReport || isFeesReport
+    isVehicleTicketReport || isVehicleTypesReport || isBoatTypesReport || isFeesReport
       ? undefined
       : isRevenueReport
       ? onRevenueFilterTypeChange
@@ -124,9 +137,9 @@ const ReportsInnerTopbar = ({
         <div className="mx-auto flex w-full max-w-[1100px] flex-nowrap items-center justify-center gap-2 overflow-x-auto">
 
           {/* FILTER TYPE */}
-          {!isVehicleTicketReport && !isVehicleTypesReport && !isFeesReport && (
+          {!isVehicleTicketReport && !isVehicleTypesReport && !isBoatTypesReport && !isFeesReport && (
             <div className={REPORT_INPUT_WIDTH_CLASS}>
-              <FilterSelect
+              <FilterButton
                 width="100%"
                 height={46}
                 value={activeFilterType || "daily"}
@@ -136,6 +149,21 @@ const ReportsInnerTopbar = ({
                   { value: "monthly", label: "Monthly" },
                   { value: "yearly", label: "Yearly" },
                 ]}
+              />
+            </div>
+          )}
+
+          {showBoatFilter && (
+            <div className={REPORT_INPUT_WIDTH_CLASS}>
+              <FilterButton
+                width="100%"
+                height={46}
+                value={boatFilterValue}
+                onChange={onBoatFilterChange}
+                options={boatFilterOptions}
+                loading={isBoatFilterLoading}
+                optionLabelProp="displayLabel"
+                popupClassName="report-user-filter-dropdown"
               />
             </div>
           )}
@@ -157,7 +185,7 @@ const ReportsInnerTopbar = ({
           {showMonthly && (
             <>
               <div className={REPORT_INPUT_WIDTH_CLASS}>
-                <FilterSelect
+                <FilterButton
                   width="100%"
                   height={46}
                   placeholder="Select a Month"
@@ -168,7 +196,7 @@ const ReportsInnerTopbar = ({
               </div>
 
               <div className={REPORT_INPUT_WIDTH_CLASS}>
-                <FilterSelect
+                <FilterButton
                   width="100%"
                   height={46}
                   placeholder="Select a Year"
@@ -183,13 +211,28 @@ const ReportsInnerTopbar = ({
           {/* YEARLY */}
           {showYearly && (
             <div className={REPORT_INPUT_WIDTH_CLASS}>
-              <FilterSelect
+              <FilterButton
                 width="100%"
                 height={46}
                 placeholder="Select a Year"
                 value={yearlyDate ?? undefined}
                 onChange={onYearlyDateChange}
                 options={yearOptions}
+              />
+            </div>
+          )}
+
+          {showUserFilter && (
+            <div className={REPORT_INPUT_WIDTH_CLASS}>
+              <FilterButton
+                width="100%"
+                height={46}
+                value={userFilterValue}
+                onChange={onUserFilterChange}
+                options={userFilterOptions}
+                loading={isUserFilterLoading}
+                optionLabelProp="displayLabel"
+                popupClassName="report-user-filter-dropdown"
               />
             </div>
           )}
@@ -202,7 +245,7 @@ const ReportsInnerTopbar = ({
             className={`${REPORT_INPUT_WIDTH_CLASS} flex h-[46px] items-center justify-center gap-2 rounded-xl bg-[#1A1F36] text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60`}
           >
             <IoDocumentTextOutline size={18} />
-            Generate Report
+            Generate PDF
           </button>
 
           <button
@@ -222,20 +265,50 @@ const ReportsInnerTopbar = ({
         <div className="mx-auto flex w-full max-w-[1100px] flex-nowrap items-center justify-center gap-2 overflow-x-auto">
 
           {/* READONLY INPUT LOOK */}
-          <div
-            className={`${REPORT_INPUT_WIDTH_CLASS} flex h-[46px] items-center rounded-xl border border-slate-200 bg-white px-4 text-[13px] font-normal text-[#1a1f36] shadow-sm`}
-          >
-            {title ||
-              (isRegisteredBoatsReport
-                ? "Registered Boats"
-                : isOwnerInfoReport
-                ? "Owner Information"
-                : isVehicleTypesReport
-                ? "Vehicle Types"
-                : isFeesReport
-                ? "Fees"
-                : "Fisheries (BFAR)")}
-          </div>
+          {showBoatFilter ? (
+            <div className={REPORT_INPUT_WIDTH_CLASS}>
+              <FilterButton
+                width="100%"
+                height={46}
+                value={boatFilterValue}
+                onChange={onBoatFilterChange}
+                options={boatFilterOptions}
+                loading={isBoatFilterLoading}
+                optionLabelProp="displayLabel"
+                popupClassName="report-user-filter-dropdown"
+              />
+            </div>
+          ) : (
+            <div
+              className={`${REPORT_INPUT_WIDTH_CLASS} flex h-[46px] items-center rounded-xl border border-slate-200 bg-white px-4 text-[13px] font-normal text-[#1a1f36] shadow-sm`}
+            >
+              {title ||
+                (isRegisteredBoatsReport
+                  ? "Registered Boats"
+                  : isOwnerInfoReport
+                  ? "Boat Owner"
+                  : isVehicleTypesReport
+                  ? "Vehicle Types"
+                  : isFeesReport
+                  ? "Fees"
+                  : "Fisheries (BFAR)")}
+            </div>
+          )}
+
+          {showUserFilter && (
+            <div className={REPORT_INPUT_WIDTH_CLASS}>
+              <FilterButton
+                width="100%"
+                height={46}
+                value={userFilterValue}
+                onChange={onUserFilterChange}
+                options={userFilterOptions}
+                loading={isUserFilterLoading}
+                optionLabelProp="displayLabel"
+                popupClassName="report-user-filter-dropdown"
+              />
+            </div>
+          )}
 
           {/* GENERATE */}
           <button
@@ -245,7 +318,7 @@ const ReportsInnerTopbar = ({
             className={`${REPORT_INPUT_WIDTH_CLASS} flex h-[46px] items-center justify-center gap-2 rounded-xl bg-[#1A1F36] text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60`}
           >
             <IoDocumentTextOutline size={18} />
-            Generate Report
+            Generate PDF
           </button>
 
           {/* EXPORT */}

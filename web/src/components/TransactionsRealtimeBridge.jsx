@@ -158,6 +158,7 @@ const invalidateBoatManagementQueries = (queryClient) => {
     ["boat-owners"],
     ["registered-boats-report"],
     ["owner-info-report"],
+    ["boat-types-report"],
   ]);
 };
 

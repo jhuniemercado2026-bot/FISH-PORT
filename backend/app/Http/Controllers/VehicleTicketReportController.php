@@ -10,6 +10,15 @@ use Illuminate\Validation\Rule;
 
 class VehicleTicketReportController extends Controller
 {
+    private function applyUserFilter($query, Request $request)
+    {
+        $userId = $request->query('user_id');
+        if ($userId === null || $userId === '' || $userId === 'all') return $query;
+        if (!ctype_digit((string) $userId)) abort(400, 'Invalid user filter.');
+
+        return $query->where('vehicle_tickets.created_by', (int) $userId);
+    }
+
     private function buildReportQuery()
     {
         return VehicleTicket::query()
@@ -71,7 +80,7 @@ class VehicleTicketReportController extends Controller
             ->where('vehicle_tickets.ticket_type', $validated['ticket_type'])
             ->whereDate('vehicle_tickets.ticket_date', $date);
 
-        return $this->buildResponse($query->get(), $validated['ticket_type'], $validated['ticket_type'] === 'daily');
+        return $this->buildResponse($this->applyUserFilter($query, $request)->get(), $validated['ticket_type'], $validated['ticket_type'] === 'daily');
     }
 
     public function monthly(Request $request)
@@ -87,7 +96,7 @@ class VehicleTicketReportController extends Controller
             ->whereYear('vehicle_tickets.ticket_date', (int) $validated['year'])
             ->whereMonth('vehicle_tickets.ticket_date', (int) $validated['month']);
 
-        return $this->buildResponse($query->get(), $validated['ticket_type'], $validated['ticket_type'] === 'daily');
+        return $this->buildResponse($this->applyUserFilter($query, $request)->get(), $validated['ticket_type'], $validated['ticket_type'] === 'daily');
     }
 
     public function yearly(Request $request)
@@ -101,6 +110,6 @@ class VehicleTicketReportController extends Controller
             ->where('vehicle_tickets.ticket_type', $validated['ticket_type'])
             ->whereYear('vehicle_tickets.ticket_date', (int) $validated['year']);
 
-        return $this->buildResponse($query->get(), $validated['ticket_type'], $validated['ticket_type'] === 'daily');
+        return $this->buildResponse($this->applyUserFilter($query, $request)->get(), $validated['ticket_type'], $validated['ticket_type'] === 'daily');
     }
 }

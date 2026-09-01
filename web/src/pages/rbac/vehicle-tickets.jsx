@@ -491,20 +491,27 @@ const buildDailyFeeItems = (fees, vehicleTypeId, quantity = "0", options = {}) =
   ];
 };
 
+const parseMoneyValue = (value) => {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const formatMoney = (value) =>
-  `₱${Number(value || 0).toLocaleString("en-PH", {
+  `₱${parseMoneyValue(value).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 
 const formatPeso = (value) =>
-  `\u20B1${Number(value || 0).toLocaleString("en-PH", {
+  `\u20B1${parseMoneyValue(value).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 
 const formatMoneyValue = (value) =>
-  Number(value || 0).toLocaleString("en-PH", {
+  parseMoneyValue(value).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -544,9 +551,9 @@ const normalizeTicket = (ticket) => {
       ticket.fee?.fee_name ||
       "-",
     feeId: String(ticket.fee_id ?? ""),
-    ticketFee: Number(ticket.ticket_fee || 0),
-    dailyFee: Number(ticket.daily_fee || 0),
-    banyeraFee: Number(ticket.banyera_fee || 0),
+    ticketFee: parseMoneyValue(ticket.ticket_fee),
+    dailyFee: parseMoneyValue(ticket.daily_fee),
+    banyeraFee: parseMoneyValue(ticket.banyera_fee),
     ticketDateTime: ticket.ticket_date || "",
     rawTicketDate: normalizeDateString(ticket.ticket_date),
     rawEndDate: normalizeDateString(ticket.end_date),
@@ -572,20 +579,20 @@ const normalizeTicket = (ticket) => {
   };
 };
 
-const toMoneyCents = (value) => Math.round(Number(value || 0) * 100);
+const toMoneyCents = (value) => Math.round(parseMoneyValue(value) * 100);
 
 const fromMoneyCents = (value) => value / 100;
 
 const getDailyTicketFeeBreakdown = (ticket, fees) => {
-  const savedDailyFee = Number(ticket.dailyFee || 0);
-  const savedBanyeraFee = Number(ticket.banyeraFee || 0);
+  const savedDailyFee = parseMoneyValue(ticket.dailyFee);
+  const savedBanyeraFee = parseMoneyValue(ticket.banyeraFee);
   if (savedDailyFee > 0 || savedBanyeraFee > 0) {
     const totalFee = savedDailyFee + savedBanyeraFee;
 
     return {
       dailyFee: savedDailyFee,
       banyeraFee: savedBanyeraFee,
-      totalFee: totalFee || Number(ticket.ticketFee || 0),
+      totalFee: totalFee || parseMoneyValue(ticket.ticketFee),
     };
   }
 
@@ -593,10 +600,10 @@ const getDailyTicketFeeBreakdown = (ticket, fees) => {
   const savedFee = fees.find((fee) => String(fee.fee_id) === String(ticket.feeId)) ?? null;
   const configuredDailyFee = getAutoFeeForTicketType(vehicleFees, "daily") ?? null;
   const configuredBanyeraFee = getBanyeraVehicleFee(vehicleFees) ?? null;
-  const savedTotal = Number(ticket.ticketFee || 0);
+  const savedTotal = parseMoneyValue(ticket.ticketFee);
 
   if (savedFee) {
-    const savedFeeAmount = Number(savedFee.amount || 0);
+    const savedFeeAmount = parseMoneyValue(savedFee.amount);
     const savedFeeType = getFeeTypeName(savedFee);
     const savedIsBanyera = savedFeeType === "banyera";
     const normalizedTotal = savedTotal > 0 ? savedTotal : savedFeeAmount;
@@ -655,9 +662,9 @@ const getDailyTicketFeeBreakdown = (ticket, fees) => {
   }
 
   return {
-    dailyFee: Number(configuredDailyFee?.amount || 0),
-    banyeraFee: Number(configuredBanyeraFee?.amount || 0),
-    totalFee: Number(configuredDailyFee?.amount || 0) + Number(configuredBanyeraFee?.amount || 0),
+    dailyFee: parseMoneyValue(configuredDailyFee?.amount),
+    banyeraFee: parseMoneyValue(configuredBanyeraFee?.amount),
+    totalFee: parseMoneyValue(configuredDailyFee?.amount) + parseMoneyValue(configuredBanyeraFee?.amount),
   };
 };
 
@@ -691,9 +698,9 @@ const getAnnualTicketFeeBreakdown = (ticket, fees) => {
     null;
 
   return {
-    annualFee: Number(annualFeeRecord?.amount || 0),
+    annualFee: parseMoneyValue(annualFeeRecord?.amount),
     banyeraFee: 0,
-    totalFee: Number(ticket.ticketFee || 0),
+    totalFee: parseMoneyValue(ticket.ticketFee),
   };
 };
 
@@ -1010,7 +1017,7 @@ const AddVehicleTicketDrawer = ({
   const totalTicketFee = feeItems.reduce((sum, item) => {
     const selectedItemFee = fees.find((fee) => String(fee.fee_id) === String(item.fee_id));
     const quantity = Number.parseInt(item.quantity || "0", 10) || 0;
-    return sum + Number(selectedItemFee?.amount || 0) * quantity;
+    return sum + parseMoneyValue(selectedItemFee?.amount) * quantity;
   }, 0);
   const selectedVehicleType = vehicleTypes.find(
     (type) => String(type.vehicle_type_id) === String(form.vehicle_type_id || "")
@@ -1335,8 +1342,8 @@ const AddVehicleTicketDrawer = ({
       const nextDriverName = form.driver_name.trim();
       const nextPrimaryFeeId = String(form.fee_id || "");
       const currentPrimaryFeeId = String(editingTicket.fee_id ?? "");
-      const nextTicketFee = Number(form.ticket_fee || 0);
-      const currentTicketFee = Number(editingTicket.ticket_fee || 0);
+      const nextTicketFee = parseMoneyValue(form.ticket_fee);
+      const currentTicketFee = parseMoneyValue(editingTicket.ticket_fee);
 
       const noChanges =
         String(editingTicket.vehicle_type_id ?? "") === String(form.vehicle_type_id ?? "") &&
@@ -1362,7 +1369,7 @@ const AddVehicleTicketDrawer = ({
         (parts, item) => {
           const selectedItemFee = fees.find((fee) => String(fee.fee_id) === String(item.fee_id));
           const quantity = Number.parseInt(item.quantity || "0", 10) || 0;
-          const amount = Number(selectedItemFee?.amount || 0);
+          const amount = parseMoneyValue(selectedItemFee?.amount);
           const subtotal = item.fee_id && quantity > 0 ? amount * quantity : 0;
           const rowType = item.row_type || (isAnnualTicket ? "annual" : "daily");
 
@@ -1383,7 +1390,7 @@ const AddVehicleTicketDrawer = ({
         fee_id: Number(form.fee_id),
         daily_fee: ticketFeeParts.dailyFee,
         banyera_fee: ticketFeeParts.banyeraFee,
-        ticket_fee: Number(form.ticket_fee),
+        ticket_fee: parseMoneyValue(form.ticket_fee),
         ticket_date: builtTicketDate,
         end_date: builtEndDate || null,
       });
@@ -1622,7 +1629,7 @@ const AddVehicleTicketDrawer = ({
             ].map((item, index) => {
               const selectedItemFee = fees.find((fee) => String(fee.fee_id) === String(item.fee_id));
               const quantity = Number.parseInt(item.quantity || "0", 10) || 0;
-              const subtotal = Number(selectedItemFee?.amount || 0) * quantity;
+              const subtotal = parseMoneyValue(selectedItemFee?.amount) * quantity;
               const selectedRowFee = item.fee_id
                 ? fees.find((fee) => String(fee.fee_id) === String(item.fee_id))
                 : null;
@@ -1749,7 +1756,7 @@ const AddVehicleTicketDrawer = ({
           value={form.ticket_fee ? formatMoney(form.ticket_fee) : ""}
           placeholder="₱0.00"
           wrapperClassName="!bg-slate-100"
-          inputStyle={{ color: isEditingAnnualTicket ? "#64748b" : Number(form.ticket_fee || 0) > 0 ? "#0d1117" : "#94a3b8" }}
+          inputStyle={{ color: isEditingAnnualTicket ? "#64748b" : parseMoneyValue(form.ticket_fee) > 0 ? "#0d1117" : "#94a3b8" }}
         />
       </div>
     </Modal>
@@ -2683,7 +2690,7 @@ const SuperVehicleTickets = () => {
   const dailyTickets = ticketStats.daily_tickets ?? 0;
   const annualTicketsToday = ticketStats.annual_tickets_today ?? 0;
   const dailyTicketsToday = ticketStats.daily_tickets_today ?? 0;
-  const dailyCollectionsToday = Number(ticketStats.daily_collections_today ?? 0);
+  const dailyCollectionsToday = parseMoneyValue(ticketStats.daily_collections_today);
 
   const vehicleTypesTotal = vehicleTypesSummary.total ?? vehicleTypes.length;
   const vehicleTypesInUse = vehicleTypesSummary.used ?? vehicleTypes.filter((type) => type.ticketsUsing > 0).length;

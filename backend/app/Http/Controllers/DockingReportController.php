@@ -8,6 +8,15 @@ use Illuminate\Http\Request;
 
 class DockingReportController extends Controller
 {
+    private function applyUserFilter($query, Request $request)
+    {
+        $userId = $request->query('user_id');
+        if ($userId === null || $userId === '' || $userId === 'all') return $query;
+        if (!ctype_digit((string) $userId)) abort(400, 'Invalid user filter.');
+
+        return $query->where('dockings.created_by', (int) $userId);
+    }
+
     private function buildReportQuery()
     {
         return Docking::query()
@@ -67,7 +76,7 @@ class DockingReportController extends Controller
         $query = $this->buildReportQuery()
             ->whereDate('dockings.docking_date', $date);
 
-        return $this->renderReport($query);
+        return $this->renderReport($this->applyUserFilter($query, $request));
     }
 
     public function monthly(Request $request)
@@ -81,7 +90,7 @@ class DockingReportController extends Controller
             ->whereYear('dockings.docking_date', (int) $validated['year'])
             ->whereMonth('dockings.docking_date', (int) $validated['month']);
 
-        return $this->renderReport($query);
+        return $this->renderReport($this->applyUserFilter($query, $request));
     }
 
     public function yearly(Request $request)
@@ -93,6 +102,6 @@ class DockingReportController extends Controller
         $query = $this->buildReportQuery()
             ->whereYear('dockings.docking_date', (int) $validated['year']);
 
-        return $this->renderReport($query);
+        return $this->renderReport($this->applyUserFilter($query, $request));
     }
 }

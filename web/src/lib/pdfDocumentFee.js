@@ -221,17 +221,7 @@ const getFeeRows = (reportData, coverageKey) => {
       : [];
 
   return fees
-    .filter((fee) => {
-      const effectiveFromYear = normalizeDateValue(fee?.effective_from).slice(0, 4);
-      const effectiveToYear = normalizeDateValue(fee?.effective_to).slice(0, 4);
-      const status = getFeeStatus(fee);
-
-      return (
-        effectiveFromYear === coverageKey ||
-        effectiveToYear === coverageKey ||
-        (status === "pending" && effectiveFromYear >= coverageKey)
-      );
-    })
+    .filter((fee) => normalizeDateValue(fee?.effective_from).slice(0, 4) === coverageKey)
     .sort((left, right) => {
       const leftFrom = normalizeDateValue(left?.effective_from);
       const rightFrom = normalizeDateValue(right?.effective_from);
@@ -345,7 +335,7 @@ export const buildFeePdf = async ({
   const secondRowItems = [
     ["Municipality", "Opol"],
     ["Region", "X"],
-    ["Total Fees", String(reportData?.totalRecords ?? rows.length)],
+    ["Total Fees", String(rows.length)],
   ];
   const firstRowWidth = CONTENT_WIDTH / firstRowItems.length;
   const secondRowWidth = CONTENT_WIDTH / secondRowItems.length;

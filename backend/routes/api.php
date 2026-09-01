@@ -32,6 +32,7 @@ use App\Http\Controllers\BfarReportController;
 use App\Http\Controllers\VehicleTicketReportController;
 use App\Http\Controllers\RegisteredBoatsReportController;
 use App\Http\Controllers\OwnerInfoReportController;
+use App\Http\Controllers\BoatTypesReportController;
 use App\Http\Controllers\DockingReportController;
 use App\Http\Controllers\BackupRecoveryController;
 use App\Http\Controllers\VoidRequestController;
@@ -197,6 +198,7 @@ Route::middleware('auth:sanctum')->group(function () {
     |----------------------------------------------------------------------
     */
     Route::prefix('revenue-reports')->group(function () {
+        Route::get('users', [RevenueReportController::class, 'users']);
         Route::get('daily', [RevenueReportController::class, 'daily']);
         Route::get('monthly', [RevenueReportController::class, 'monthly']);
         Route::get('yearly', [RevenueReportController::class, 'yearly']);
@@ -234,6 +236,9 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::prefix('owner-info-reports')->group(function () {
         Route::get('/', [OwnerInfoReportController::class, 'index']);
+    });
+    Route::prefix('boat-types-reports')->group(function () {
+        Route::get('yearly', [BoatTypesReportController::class, 'yearly']);
     });
     Route::prefix('docking-reports')->group(function () {
         Route::get('daily', [DockingReportController::class, 'daily']);

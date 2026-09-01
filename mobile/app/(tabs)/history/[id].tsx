@@ -35,6 +35,13 @@ type TransactionLockState = {
   remittance_reference_no?: string | null;
 };
 
+const parseMoneyValue = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const endpointForType = (type: TransactionType) => {
   switch (type) {
     case "docking":
@@ -209,7 +216,7 @@ const createDraftDetail = (draft: OfflineTransactionDraft): TransactionRecord =>
   if (draft.type === "banyera") {
     const items = Array.isArray(payload.items) ? payload.items : [];
     const totalFee = items.reduce(
-      (sum, item) => sum + Number(item?.subtotal ?? 0),
+      (sum, item) => sum + parseMoneyValue(item?.subtotal),
       0
     );
 
@@ -695,7 +702,7 @@ export default function HistoryDetailScreen() {
             daug_only: true,
             items: updatedItems.map((item) => ({
               ...item,
-              daug: item.daug !== "" ? Number(item.daug) : null,
+              daug: item.daug !== "" ? parseMoneyValue(item.daug) : null,
             })),
           }),
         }
@@ -844,7 +851,7 @@ export default function HistoryDetailScreen() {
       ? detail.items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
       : 0;
     const ticketDisplayFee =
-      Number(detail.total_fee && Number(detail.total_fee) > 0 ? detail.total_fee : detail.ticket_fee || 0);
+      parseMoneyValue(detail.total_fee) > 0 ? parseMoneyValue(detail.total_fee) : parseMoneyValue(detail.ticket_fee);
 
     const voidedDetailsBlock = isVoided ? (
       <View className="mb-4 -mx-5 rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-5 py-5 shadow-sm shadow-black/5">
@@ -991,7 +998,7 @@ export default function HistoryDetailScreen() {
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                     <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      ₱{Number(detail.docking_fee || 0).toLocaleString("en-PH", {
+                      ₱{parseMoneyValue(detail.docking_fee).toLocaleString("en-PH", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -1115,7 +1122,7 @@ export default function HistoryDetailScreen() {
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                     <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      ₱{Number(detail.total_fee || 0).toLocaleString("en-PH", {
+                      ₱{parseMoneyValue(detail.total_fee).toLocaleString("en-PH", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -1153,8 +1160,8 @@ export default function HistoryDetailScreen() {
                       item.classification?.name ||
                       "Unknown Classification";
                     const qty = Number(item.quantity || 0);
-                    const subtotal = Number(item.subtotal || 0);
-                    const daugValue = item.daug !== undefined && item.daug !== null ? Number(item.daug) : 0;
+                    const subtotal = parseMoneyValue(item.subtotal);
+                    const daugValue = item.daug !== undefined && item.daug !== null ? parseMoneyValue(item.daug) : 0;
                     const daug = `₱${daugValue.toLocaleString("en-PH", {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
@@ -1301,7 +1308,7 @@ export default function HistoryDetailScreen() {
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                     <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      ₱{Number(detail.amount || 0).toLocaleString("en-PH", {
+                      ₱{parseMoneyValue(detail.amount).toLocaleString("en-PH", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -1317,7 +1324,7 @@ export default function HistoryDetailScreen() {
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                     <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      ₱{Number(detail.surplus || 0).toLocaleString("en-PH", {
+                      ₱{parseMoneyValue(detail.surplus).toLocaleString("en-PH", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -1330,7 +1337,7 @@ export default function HistoryDetailScreen() {
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                     <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      ₱{Number(detail.deficit || 0).toLocaleString("en-PH", {
+                      ₱{parseMoneyValue(detail.deficit).toLocaleString("en-PH", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}

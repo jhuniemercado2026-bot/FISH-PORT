@@ -61,19 +61,19 @@ const PERIOD_OPTIONS = [
 
 const REMITTANCE_STATUS_OPTIONS = [
   { value: "all", label: "All Status" },
-  { value: "remitted", label: "Checked" },
-  { value: "pending", label: "Unchecked" },
+  { value: "Checked", label: "Checked" },
+  { value: "Unchecked", label: "Unchecked" },
 ];
 
 const REMITTANCE_STATUS_LEGEND = [
   {
-    key: "remitted",
+    key: "Checked",
     label: "Checked",
     meaning: "Checked remittance record",
     color: "#16a34a",
   },
   {
-    key: "pending",
+    key: "Unchecked",
     label: "Unchecked",
     meaning: "Awaiting remittance check",
     color: "#f59e0b",
@@ -124,7 +124,10 @@ const getRemittanceHighlightId = ({ highlightedSearchResult, search }) => {
 };
 
 const getRemittanceStatusColor = (status) =>
-  String(status || "").toLowerCase() === "remitted" ? "#16a34a" : "#f59e0b";
+  ["checked", "remitted"].includes(String(status || "").toLowerCase()) ? "#16a34a" : "#f59e0b";
+
+const isCheckedRemittanceStatus = (status) =>
+  ["checked", "remitted"].includes(String(status || "").toLowerCase());
 
 const getTodayDateString = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -385,6 +388,9 @@ const SuperCollections = ({ initialTab }) => {
     ? remittanceProgress.users.filter((user) => !user?.has_remitted)
     : [];
   const hasPendingInspectorRemittances = pendingRemittanceUsers.length > 0;
+  const remittanceProgressCountLabel = remittedUsersCount > 0
+    ? `${remittedUsersCount} of ${eligibleUsersCount} inspector remitted`
+    : `${pendingRemittanceUsers.length} of ${eligibleUsersCount} inspector not remitted`;
   const confirmedRemittanceAmount = Number(createRemittanceForm.confirmedAmount || 0);
   const totalAmountToRemit = createRemittanceForm.confirmedAmount === "" ? 0 : confirmedRemittanceAmount;
   const surplusAmount = createRemittanceForm.confirmedAmount === ""
@@ -757,19 +763,19 @@ const SuperCollections = ({ initialTab }) => {
   };
 
   const handleRemitRemittance = (row) => {
-    if (String(row?.status || "").toLowerCase() === "remitted") return;
+    if (isCheckedRemittanceStatus(row?.status)) return;
     remitMutation.mutate(row.remittance_id);
   };
 
   const handleUnremitRemittance = (row) => {
-    if (String(row?.status || "").toLowerCase() !== "remitted") return;
+    if (!isCheckedRemittanceStatus(row?.status)) return;
     unremitMutation.mutate(row.remittance_id);
   };
 
   const renderRemittanceStatusAction = (row) => {
     const isUnremitting = unremitMutation.isPending && unremittingRemittanceId === row.remittance_id;
     const isRemitting = remitMutation.isPending && remittingRemittanceId === row.remittance_id;
-    const isRowRemitted = String(row.status || "").toLowerCase() === "remitted";
+    const isRowRemitted = isCheckedRemittanceStatus(row.status);
 
     if (isUnremitting) {
       return (
@@ -1359,7 +1365,7 @@ const SuperCollections = ({ initialTab }) => {
                                 Pending:
                               </p>
                               <p className="m-0 text-right text-[11px] font-semibold uppercase text-[#6F6F82]">
-                                {`${remittedUsersCount} of ${eligibleUsersCount} users remitted`}
+                                {remittanceProgressCountLabel}
                               </p>
                             </div>
                             <ol className="m-0 mt-1 list-decimal space-y-1 pl-5 text-[12px] leading-5 text-slate-600">
@@ -1374,7 +1380,7 @@ const SuperCollections = ({ initialTab }) => {
                           </div>
                         ) : (
                           <p className="m-0 mt-2 text-right text-[11px] font-semibold uppercase text-[#6F6F82]">
-                            {`${remittedUsersCount} of ${eligibleUsersCount} users remitted`}
+                            {remittanceProgressCountLabel}
                           </p>
                         )}
                         <ModalFieldError message={createRemittanceErrors.remittance_progress} />

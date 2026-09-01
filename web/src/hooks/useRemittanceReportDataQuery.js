@@ -37,14 +37,17 @@ export const getRemittanceReportQueryOptions = ({
   selectedDate,
   selectedMonth,
   selectedYear,
+  userId,
 } = {}) => {
   return {
-    queryKey: ["remittance-report", { filterType, selectedDate, selectedMonth, selectedYear }],
+    queryKey: ["remittance-report", { filterType, selectedDate, selectedMonth, selectedYear, userId }],
     queryFn: async ({ signal }) => {
+      const withUser = (params) => (userId && userId !== "all" ? { ...params, user_id: userId } : params);
+
       if (filterType === "daily") {
         if (!selectedDate) return extractRemittanceReport(null);
         const response = await api.get("/remittance-reports/daily", {
-          params: { date: selectedDate },
+          params: withUser({ date: selectedDate }),
           signal,
         });
         return extractRemittanceReport(response.data);
@@ -53,7 +56,7 @@ export const getRemittanceReportQueryOptions = ({
       if (filterType === "monthly") {
         if (!selectedMonth || !selectedYear) return extractRemittanceReport(null);
         const response = await api.get("/remittance-reports/monthly", {
-          params: { month: String(selectedMonth).split("-")[1], year: selectedYear },
+          params: withUser({ month: String(selectedMonth).split("-")[1], year: selectedYear }),
           signal,
         });
         return extractRemittanceReport(response.data);
@@ -62,7 +65,7 @@ export const getRemittanceReportQueryOptions = ({
       if (filterType === "yearly") {
         if (!selectedYear) return extractRemittanceReport(null);
         const response = await api.get("/remittance-reports/yearly", {
-          params: { year: selectedYear },
+          params: withUser({ year: selectedYear }),
           signal,
         });
         return extractRemittanceReport(response.data);

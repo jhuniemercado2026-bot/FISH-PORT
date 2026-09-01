@@ -26,7 +26,6 @@ const hexToRgb = (hex) => {
 const COLORS = {
   black: hexToRgb("#000000"),
   mediumGray: hexToRgb("#ECECEC"),
-  white: hexToRgb("#FFFFFF"),
 };
 
 const sanitizeText = (value) =>
@@ -34,22 +33,6 @@ const sanitizeText = (value) =>
     .replace(/[^\x20-\x7E]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-
-const loadPngBytes = async (path) => {
-  try {
-    const response = await fetch(path);
-    if (!response.ok) return null;
-    return new Uint8Array(await response.arrayBuffer());
-  } catch {
-    return null;
-  }
-};
-
-const getOwnerName = (owner) =>
-  sanitizeText(
-    owner?.full_name ||
-      `${owner?.owner_firstname ?? ""} ${owner?.owner_lastname ?? ""}`.trim(),
-  ) || "-";
 
 const createPdfComposer = async () => {
   const pdfDoc = await PDFDocument.create();
@@ -65,11 +48,7 @@ const createPdfComposer = async () => {
   };
 
   const drawText = (text, x, y, options = {}) => {
-    const {
-      fontSize = 10,
-      bold = false,
-      color = COLORS.black,
-    } = options;
+    const { fontSize = 10, bold = false, color = COLORS.black } = options;
 
     page.drawText(sanitizeText(text) || "-", {
       x,
@@ -81,11 +60,7 @@ const createPdfComposer = async () => {
   };
 
   const drawRect = (x, y, width, height, options = {}) => {
-    const {
-      borderColor = COLORS.black,
-      fillColor,
-      borderWidth = 1,
-    } = options;
+    const { borderColor = COLORS.black, fillColor, borderWidth = 1 } = options;
 
     page.drawRectangle({
       x,
@@ -110,13 +85,7 @@ const createPdfComposer = async () => {
 
   const drawImage = (image, x, y, width, height) => {
     if (!image) return;
-
-    page.drawImage(image, {
-      x,
-      y,
-      width,
-      height,
-    });
+    page.drawImage(image, { x, y, width, height });
   };
 
   return {
@@ -168,25 +137,39 @@ const drawTableHeader = (composer, columns) => {
   composer.cursorY -= headerHeight;
 };
 
-const drawTableRowBorder = (composer, rowBottom, rowHeight) => {
-  composer.drawRect(MARGIN_X, rowBottom, CONTENT_WIDTH, rowHeight, {
-    borderColor: COLORS.black,
-    borderWidth: BORDER_WIDTH,
+const drawRightAlignedText = (composer, value, x, columnWidth, y, options = {}) => {
+  const fontSize = options.fontSize ?? 8;
+  const bold = options.bold ?? false;
+  const font = bold ? composer.boldFont : composer.regularFont;
+  const text = sanitizeText(value) || "-";
+  const textWidth = font.widthOfTextAtSize(text, fontSize);
+  const safeX = Math.max(x + 6, x + columnWidth - textWidth - 6);
+
+  composer.drawText(text, safeX, y, {
+    fontSize,
+    bold,
+    color: options.color ?? COLORS.black,
   });
 };
 
-export const buildOwnerInfoPdf = async ({
+export const buildBoatTypesPdf = async ({
+  year,
+  yearlyDate,
   preparedBy = "Admin",
   reportData = {},
 }) => {
   const composer = await createPdfComposer();
-  const owners = Array.isArray(reportData.owners) ? reportData.owners : [];
-  const totalOwners = Number(reportData.totalOwners ?? reportData.total_owners ?? owners.length);
-  const generatedOn = new Date().toLocaleDateString("en-PH", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
+  const boatTypes = Array.isArray(reportData.boatTypes)
+    ? reportData.boatTypes
+    : Array.isArray(reportData.boat_types)
+      ? reportData.boat_types
+      : [];
+  const coverageYear = String(yearlyDate || year || reportData.year || "-");
+  const totalUsage = Number(
+    reportData.totalUsage ??
+      reportData.total_usage ??
+      boatTypes.reduce((sum, item) => sum + Number(item?.usage_count ?? item?.usageCount ?? 0), 0),
+  );
   const headerImageBytes = await getHeaderPngBytes();
   const headerImage = headerImageBytes
     ? await composer.pdfDoc.embedPng(headerImageBytes)
@@ -246,7 +229,7 @@ export const buildOwnerInfoPdf = async ({
     fillColor: COLORS.black,
     borderWidth: 0,
   });
-  composer.drawCenteredText("Boat Owner Report", textCenterX, rightLowerSectionCenterY - 3, {
+  composer.drawCenteredText("Boat Types Report", textCenterX, rightLowerSectionCenterY - 3, {
     fontSize: 12,
     bold: true,
   });
@@ -257,14 +240,14 @@ export const buildOwnerInfoPdf = async ({
   const detailsRowHeight = 28;
   const detailsContainerHeight = detailsRowHeight * 2;
   const firstRowItems = [
-    ["Report Type", "Boat Owner"],
-    ["Generated On", generatedOn],
+    ["Report Type", "Yearly"],
+    ["Coverage Year", coverageYear],
     ["Prepared By", preparedBy],
   ];
   const secondRowItems = [
     ["Municipality", "Opol"],
     ["Region", "X"],
-    ["Total Owners", String(Number.isFinite(totalOwners) ? totalOwners : owners.length)],
+    ["Total Usage", String(Number.isFinite(totalUsage) ? totalUsage : 0)],
   ];
   const firstRowWidth = CONTENT_WIDTH / firstRowItems.length;
   const secondRowWidth = CONTENT_WIDTH / secondRowItems.length;
@@ -328,30 +311,20 @@ export const buildOwnerInfoPdf = async ({
   });
 
   composer.cursorY = boxTop - detailsContainerHeight - 18;
-  const balancedColumnWidth = CONTENT_WIDTH / 3;
 
   const columns = [
-    { key: "full_name", label: "Full Name", width: balancedColumnWidth },
-    { key: "contact_number", label: "Contact", width: balancedColumnWidth },
-    { key: "address", label: "Address", width: balancedColumnWidth },
+    { key: "typeName", label: "Boat Types", width: CONTENT_WIDTH * 0.7 },
+    { key: "usageCount", label: "Usage Count", width: CONTENT_WIDTH * 0.3 },
   ];
 
   drawTableHeader(composer, columns);
 
-  const rows =
-    owners.length > 0
-      ? owners.map((owner) => ({
-          full_name: getOwnerName(owner),
-          contact_number: owner.contact_number || "-",
-          address: owner.address || "-",
-        }))
-      : [
-          {
-            full_name: "-",
-            contact_number: "-",
-            address: "",
-          },
-        ];
+  const rows = boatTypes.length > 0
+    ? boatTypes.map((boatType) => ({
+        typeName: boatType.type_name || boatType.typeName || "-",
+        usageCount: Number(boatType.usage_count ?? boatType.usageCount ?? 0),
+      }))
+    : [{ typeName: "-", usageCount: 0 }];
 
   const detailRowHeight = 24;
   rows.forEach((row) => {
@@ -361,7 +334,10 @@ export const buildOwnerInfoPdf = async ({
     }
 
     const rowBottom = composer.cursorY - detailRowHeight;
-    drawTableRowBorder(composer, rowBottom, detailRowHeight);
+    composer.drawRect(MARGIN_X, rowBottom, CONTENT_WIDTH, detailRowHeight, {
+      borderColor: COLORS.black,
+      borderWidth: BORDER_WIDTH,
+    });
 
     let x = MARGIN_X;
     columns.forEach((column, index) => {
@@ -373,10 +349,21 @@ export const buildOwnerInfoPdf = async ({
         });
       }
 
-      composer.drawText(String(row[column.key] ?? "-"), x + 6, composer.cursorY - 15, {
-        fontSize: 8,
-        color: COLORS.black,
-      });
+      if (column.key === "usageCount") {
+        drawRightAlignedText(
+          composer,
+          String(row[column.key] ?? 0),
+          x,
+          column.width,
+          composer.cursorY - 15,
+        );
+      } else {
+        composer.drawText(String(row[column.key] ?? "-"), x + 6, composer.cursorY - 15, {
+          fontSize: 8,
+          color: COLORS.black,
+        });
+      }
+
       x += column.width;
     });
 

@@ -8,6 +8,15 @@ use Illuminate\Support\Facades\DB;
 
 class RemittanceReportController extends Controller
 {
+    private function requestedUserId(Request $request): ?int
+    {
+        $userId = $request->query('user_id');
+        if ($userId === null || $userId === '' || $userId === 'all') return null;
+        if (!ctype_digit((string) $userId)) abort(400, 'Invalid user filter.');
+
+        return (int) $userId;
+    }
+
     private function emptyReportPayload(): array
     {
         return [
@@ -21,7 +30,7 @@ class RemittanceReportController extends Controller
         ];
     }
 
-    private function collectionSources(?string $date, ?string $month, ?string $year): array
+    private function collectionSources(?string $date, ?string $month, ?string $year, ?int $userId = null): array
     {
         $payments = DB::table('payments as p')
             ->join('bills as b', 'b.bill_id', '=', 'p.bill_id')
@@ -38,6 +47,10 @@ class RemittanceReportController extends Controller
                 DB::raw('COALESCE(p.payment_date, p.created_at) as sort_date'),
             ]);
 
+        if ($userId) {
+            $payments->where('p.received_by', $userId);
+        }
+
         $tickets = DB::table('vehicle_tickets as vt')
             ->leftJoin('vehicle_types as vehicle_type', 'vehicle_type.vehicle_type_id', '=', 'vt.vehicle_type_id')
             ->whereNull('vt.voided_at')
@@ -51,6 +64,10 @@ class RemittanceReportController extends Controller
                 'vt.ticket_fee as cash_received',
                 DB::raw('COALESCE(vt.ticket_date, vt.created_at) as sort_date'),
             ]);
+
+        if ($userId) {
+            $tickets->where('vt.created_by', $userId);
+        }
 
         $query = DB::query()->fromSub($payments->unionAll($tickets), 'collections');
 
@@ -82,7 +99,7 @@ class RemittanceReportController extends Controller
             ->all();
     }
 
-    private function getRemittanceRowsAndTotals(?string $date, ?string $month, ?string $year): array
+    private function getRemittanceRowsAndTotals(?string $date, ?string $month, ?string $year, ?int $userId = null): array
     {
         $query = Remittance::query();
 
@@ -93,6 +110,10 @@ class RemittanceReportController extends Controller
                 ->whereMonth('date', $month);
         } elseif ($year) {
             $query->whereYear('date', $year);
+        }
+
+        if ($userId) {
+            $query->where('submitted_by', $userId);
         }
 
         $remittances = $query
@@ -126,7 +147,7 @@ class RemittanceReportController extends Controller
                 'surplus' => round($surplus, 2),
                 'deficit' => round($deficit, 2),
                 'remarks' => $remittance->remarks ?? '-',
-                'status' => strtoupper((string) ($remittance->status ?? '-')),
+                'status' => Remittance::normalizeStatus($remittance->status ?? '-'),
             ];
         })->all();
 
@@ -144,7 +165,7 @@ class RemittanceReportController extends Controller
         $totalSurplus = round((float) ($totals->totalSurplus ?? 0), 2);
         $totalDeficit = round((float) ($totals->totalDeficit ?? 0), 2);
         $totalTodaysCashReceived = round($totalRemittances - $totalSurplus + $totalDeficit, 2);
-        $collectionSources = $this->collectionSources($date, $month, $year);
+        $collectionSources = $this->collectionSources($date, $month, $year, $userId);
 
         return [
             'rows' => $rows,
@@ -164,7 +185,7 @@ class RemittanceReportController extends Controller
             return response()->json($this->emptyReportPayload(), 400);
         }
 
-        return response()->json($this->getRemittanceRowsAndTotals($date, null, null));
+        return response()->json($this->getRemittanceRowsAndTotals($date, null, null, $this->requestedUserId($request)));
     }
 
     public function monthly(Request $request)
@@ -176,7 +197,7 @@ class RemittanceReportController extends Controller
             return response()->json($this->emptyReportPayload(), 400);
         }
 
-        return response()->json($this->getRemittanceRowsAndTotals(null, $month, $year));
+        return response()->json($this->getRemittanceRowsAndTotals(null, $month, $year, $this->requestedUserId($request)));
     }
 
     public function yearly(Request $request)
@@ -186,6 +207,6 @@ class RemittanceReportController extends Controller
             return response()->json($this->emptyReportPayload(), 400);
         }
 
-        return response()->json($this->getRemittanceRowsAndTotals(null, null, $year));
+        return response()->json($this->getRemittanceRowsAndTotals(null, null, $year, $this->requestedUserId($request)));
     }
 }

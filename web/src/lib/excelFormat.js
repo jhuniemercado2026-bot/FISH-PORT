@@ -7,7 +7,7 @@ const getExportValue = (value) => {
 
 const isNumericColumn = (column) => {
   const label = Array.isArray(column.label) ? column.label.join(" ") : column.label;
-  return /amount|fee|total|receivable|quantity|qty|daug|balance|php|price|tickets?/i.test(
+  return /amount|fee|total|receivable|quantity|qty|count|daug|balance|php|price|tickets?/i.test(
     `${column.key} ${label}`,
   );
 };
@@ -170,7 +170,22 @@ const getColumnWidth = (column, rows) => {
   return Math.min(28, Math.max(12, baseWidth));
 };
 
-const fitColumnWidthsForA4 = (columns, rows) => {
+const getReportColumnWidths = (columns, rows, sheetName) => {
+  if (sheetName === "BoatTypes") {
+    return columns.map((column) => {
+      if (column.key === "typeName") return 92;
+      if (column.key === "usageCount") return 40;
+      return getColumnWidth(column, rows);
+    });
+  }
+
+  return null;
+};
+
+const fitColumnWidthsForA4 = (columns, rows, sheetName) => {
+  const reportWidths = getReportColumnWidths(columns, rows, sheetName);
+  if (reportWidths) return reportWidths;
+
   const widths = columns.map((column) => getColumnWidth(column, rows));
   const totalWidth = widths.reduce((sum, width) => sum + width, 0);
   if (!totalWidth) return widths;
@@ -227,7 +242,7 @@ export const createExcelExportBlob = async ({
     right: { style: "thin", color: { argb: "FF080616" } },
   };
 
-  const fittedColumnWidths = fitColumnWidthsForA4(columns, rows);
+  const fittedColumnWidths = fitColumnWidthsForA4(columns, rows, sheetName);
 
   worksheet.columns = columns.map((column, index) => ({
     header: formatColumnHeader(column),
@@ -330,58 +345,95 @@ export const createExcelExportBlob = async ({
 
   worksheet.spliceRows(2, 0, spacerRow);
 
+  const metadataLabels = sheetName === "BoatTypes"
+    ? [
+        "Report:",
+        reportHeader?.useGeneratedOn ? "Generated On:" : reportHeader?.coverageLabel || "Coverage:",
+      ]
+    : [
+        "Report:",
+        reportHeader?.useGeneratedOn ? "Generated On:" : reportHeader?.coverageLabel || "Coverage:",
+        totalLabel,
+      ];
+  const metadataValues = sheetName === "BoatTypes"
+    ? [
+        reportHeader?.reportTitle || reportHeader?.reportTypeLabel || "",
+        reportHeader?.useGeneratedOn
+          ? new Date().toLocaleDateString("en-PH", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            })
+          : reportHeader?.coverageValue || "",
+      ]
+    : [
+        reportHeader?.reportTitle || reportHeader?.reportTypeLabel || "",
+        reportHeader?.useGeneratedOn
+          ? new Date().toLocaleDateString("en-PH", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            })
+          : reportHeader?.coverageValue || "",
+        formattedTotalValue,
+      ];
+
   const metadataStart = 3;
-  const metadataEnd = 4;
-  const firstThird = Math.floor(columns.length / 3);
-  const secondThird = Math.floor((columns.length * 2) / 3);
+  const useCompactMetadata = columns.length < 3;
+  let metadataEnd = 4;
 
-  const metadataLabels = [
-    "Report:",
-    reportHeader?.useGeneratedOn ? "Generated On:" : reportHeader?.coverageLabel || "Coverage:",
-    totalLabel,
-  ];
-  const metadataValues = [
-    reportHeader?.reportTitle || reportHeader?.reportTypeLabel || "",
-    reportHeader?.useGeneratedOn
-      ? new Date().toLocaleDateString("en-PH", {
-          month: "long",
-          day: "numeric",
-          year: "numeric",
-        })
-      : reportHeader?.coverageValue || "",
-    formattedTotalValue,
-  ];
+  if (useCompactMetadata) {
+    metadataEnd = metadataStart + 1;
 
-  [metadataLabels, metadataValues].forEach((values, rowOffset) => {
-    const rowIndex = metadataStart + rowOffset;
-    const row = worksheet.getRow(rowIndex);
-    row.height = 18;
+    [metadataLabels, metadataValues].forEach((values, rowOffset) => {
+      const rowIndex = metadataStart + rowOffset;
+      const row = worksheet.getRow(rowIndex);
+      row.height = 18;
 
-    worksheet.mergeCells(rowIndex, 1, rowIndex, firstThird);
-    worksheet.mergeCells(rowIndex, firstThird + 1, rowIndex, secondThird);
-    worksheet.mergeCells(rowIndex, secondThird + 1, rowIndex, columns.length);
+      values.forEach((value, index) => {
+        const cell = row.getCell(index + 1);
+        cell.value = value;
+        cell.font = { ...defaultFont, size: 11, bold: rowOffset === 0 };
+        cell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+        cell.fill = rowOffset === 0 ? { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } } : undefined;
+        cell.border = borderStyle;
+      });
+    });
+  } else {
+    const firstThird = Math.floor(columns.length / 3);
+    const secondThird = Math.floor((columns.length * 2) / 3);
 
-    const leftCell = row.getCell(1);
-    leftCell.value = values[0];
-    leftCell.font = { ...defaultFont, size: 11, bold: rowOffset === 0 };
-    leftCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
-    leftCell.fill = rowOffset === 0 ? { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } } : undefined;
-    leftCell.border = borderStyle;
+    [metadataLabels, metadataValues].forEach((values, rowOffset) => {
+      const rowIndex = metadataStart + rowOffset;
+      const row = worksheet.getRow(rowIndex);
+      row.height = 18;
 
-    const centerCell = row.getCell(firstThird + 1);
-    centerCell.value = values[1];
-    centerCell.font = { ...defaultFont, size: 11, bold: rowOffset === 0 };
-    centerCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
-    centerCell.fill = rowOffset === 0 ? { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } } : undefined;
-    centerCell.border = borderStyle;
+      worksheet.mergeCells(rowIndex, 1, rowIndex, firstThird);
+      worksheet.mergeCells(rowIndex, firstThird + 1, rowIndex, secondThird);
+      worksheet.mergeCells(rowIndex, secondThird + 1, rowIndex, columns.length);
 
-    const rightCell = row.getCell(secondThird + 1);
-    rightCell.value = values[2];
-    rightCell.font = { ...defaultFont, size: 11, bold: rowOffset === 0 };
-    rightCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
-    rightCell.fill = rowOffset === 0 ? { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } } : undefined;
-    rightCell.border = borderStyle;
-  });
+      const leftCell = row.getCell(1);
+      leftCell.value = values[0];
+      leftCell.font = { ...defaultFont, size: 11, bold: rowOffset === 0 };
+      leftCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+      leftCell.fill = rowOffset === 0 ? { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } } : undefined;
+      leftCell.border = borderStyle;
+
+      const centerCell = row.getCell(firstThird + 1);
+      centerCell.value = values[1];
+      centerCell.font = { ...defaultFont, size: 11, bold: rowOffset === 0 };
+      centerCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+      centerCell.fill = rowOffset === 0 ? { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } } : undefined;
+      centerCell.border = borderStyle;
+
+      const rightCell = row.getCell(secondThird + 1);
+      rightCell.value = values[2];
+      rightCell.font = { ...defaultFont, size: 11, bold: rowOffset === 0 };
+      rightCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+      rightCell.fill = rowOffset === 0 ? { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } } : undefined;
+      rightCell.border = borderStyle;
+    });
+  }
 
   worksheet.spliceRows(metadataEnd + 1, 0, spacerRow);
   const headerRowIndex = metadataEnd + 2;
@@ -404,6 +456,9 @@ export const createExcelExportBlob = async ({
         vertical: "middle",
         wrapText: true,
       };
+      if (column.key === "usageCount") {
+        cell.numFmt = "0";
+      }
       cell.border = borderStyle;
     });
   });
@@ -422,7 +477,7 @@ export const createExcelExportBlob = async ({
     });
   });
 
-  if (totalFound) {
+  if (totalFound && sheetName !== "BoatTypes") {
     const totalRow = worksheet.addRow(
       columns.map((column, index) => {
         if (index === 0) return "Total";
@@ -437,6 +492,9 @@ export const createExcelExportBlob = async ({
         horizontal: isNumericColumn(column) ? "right" : "left",
         vertical: "middle",
       };
+      if (column.key === "usageCount") {
+        cell.numFmt = "0";
+      }
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEEEEE" } };
       cell.border = borderStyle;
     });

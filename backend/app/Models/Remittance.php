@@ -8,6 +8,9 @@ use RuntimeException;
 
 class Remittance extends Model
 {
+    public const STATUS_UNCHECKED = 'Unchecked';
+    public const STATUS_CHECKED = 'Checked';
+
     protected $primaryKey = 'remittance_id';
 
     protected $fillable = [
@@ -81,7 +84,7 @@ class Remittance extends Model
 
     public function scopeTableFilters(Builder $query, array $filters = []): Builder
     {
-        $status = (string) ($filters['status'] ?? 'all');
+        $status = static::normalizeStatus($filters['status'] ?? 'all');
         $period = (string) ($filters['period'] ?? 'all');
 
         if ($status !== '' && $status !== 'all') {
@@ -99,6 +102,23 @@ class Remittance extends Model
         };
 
         return $query;
+    }
+
+    public static function normalizeStatus(?string $status): string
+    {
+        $normalized = strtolower(trim((string) $status));
+
+        return match ($normalized) {
+            'pending', 'unchecked' => self::STATUS_UNCHECKED,
+            'remitted', 'checked' => self::STATUS_CHECKED,
+            'all' => 'all',
+            default => trim((string) $status),
+        };
+    }
+
+    public function isChecked(): bool
+    {
+        return static::normalizeStatus($this->status) === self::STATUS_CHECKED;
     }
 
     public function scopeTableSort(Builder $query, ?string $sort = null): Builder

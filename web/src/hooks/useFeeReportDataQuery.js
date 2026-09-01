@@ -1,19 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "../api/axios";
 
-const extractFeeReportPayload = (payload) => ({
-  fees: Array.isArray(payload?.fees) ? payload.fees : [],
-  totalRecords: Number(payload?.total_records ?? 0),
-});
+const FEE_REPORT_QUERY_VERSION = 2;
 
-export const getFeeReportQueryOptions = ({ year } = {}) => ({
-  queryKey: ["fee-report", { year }],
+const extractFeeReportPayload = (payload) => {
+  const fees = Array.isArray(payload?.fees) ? payload.fees : [];
+
+  return {
+    fees,
+    totalRecords: fees.length,
+  };
+};
+
+export const getFeeReportQueryOptions = ({ year, userId } = {}) => ({
+  queryKey: ["fee-report", { year, userId, version: FEE_REPORT_QUERY_VERSION }],
   queryFn: async ({ signal }) => {
     if (!year) return extractFeeReportPayload(null);
 
     try {
       const response = await api.get("/fees-reports/yearly", {
-        params: { year },
+        params: userId && userId !== "all" ? { year, user_id: userId } : { year },
         signal,
       });
       return extractFeeReportPayload(response.data);

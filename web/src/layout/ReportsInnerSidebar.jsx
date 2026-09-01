@@ -18,7 +18,8 @@ const FONT = "'Montserrat', sans-serif";
 export const REPORT_TABS = [
   { key: "revenue", label: "Revenue", icon: IoStatsChartOutline },
   { key: "registered-boats", label: "Registered Boats", icon: IoBoatOutline },
-  { key: "owner-info", label: "Owner Info", icon: IoPeopleOutline },
+  { key: "boat-types", label: "Boat Types", icon: IoBoatOutline },
+  { key: "owner-info", label: "Boat Owner", icon: IoPeopleOutline },
   { key: "docking", label: "Docking", icon: IoBoatOutline },
   { key: "banyera", label: "Banyera", icon: IoFishOutline },
   { key: "fisheries-bfar", label: "Fisheries (BFAR)", icon: IoFishOutline },

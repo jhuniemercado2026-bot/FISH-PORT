@@ -7,6 +7,30 @@ use Illuminate\Support\Facades\DB;
 
 class RevenueReportController extends Controller
 {
+    private function reportUserRoles(Request $request): ?array
+    {
+        return match ($request->user()?->role) {
+            'head' => ['coordinator', 'inspector'],
+            'coordinator' => ['inspector'],
+            default => null,
+        };
+    }
+
+    private function requestedUserId(Request $request): array
+    {
+        $rawUserId = $request->query('user_id');
+
+        if ($rawUserId === null || $rawUserId === '' || $rawUserId === 'all') {
+            return ['valid' => true, 'value' => null];
+        }
+
+        if (!ctype_digit((string) $rawUserId)) {
+            return ['valid' => false, 'value' => null];
+        }
+
+        return ['valid' => true, 'value' => (int) $rawUserId];
+    }
+
     protected function normalizeRevenueRow(object|array $row): array
     {
         $payload = is_array($row) ? $row : (array) $row;
@@ -29,7 +53,7 @@ class RevenueReportController extends Controller
         ];
     }
 
-    private function getRevenueRowsAndTotal(?string $date, ?string $month, ?string $year)
+    private function getRevenueRowsAndTotal(?string $date, ?string $month, ?string $year, ?int $userId = null, ?array $reportUserRoles = null)
     {
         // Build subqueries for OR numbers and receivable amounts
         $dockingOrsSubquery = DB::table('bill_items')
@@ -117,6 +141,22 @@ class RevenueReportController extends Controller
             ->whereNull('vehicle_tickets.voided_at')
             ->groupBy('vehicle_tickets.ticket_date', 'vehicle_tickets.plate_number', 'vehicle_types.type_name', 'vehicle_tickets.ticket_type');
 
+        if ($userId) {
+            $dockingQuery->where('dockings.created_by', $userId);
+            $banyeraQuery->where('banyera_transactions.created_by', $userId);
+            $ticketQuery->where('vehicle_tickets.created_by', $userId);
+        }
+
+        if (!empty($reportUserRoles)) {
+            $reportUserIds = DB::table('users')
+                ->select('user_id')
+                ->whereIn('role', $reportUserRoles);
+
+            $dockingQuery->whereIn('dockings.created_by', clone $reportUserIds);
+            $banyeraQuery->whereIn('banyera_transactions.created_by', clone $reportUserIds);
+            $ticketQuery->whereIn('vehicle_tickets.created_by', clone $reportUserIds);
+        }
+
         // Apply date filters
         if ($date) {
             $dockingQuery->whereDate('dockings.docking_date', $date);
@@ -175,7 +215,18 @@ class RevenueReportController extends Controller
                 return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
             }
 
-            $result = $this->getRevenueRowsAndTotal($date, null, null);
+            $requestedUserId = $this->requestedUserId($request);
+            if (!$requestedUserId['valid']) {
+                return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
+            }
+
+            $result = $this->getRevenueRowsAndTotal(
+                $date,
+                null,
+                null,
+                $requestedUserId['value'],
+                $requestedUserId['value'] ? $this->reportUserRoles($request) : null
+            );
 
             return response()->json($result);
         } catch (\Exception $e) {
@@ -193,7 +244,18 @@ class RevenueReportController extends Controller
                 return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
             }
 
-            $result = $this->getRevenueRowsAndTotal(null, $month, $year);
+            $requestedUserId = $this->requestedUserId($request);
+            if (!$requestedUserId['valid']) {
+                return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
+            }
+
+            $result = $this->getRevenueRowsAndTotal(
+                null,
+                $month,
+                $year,
+                $requestedUserId['value'],
+                $requestedUserId['value'] ? $this->reportUserRoles($request) : null
+            );
 
             return response()->json($result);
         } catch (\Exception $e) {
@@ -210,11 +272,55 @@ class RevenueReportController extends Controller
                 return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
             }
 
-            $result = $this->getRevenueRowsAndTotal(null, null, $year);
+            $requestedUserId = $this->requestedUserId($request);
+            if (!$requestedUserId['valid']) {
+                return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
+            }
+
+            $result = $this->getRevenueRowsAndTotal(
+                null,
+                null,
+                $year,
+                $requestedUserId['value'],
+                $requestedUserId['value'] ? $this->reportUserRoles($request) : null
+            );
 
             return response()->json($result);
         } catch (\Exception $e) {
             return response()->json(['rows' => [], 'totalRevenue' => 0, 'error' => $e->getMessage()], 500);
         }
+    }
+
+    public function users(Request $request)
+    {
+        $roles = $this->reportUserRoles($request);
+
+        if (empty($roles)) {
+            return response()->json(['message' => 'You are not allowed to use report user filters.'], 403);
+        }
+
+        $users = DB::table('users')
+            ->select('user_id', 'first_name', 'last_name', 'email', 'role')
+            ->whereIn('role', $roles)
+            ->orderByRaw("CASE role WHEN 'coordinator' THEN 0 WHEN 'inspector' THEN 1 ELSE 2 END")
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->orderBy('email')
+            ->get()
+            ->map(function ($user) {
+                $fullName = trim(implode(' ', array_filter([$user->first_name, $user->last_name])));
+
+                return [
+                    'user_id' => $user->user_id,
+                    'first_name' => $user->first_name,
+                    'last_name' => $user->last_name,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                    'full_name' => $fullName !== '' ? $fullName : null,
+                ];
+            })
+            ->values();
+
+        return response()->json(['data' => $users]);
     }
 }

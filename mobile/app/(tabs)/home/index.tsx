@@ -43,6 +43,13 @@ type HomeOfflineData = {
   isLoading?: boolean;
 };
 
+const parseMoneyValue = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const normalizeHistoryPayload = (payload: any, keys: string[] = []) => {
   if (Array.isArray(payload)) return payload;
   if (payload && Array.isArray(payload.data)) return payload.data;
@@ -288,7 +295,7 @@ const createDraftHomeRecord = (draft: OfflineTransactionDraft) => {
 
   if (draft.type === "banyera") {
     const items = Array.isArray(payload.items) ? payload.items : [];
-    const totalFee = items.reduce((sum, item) => sum + Number(item?.subtotal ?? 0), 0);
+    const totalFee = items.reduce((sum, item) => sum + parseMoneyValue(item?.subtotal), 0);
 
     return {
       __isDraft: true,
@@ -929,7 +936,7 @@ export default function HomeScreen() {
     const boatName = record?.boat?.boat_name || record?.boat_name || "Unknown Boat";
     const transactionDate = record?.transaction_date || record?.created_at || record?.docking_date || null;
     const subtitle = `${itemLabel} • ${formatBanyeraDate(transactionDate)} • ${formatBanyeraTime(transactionDate)}`;
-    const totalFee = Number(record?.total_fee || 0);
+    const totalFee = parseMoneyValue(record?.total_fee);
 
     return {
       id: `banyera-${record?.banyera_id || record?.id || record?.transaction_id || Math.random()}`,
@@ -952,7 +959,7 @@ export default function HomeScreen() {
     const boatName = record?.boat?.boat_name || record?.boat_name || "Unknown Boat";
     const transactionDate = record?.docking_date || record?.created_at || null;
     const subtitle = `${formatBanyeraDate(transactionDate)} • ${formatBanyeraTime(transactionDate)}`;
-    const totalFee = Number(record?.docking_fee || 0);
+    const totalFee = parseMoneyValue(record?.docking_fee);
 
     return {
       id: `docking-${record?.docking_id || record?.id || record?.transaction_id || Math.random()}`,
@@ -975,7 +982,7 @@ export default function HomeScreen() {
     const title = record?.plate_number || record?.vehicle_type?.type_name || record?.vehicleType?.type_name || "Ticket";
     const transactionDate = record?.transaction_date || record?.ticket_date || record?.created_at || null;
     const subtitle = formatBanyeraDate(transactionDate);
-    const totalFee = Number(record?.total_fee || record?.ticket_fee || 0);
+    const totalFee = parseMoneyValue(record?.total_fee || record?.ticket_fee);
 
     return {
       id: `ticket-${record?.ticket_id || record?.id || record?.transaction_id || Math.random()}`,
@@ -998,7 +1005,7 @@ export default function HomeScreen() {
     const title = record?.remittance_reference_no || "-";
     const transactionDate = record?.date || record?.created_at || null;
     const subtitle = formatBanyeraDate(transactionDate);
-    const amount = Number(record?.amount || 0);
+    const amount = parseMoneyValue(record?.amount);
 
     return {
       id: `remittance-${record?.remittance_id || record?.id || record?.local_id || Math.random()}`,

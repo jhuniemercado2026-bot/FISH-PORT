@@ -25,7 +25,7 @@ class TransactionLockService
             $today = Carbon::now('Asia/Manila')->toDateString();
             $latestCoordinatorRemittance = Remittance::query()
                 ->whereDate('date', $today)
-                ->whereIn('status', ['pending', 'remitted'])
+                ->whereIn('status', [Remittance::STATUS_UNCHECKED, Remittance::STATUS_CHECKED])
                 ->whereHas('submittedBy', fn ($query) => $query->where('role', 'coordinator'))
                 ->latest('updated_at')
                 ->latest('remittance_id')
@@ -55,7 +55,7 @@ class TransactionLockService
         $latestRemittance = Remittance::query()
             ->whereDate('date', $today)
             ->when($user, fn ($query) => $query->where('submitted_by', $user->user_id))
-            ->whereIn('status', ['pending', 'remitted'])
+            ->whereIn('status', [Remittance::STATUS_UNCHECKED, Remittance::STATUS_CHECKED])
             ->latest('updated_at')
             ->latest('remittance_id')
             ->first();
@@ -156,7 +156,7 @@ class TransactionLockService
             $remittanceId = (int) ($cached['remittance_id'] ?? 0);
             $remittanceQuery = Remittance::query()
                 ->where('remittance_id', $remittanceId)
-                ->whereIn('status', ['pending', 'remitted']);
+                ->whereIn('status', [Remittance::STATUS_UNCHECKED, Remittance::STATUS_CHECKED]);
 
             if (($cached['lock_scope'] ?? 'user') === 'global') {
                 $remittanceQuery->whereHas('submittedBy', fn ($query) => $query->where('role', 'coordinator'));

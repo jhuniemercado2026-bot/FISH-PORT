@@ -263,8 +263,15 @@ const getFeeName = (item) =>
   item?.fee?.fee_name           ||
   "-";
 
+const parseMoneyValue = (value) => {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const getFeeAmount = (fee) =>
-  fee?.amount ?? 0;
+  parseMoneyValue(fee?.amount);
 
 const isBanyeraFee = (fee) => {
   const feeName =
@@ -287,7 +294,7 @@ const isFeeActive = (fee) => {
 };
 
 const getItemsSubtotalTotal = (items = []) =>
-  items.reduce((sum, item) => sum + Number(item?.subtotal ?? 0), 0);
+  items.reduce((sum, item) => sum + parseMoneyValue(item?.subtotal), 0);
 
 const getItemsDaugTotal = (items = []) =>
   items.reduce((sum, item) => sum + getDaugAmount(item), 0);
@@ -296,16 +303,16 @@ const getTransactionTotalFee = (tx) => {
   const items = Array.isArray(tx?.items) ? tx.items : [];
   if (items.length > 0) return getItemsSubtotalTotal(items);
 
-  return Number(tx?.total_fee ?? 0);
+  return parseMoneyValue(tx?.total_fee);
 };
 
 const getTransactionFeePerBanyera = (tx) => {
   const firstItem = tx?.items?.[0];
-  const explicitFeeAmount = Number(firstItem?.fee?.amount ?? firstItem?.fee_amount ?? 0);
+  const explicitFeeAmount = parseMoneyValue(firstItem?.fee?.amount ?? firstItem?.fee_amount);
   if (explicitFeeAmount > 0) return explicitFeeAmount;
 
   const qty = Number(firstItem?.quantity ?? 0);
-  const subtotal = Number(firstItem?.subtotal ?? 0);
+  const subtotal = parseMoneyValue(firstItem?.subtotal);
   if (qty > 0 && subtotal > 0) return subtotal / qty;
 
   const totalQty = (tx?.items ?? []).reduce((sum, item) => sum + Number(item?.quantity ?? 0), 0);
@@ -313,7 +320,7 @@ const getTransactionFeePerBanyera = (tx) => {
   return totalQty > 0 ? totalFee / totalQty : 0;
 };
 
-const getDaugAmount = (item) => Number(item?.daug ?? item?.daug_php ?? 0);
+const getDaugAmount = (item) => parseMoneyValue(item?.daug ?? item?.daug_php);
 
 const sortClassificationsByCreatedAt = (items = []) => {
   const normalizedItems = Array.isArray(items) ? items : [];
@@ -344,7 +351,7 @@ const isBanyeraVoided = (tx) =>
   );
 
 const formatAmount = (value) =>
-  Number(value ?? 0).toLocaleString("en-PH", {
+  parseMoneyValue(value).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -440,11 +447,11 @@ const normalizeBanyeraPayloadForComparison = (payload) =>
           classification_id: Number(item?.classification_id || 0),
           quantity: Number(item?.quantity || 0),
           fee_id: Number(item?.fee_id || 0),
-          subtotal: Number(item?.subtotal || 0),
+          subtotal: parseMoneyValue(item?.subtotal),
           daug:
             item?.daug === "" || item?.daug === null || item?.daug === undefined
               ? null
-              : Number(item.daug),
+              : parseMoneyValue(item.daug),
         }))
       : [],
   });
@@ -456,13 +463,13 @@ const normalizeDaugOnlyState = (items) =>
       daug:
         item?.daug === "" || item?.daug === null || item?.daug === undefined
           ? null
-          : Number(item.daug),
+          : parseMoneyValue(item.daug),
     }))
   );
 
 const formatMoney = (value) => {
   if (value === null || value === undefined || value === "") return `${PESO}0.00`;
-  return `${PESO}${Number(value).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${PESO}${parseMoneyValue(value).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 const isFutureBanyeraDate = (dateString) => {
@@ -905,7 +912,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
         quantity:           qty,
         fee_id:             parseInt(form.fee_id),
         subtotal:           getFeeAmount(selectedApplicableFee) * qty,
-        daug:               it.daug === "" ? null : Number(it.daug),
+        daug:               it.daug === "" ? null : parseMoneyValue(it.daug),
       };
     });
 
@@ -1791,7 +1798,7 @@ const SuperBanyera = () => {
     ? classificationsMeta.total ?? classifications.length ?? 0
     : classifications.length ?? 0;
   const totalBanyeraToday = transactionStats.today_count ?? 0;
-  const totalFeeToday = Number(transactionStats.today_total_fee ?? 0);
+  const totalFeeToday = parseMoneyValue(transactionStats.today_total_fee);
 
   const summaryClassifications = classificationsData?.summary ?? {
     total: 0,
@@ -2808,7 +2815,7 @@ const EditBanyeraDrawer = ({ tx, open, boats, fees, classifications, onClose, on
           quantity,
           fee_id: parseInt(item.fee_id ?? form.fee_id, 10),
           subtotal: getFeeAmount(selectedApplicableFee) * quantity,
-          daug: item.daug === "" ? null : Number(item.daug),
+          daug: item.daug === "" ? null : parseMoneyValue(item.daug),
         };
       }),
     };

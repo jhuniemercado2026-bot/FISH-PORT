@@ -15,13 +15,16 @@ export const getVehicleTicketReportQueryOptions = ({
   selectedMonth,
   selectedYear,
   ticketType = "daily",
+  userId,
 } = {}) => ({
-  queryKey: ["vehicle-ticket-report", { filterType, selectedDate, selectedMonth, selectedYear, ticketType }],
+  queryKey: ["vehicle-ticket-report", { filterType, selectedDate, selectedMonth, selectedYear, ticketType, userId }],
   queryFn: async ({ signal }) => {
+    const withUser = (params) => (userId && userId !== "all" ? { ...params, user_id: userId } : params);
+
     if (filterType === "daily") {
       if (!selectedDate || !ticketType) return extractVehicleTicketReportPayload(null);
       const response = await api.get("/vehicle-ticket-reports/daily", {
-        params: { date: selectedDate, ticket_type: ticketType },
+        params: withUser({ date: selectedDate, ticket_type: ticketType }),
         signal,
       });
       return extractVehicleTicketReportPayload(response.data);
@@ -31,7 +34,7 @@ export const getVehicleTicketReportQueryOptions = ({
       if (!selectedMonth || !selectedYear || !ticketType) return extractVehicleTicketReportPayload(null);
       const [year, month] = String(selectedMonth).split("-");
       const response = await api.get("/vehicle-ticket-reports/monthly", {
-        params: { month, year: selectedYear, ticket_type: ticketType },
+        params: withUser({ month, year: selectedYear, ticket_type: ticketType }),
         signal,
       });
       return extractVehicleTicketReportPayload(response.data);
@@ -40,7 +43,7 @@ export const getVehicleTicketReportQueryOptions = ({
     if (filterType === "yearly") {
       if (!selectedYear || !ticketType) return extractVehicleTicketReportPayload(null);
       const response = await api.get("/vehicle-ticket-reports/yearly", {
-        params: { year: selectedYear, ticket_type: ticketType },
+        params: withUser({ year: selectedYear, ticket_type: ticketType }),
         signal,
       });
       return extractVehicleTicketReportPayload(response.data);

@@ -360,7 +360,7 @@ class RemittanceController extends Controller
             'amount' => $amount,
             'surplus' => $surplus,
             'deficit' => $deficit,
-            'status' => 'pending',
+            'status' => Remittance::STATUS_UNCHECKED,
             'remarks' => $remarks !== '' ? $remarks : null,
             'submitted_by' => Auth::id(),
         ]);
@@ -413,7 +413,7 @@ class RemittanceController extends Controller
             'surplus' => 'nullable|numeric|min:0',
             'deficit' => 'nullable|numeric|min:0',
             'remarks' => 'nullable|string',
-            'status' => 'nullable|in:pending,remitted',
+            'status' => 'nullable|in:pending,remitted,Checked,Unchecked,checked,unchecked',
         ]);
 
         $date = Carbon::parse($validated['date'], 'Asia/Manila')->toDateString();
@@ -451,7 +451,9 @@ class RemittanceController extends Controller
             'amount' => $amount,
             'surplus' => (float) ($validated['surplus'] ?? 0),
             'deficit' => (float) ($validated['deficit'] ?? 0),
-            'status' => $validated['status'] ?? $remittance->status,
+            'status' => array_key_exists('status', $validated)
+                ? Remittance::normalizeStatus($validated['status'])
+                : $remittance->status,
             'remarks' => $validated['remarks'] ?? null,
         ]);
 
@@ -493,14 +495,14 @@ class RemittanceController extends Controller
             ], 403);
         }
 
-        if (strtolower((string) $remittance->status) === 'remitted') {
+        if ($remittance->isChecked()) {
             return response()->json([
-                'message' => 'This remittance has already been marked as remitted.',
+                'message' => 'This remittance has already been marked as checked.',
             ], 422);
         }
 
         $remittance->update([
-            'status' => 'remitted',
+            'status' => Remittance::STATUS_CHECKED,
         ]);
 
         $approverUserId = (int) ($user?->user_id ?? 0);
@@ -524,14 +526,14 @@ class RemittanceController extends Controller
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Remittance',
-            details: 'Marked remittance "' . $remittance->remittance_reference_no . '" as remitted.',
+            details: 'Marked remittance "' . $remittance->remittance_reference_no . '" as checked.',
             user: $user
         );
 
         $payload = $this->broadcastRemittance($remittance, 'updated');
 
         return response()->json([
-            'message' => 'Remittance marked as remitted.',
+            'message' => 'Remittance marked as checked.',
             'remittance' => $payload,
             'transaction_lock' => $this->transactionLockForUser($user),
         ]);
@@ -548,14 +550,14 @@ class RemittanceController extends Controller
             ], 403);
         }
 
-        if (strtolower((string) $remittance->status) !== 'remitted') {
+        if (!$remittance->isChecked()) {
             return response()->json([
-                'message' => 'Only remitted records can be reverted.',
+                'message' => 'Only checked records can be reverted.',
             ], 422);
         }
 
         $remittance->update([
-            'status' => 'pending',
+            'status' => Remittance::STATUS_UNCHECKED,
         ]);
 
         Notification::query()
@@ -567,14 +569,14 @@ class RemittanceController extends Controller
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
             module: 'Remittance',
-            details: 'Reverted remittance "' . $remittance->remittance_reference_no . '" back to pending.',
+            details: 'Reverted remittance "' . $remittance->remittance_reference_no . '" back to unchecked.',
             user: $user
         );
 
         $payload = $this->broadcastRemittance($remittance, 'updated');
 
         return response()->json([
-            'message' => 'Remittance reverted to pending.',
+            'message' => 'Remittance reverted to unchecked.',
             'remittance' => $payload,
             'transaction_lock' => $this->transactionLockForUser($user),
         ]);

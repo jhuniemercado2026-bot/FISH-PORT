@@ -32,13 +32,16 @@ export const getBillingReportQueryOptions = ({
   selectedDate,
   selectedMonth,
   selectedYear,
+  userId,
 } = {}) => ({
-  queryKey: ["billing-report", { filterType, selectedDate, selectedMonth, selectedYear }],
+  queryKey: ["billing-report", { filterType, selectedDate, selectedMonth, selectedYear, userId }],
   queryFn: async ({ signal }) => {
+    const withUser = (params) => (userId && userId !== "all" ? { ...params, user_id: userId } : params);
+
     if (filterType === "daily") {
       if (!selectedDate) return extractBillingReport(null);
       const response = await api.get("/billing-reports/daily", {
-        params: { date: selectedDate },
+        params: withUser({ date: selectedDate }),
         signal,
       });
       return extractBillingReport(response.data);
@@ -47,7 +50,7 @@ export const getBillingReportQueryOptions = ({
     if (filterType === "monthly") {
       if (!selectedMonth || !selectedYear) return extractBillingReport(null);
       const response = await api.get("/billing-reports/monthly", {
-        params: { month: String(selectedMonth).split("-")[1], year: selectedYear },
+        params: withUser({ month: String(selectedMonth).split("-")[1], year: selectedYear }),
         signal,
       });
       return extractBillingReport(response.data);
@@ -56,7 +59,7 @@ export const getBillingReportQueryOptions = ({
     if (filterType === "yearly") {
       if (!selectedYear) return extractBillingReport(null);
       const response = await api.get("/billing-reports/yearly", {
-        params: { year: selectedYear },
+        params: withUser({ year: selectedYear }),
         signal,
       });
       return extractBillingReport(response.data);

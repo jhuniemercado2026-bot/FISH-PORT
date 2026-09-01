@@ -3006,6 +3006,7 @@ const SuperBilling = () => {
       payment_scope: paymentModalScope,
       bill_id: paymentModalScope === "single_bill" ? Number(paymentModalForm.bill_id) : undefined,
       bill_ids: paymentModalScope === "selected_bills" ? paymentModalForm.bill_ids.map((billId) => Number(billId)) : undefined,
+      boat_id: paymentModalScope === "selected_bills" ? Number(paymentModalForm.boat_id) : undefined,
       payment_method: paymentModalForm.payment_method || "cash",
       official_receipt_no: normalizeOfficialReceiptNo(paymentModalForm.official_receipt_no),
       payment_date: paymentModalForm.payment_date,

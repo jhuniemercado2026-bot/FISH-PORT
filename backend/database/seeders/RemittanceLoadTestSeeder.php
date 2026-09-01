@@ -66,7 +66,7 @@ class RemittanceLoadTestSeeder extends Seeder
                         'amount' => $amount,
                         'surplus' => $surplus,
                         'deficit' => $deficit,
-                        'status' => $sequence % 4 === 0 ? 'remitted' : 'pending',
+                        'status' => $sequence % 4 === 0 ? 'Checked' : 'Unchecked',
                         'submitted_by' => $user->user_id,
                         'created_at' => $date->setTime(16, $sequence % 60)->toDateTimeString(),
                         'updated_at' => $now,

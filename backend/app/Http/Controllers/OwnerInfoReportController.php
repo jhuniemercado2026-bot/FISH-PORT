@@ -12,12 +12,29 @@ class OwnerInfoReportController extends Controller
         // Optimize: Use pagination to prevent loading all owners into memory
         $perPage = (int) $request->query('per_page', 1000);
         $perPage = min($perPage, 1000); // Cap at 1000
+        $userId = $request->query('user_id');
+        if ($userId !== null && $userId !== '' && $userId !== 'all' && !ctype_digit((string) $userId)) {
+            abort(400, 'Invalid user filter.');
+        }
+        $ownerId = $request->query('owner_id');
+        if ($ownerId !== null && $ownerId !== '' && $ownerId !== 'all' && !ctype_digit((string) $ownerId)) {
+            abort(400, 'Invalid owner filter.');
+        }
 
-        $owners = BoatOwner::withTrashed()
+        $query = BoatOwner::withTrashed()
             ->orderBy('owner_lastname')
             ->orderBy('owner_firstname')
-            ->select(['owner_id', 'owner_firstname', 'owner_lastname', 'address', 'contact_number', 'deleted_at'])
-            ->paginate($perPage);
+            ->select(['owner_id', 'owner_firstname', 'owner_lastname', 'address', 'contact_number', 'created_by', 'deleted_at']);
+
+        if ($userId !== null && $userId !== '' && $userId !== 'all') {
+            $query->where('created_by', (int) $userId);
+        }
+
+        if ($ownerId !== null && $ownerId !== '' && $ownerId !== 'all') {
+            $query->where('owner_id', (int) $ownerId);
+        }
+
+        $owners = $query->paginate($perPage);
 
         return response()->json([
             'data' => $owners->items(),

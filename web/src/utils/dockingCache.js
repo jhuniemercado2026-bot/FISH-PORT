@@ -3,9 +3,16 @@ const getManilaDateString = () =>
 
 const getDockingDate = (docking) => String(docking?.docking_date ?? "").slice(0, 10);
 
-const getDockingFee = (docking) => Number(docking?.docking_fee ?? 0);
+const parseMoneyValue = (value) => {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
-const adjustStatValue = (value, delta) => Math.max(0, Number(value ?? 0) + delta);
+const getDockingFee = (docking) => parseMoneyValue(docking?.docking_fee);
+
+const adjustStatValue = (value, delta) => Math.max(0, parseMoneyValue(value) + parseMoneyValue(delta));
 
 const sortDockingsByDate = (dockings = []) =>
   [...dockings].sort((left, right) => {

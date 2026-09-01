@@ -394,11 +394,18 @@ const extractRegisteredBoatsReport = (payload) => {
   return { boats };
 };
 
-export const getRegisteredBoatsReportQueryOptions = () => ({
-  queryKey: ["registered-boats-report"],
+export const getRegisteredBoatsReportQueryOptions = ({ userId, boatId } = {}) => ({
+  queryKey: ["registered-boats-report", { userId, boatId }],
   queryFn: async ({ signal }) => {
     try {
-      const response = await api.get("/registered-boats-reports", { signal });
+      const params = {};
+      if (userId && userId !== "all") params.user_id = userId;
+      if (boatId && boatId !== "all") params.boat_id = boatId;
+
+      const response = await api.get("/registered-boats-reports", {
+        params,
+        signal,
+      });
       return extractRegisteredBoatsReport(response.data);
     } catch (error) {
       console.error("Error fetching registered boats report:", error);
@@ -410,9 +417,9 @@ export const getRegisteredBoatsReportQueryOptions = () => ({
   refetchOnWindowFocus: false,
 });
 
-export const useRegisteredBoatsReportDataQuery = (queryOptions = {}) =>
+export const useRegisteredBoatsReportDataQuery = ({ userId, boatId, ...queryOptions } = {}) =>
   useQuery({
-    ...getRegisteredBoatsReportQueryOptions(),
+    ...getRegisteredBoatsReportQueryOptions({ userId, boatId }),
     placeholderData: (previousData) => previousData,
     ...queryOptions,
   });
@@ -429,12 +436,16 @@ const extractOwnerInfoReport = (payload) => {
   return { owners, totalOwners: Number.isFinite(totalOwners) ? totalOwners : owners.length };
 };
 
-export const getOwnerInfoReportQueryOptions = () => ({
-  queryKey: ["owner-info-report"],
+export const getOwnerInfoReportQueryOptions = ({ userId, ownerId } = {}) => ({
+  queryKey: ["owner-info-report", { userId, ownerId }],
   queryFn: async ({ signal }) => {
     try {
+      const params = { per_page: 1000 };
+      if (userId && userId !== "all") params.user_id = userId;
+      if (ownerId && ownerId !== "all") params.owner_id = ownerId;
+
       const response = await api.get("/owner-info-reports", {
-        params: { per_page: 1000 },
+        params,
         signal,
       });
       return extractOwnerInfoReport(response.data);
@@ -448,9 +459,60 @@ export const getOwnerInfoReportQueryOptions = () => ({
   refetchOnWindowFocus: false,
 });
 
-export const useOwnerInfoReportDataQuery = (queryOptions = {}) =>
+export const useOwnerInfoReportDataQuery = ({ userId, ownerId, ...queryOptions } = {}) =>
   useQuery({
-    ...getOwnerInfoReportQueryOptions(),
+    ...getOwnerInfoReportQueryOptions({ userId, ownerId }),
+    placeholderData: (previousData) => previousData,
+    ...queryOptions,
+  });
+
+const extractBoatTypesReport = (payload) => {
+  const boatTypes = Array.isArray(payload?.boatTypes)
+    ? payload.boatTypes
+    : Array.isArray(payload?.boat_types)
+    ? payload.boat_types
+    : Array.isArray(payload?.data)
+    ? payload.data
+    : [];
+  const totalUsage = Number(
+    payload?.totalUsage ??
+      payload?.total_usage ??
+      boatTypes.reduce((sum, boatType) => sum + Number(boatType?.usage_count ?? boatType?.usageCount ?? 0), 0),
+  );
+
+  return {
+    boatTypes,
+    totalUsage: Number.isFinite(totalUsage) ? totalUsage : 0,
+    year: payload?.year,
+  };
+};
+
+export const getBoatTypesReportQueryOptions = ({ year, userId, boatTypeId } = {}) => ({
+  queryKey: ["boat-types-report", { year, userId, boatTypeId }],
+  queryFn: async ({ signal }) => {
+    try {
+      const params = { year };
+      if (userId && userId !== "all") params.user_id = userId;
+      if (boatTypeId && boatTypeId !== "all") params.boat_type_id = boatTypeId;
+
+      const response = await api.get("/boat-types-reports/yearly", {
+        params,
+        signal,
+      });
+      return extractBoatTypesReport(response.data);
+    } catch (error) {
+      console.error("Error fetching boat types report:", error);
+      return extractBoatTypesReport(null);
+    }
+  },
+  staleTime: 5 * 60 * 1000,
+  gcTime: 30 * 60 * 1000,
+  refetchOnWindowFocus: false,
+});
+
+export const useBoatTypesReportDataQuery = (filters = {}, queryOptions = {}) =>
+  useQuery({
+    ...getBoatTypesReportQueryOptions(filters),
     placeholderData: (previousData) => previousData,
     ...queryOptions,
   });

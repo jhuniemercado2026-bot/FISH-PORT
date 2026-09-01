@@ -7,6 +7,15 @@ use Illuminate\Http\Request;
 
 class BillingReportController extends Controller
 {
+    private function requestedUserId(Request $request): ?int
+    {
+        $userId = $request->query('user_id');
+        if ($userId === null || $userId === '' || $userId === 'all') return null;
+        if (!ctype_digit((string) $userId)) abort(400, 'Invalid user filter.');
+
+        return (int) $userId;
+    }
+
     private function emptyReportPayload(): array
     {
         return [
@@ -18,7 +27,7 @@ class BillingReportController extends Controller
         ];
     }
 
-    private function getBillingRowsAndTotals(?string $date, ?string $month, ?string $year): array
+    private function getBillingRowsAndTotals(?string $date, ?string $month, ?string $year, ?int $userId = null): array
     {
         $query = Bill::query()
             ->with([
@@ -34,6 +43,10 @@ class BillingReportController extends Controller
                 ->whereMonth('created_at', $month);
         } elseif ($year) {
             $query->whereYear('created_at', $year);
+        }
+
+        if ($userId) {
+            $query->where('created_by', $userId);
         }
 
         $bills = $query
@@ -77,7 +90,7 @@ class BillingReportController extends Controller
             return response()->json($this->emptyReportPayload(), 400);
         }
 
-        return response()->json($this->getBillingRowsAndTotals($date, null, null));
+        return response()->json($this->getBillingRowsAndTotals($date, null, null, $this->requestedUserId($request)));
     }
 
     public function monthly(Request $request)
@@ -89,7 +102,7 @@ class BillingReportController extends Controller
             return response()->json($this->emptyReportPayload(), 400);
         }
 
-        return response()->json($this->getBillingRowsAndTotals(null, $month, $year));
+        return response()->json($this->getBillingRowsAndTotals(null, $month, $year, $this->requestedUserId($request)));
     }
 
     public function yearly(Request $request)
@@ -99,6 +112,6 @@ class BillingReportController extends Controller
             return response()->json($this->emptyReportPayload(), 400);
         }
 
-        return response()->json($this->getBillingRowsAndTotals(null, null, $year));
+        return response()->json($this->getBillingRowsAndTotals(null, null, $year, $this->requestedUserId($request)));
     }
 }

@@ -244,24 +244,31 @@ const normalizeDateTimeString = (value) => {
   return `${String(parsed.year).padStart(4, "0")}-${String(parsed.month).padStart(2, "0")}-${String(parsed.day).padStart(2, "0")} ${String(parsed.hour).padStart(2, "0")}:${String(parsed.minute).padStart(2, "0")}:${String(parsed.second).padStart(2, "0")}`;
 };
 
+const parseMoneyValue = (value) => {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const formatMoney = (value) => {
   if (value === null || value === undefined || value === "") return "-";
-  return `${PESO}${Number(value).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${PESO}${parseMoneyValue(value).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 const formatMoneyValue = (value) => {
   if (value === null || value === undefined || value === "") return "-";
-  return Number(value).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return parseMoneyValue(value).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
 const formatPeso = (value) => {
   if (value === null || value === undefined || value === "") return `${PESO}0.00`;
-  return `${PESO}${Number(value).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${PESO}${parseMoneyValue(value).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 const formatFeeOptionAmount = (value) => {
   if (value === null || value === undefined || value === "") return `${PESO}0.00`;
-  return `${PESO}${Number(value).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${PESO}${parseMoneyValue(value).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 const getFeeTypeName = (fee) =>
@@ -741,7 +748,7 @@ const normalizeDockingPayloadForComparison = (payload) =>
     boat_id: String(payload?.boat_id ?? ""),
     fee_id: String(payload?.fee_id ?? ""),
     docking_date: String(payload?.docking_date ?? "").slice(0, 16),
-    docking_fee: Number(payload?.docking_fee ?? 0),
+    docking_fee: parseMoneyValue(payload?.docking_fee),
   });
 
 const CalendarDockingsDrawer = ({ open, dateLabel, dockings, onClose, onSelectDocking }) => {
@@ -932,7 +939,7 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
       boat_id:      form.boat_id,
       fee_id:       form.fee_id,
       docking_date: `${builtDockingDate} ${builtDockingTime}`,
-      docking_fee:  form.docking_fee === "" ? 0 : Number(form.docking_fee),
+      docking_fee:  parseMoneyValue(form.docking_fee),
     };
 
     if (
@@ -1123,7 +1130,7 @@ const EditDockingDrawer = ({ docking, open, boats, fees, onClose, onSubmit, savi
       boat_id: form.boat_id,
       fee_id: form.fee_id,
       docking_date: `${builtDockingDate} ${builtDockingTime}`,
-      docking_fee: form.docking_fee === "" ? 0 : Number(form.docking_fee),
+      docking_fee: parseMoneyValue(form.docking_fee),
     });
   };
 
@@ -1634,7 +1641,7 @@ const SuperDocking = () => {
     Boolean(transactionLock?.date) && String(value || "").slice(0, 10) === transactionLock.date;
   const isTodayDateLocked = transactionLock?.date === todayKey;
   const loggedToday   = dockingStats.logged_today ?? 0;
-  const totalFeeToday = Number(dockingStats.total_fee_today ?? 0);
+  const totalFeeToday = parseMoneyValue(dockingStats.total_fee_today);
 
   // ── API actions ───────────────────────────────────────────────────────────
   const upsertDockingInCache = React.useCallback((nextDocking) => {

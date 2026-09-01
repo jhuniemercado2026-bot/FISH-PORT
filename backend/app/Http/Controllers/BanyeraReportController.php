@@ -8,6 +8,15 @@ use Illuminate\Http\Request;
 
 class BanyeraReportController extends Controller
 {
+    private function applyUserFilter($query, Request $request)
+    {
+        $userId = $request->query('user_id');
+        if ($userId === null || $userId === '' || $userId === 'all') return $query;
+        if (!ctype_digit((string) $userId)) abort(400, 'Invalid user filter.');
+
+        return $query->where('banyera_transactions.created_by', (int) $userId);
+    }
+
     private function buildReportQuery()
     {
         return BanyeraTransaction::query()
@@ -92,7 +101,7 @@ class BanyeraReportController extends Controller
         $query = $this->buildReportQuery()
             ->whereDate('banyera_transactions.transaction_date', $date);
 
-        return $this->renderReport($query);
+        return $this->renderReport($this->applyUserFilter($query, $request));
     }
 
     public function monthly(Request $request)
@@ -106,7 +115,7 @@ class BanyeraReportController extends Controller
             ->whereYear('banyera_transactions.transaction_date', (int) $validated['year'])
             ->whereMonth('banyera_transactions.transaction_date', (int) $validated['month']);
 
-        return $this->renderReport($query);
+        return $this->renderReport($this->applyUserFilter($query, $request));
     }
 
     public function yearly(Request $request)
@@ -118,6 +127,6 @@ class BanyeraReportController extends Controller
         $query = $this->buildReportQuery()
             ->whereYear('banyera_transactions.transaction_date', (int) $validated['year']);
 
-        return $this->renderReport($query);
+        return $this->renderReport($this->applyUserFilter($query, $request));
     }
 }
