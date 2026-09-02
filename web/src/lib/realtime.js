@@ -7,7 +7,7 @@ const realtimeEnabled = String(env.VITE_REALTIME_ENABLED || "false").toLowerCase
 const pusherKey = env.VITE_PUSHER_APP_KEY;
 const pusherCluster = env.VITE_PUSHER_APP_CLUSTER || "mt1";
 const pusherScheme = env.VITE_PUSHER_SCHEME || "https";
-const apiBaseUrl = env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api";
+const apiBaseUrl = env.VITE_API_BASE_URL || "https://fishport.opollmisor.com/api";
 
 let echo = null;
 let echoAuthToken = "";
