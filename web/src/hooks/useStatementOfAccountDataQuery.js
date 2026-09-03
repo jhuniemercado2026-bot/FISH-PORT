@@ -8,11 +8,19 @@ export const getStatementOfAccountDataQueryOptions = ({
   status = "all",
   statementType = "boats",
   boat = "",
+  ownerId = "",
+  filterType = "",
+  selectedDate = "",
+  selectedMonth = "",
+  selectedYear = "",
   highlightBoatId = "",
   highlightOwnerId = "",
   selectedOnly = false,
 } = {}) => ({
-  queryKey: [statementType === "owners" ? "owner-statement-data" : "boat-statement-data", { page, perPage, search, status, boat, highlightBoatId, highlightOwnerId, selectedOnly }],
+  queryKey: [
+    statementType === "owners" ? "owner-statement-data" : "boat-statement-data",
+    { page, perPage, search, status, boat, ownerId, filterType, selectedDate, selectedMonth, selectedYear, highlightBoatId, highlightOwnerId, selectedOnly },
+  ],
   queryFn: async ({ signal }) => {
     const endpoint = statementType === "owners" ? "/owner-statement" : "/boat-statement";
     const res = await api.get(endpoint, {
@@ -22,6 +30,11 @@ export const getStatementOfAccountDataQueryOptions = ({
         search: search || undefined,
         status: status !== "all" ? status : undefined,
         boat: boat || undefined,
+        owner_id: ownerId || undefined,
+        filter_type: filterType || undefined,
+        selected_date: selectedDate || undefined,
+        selected_month: selectedMonth || undefined,
+        selected_year: selectedYear || undefined,
         highlight_boat_id: highlightBoatId || undefined,
         highlight_owner_id: highlightOwnerId || undefined,
         selected_only: selectedOnly ? 1 : undefined,
@@ -68,7 +81,7 @@ const looksLikeQueryOptions = (value) =>
   value &&
   typeof value === "object" &&
   Object.keys(value).some((key) => QUERY_OPTION_KEYS.has(key)) &&
-  !["page", "perPage", "search", "status", "statementType", "boat", "highlightBoatId", "highlightOwnerId", "selectedOnly"].some((key) => Object.prototype.hasOwnProperty.call(value, key));
+  !["page", "perPage", "search", "status", "statementType", "boat", "ownerId", "filterType", "selectedDate", "selectedMonth", "selectedYear", "highlightBoatId", "highlightOwnerId", "selectedOnly"].some((key) => Object.prototype.hasOwnProperty.call(value, key));
 
 export const useStatementOfAccountDataQuery = (filters = {}, queryOptions = {}) => {
   const resolvedFilters = looksLikeQueryOptions(filters) ? {} : filters;

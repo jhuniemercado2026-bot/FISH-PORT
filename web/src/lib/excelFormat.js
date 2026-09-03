@@ -436,21 +436,24 @@ export const createExcelExportBlob = async ({
   }
 
   worksheet.spliceRows(metadataEnd + 1, 0, spacerRow);
-  const headerRowIndex = metadataEnd + 2;
-  worksheet.insertRow(headerRowIndex, columns.map(formatColumnHeader));
-  const headerRow = worksheet.getRow(headerRowIndex);
-  headerRow.eachCell((cell) => {
-    cell.font = { ...defaultFont, bold: true };
-    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } };
-    cell.border = borderStyle;
-  });
+  const usesEmbeddedHeaders = sheetName === "OwnerStatement";
+  const headerRowIndex = usesEmbeddedHeaders ? metadataEnd + 1 : metadataEnd + 2;
+  if (!usesEmbeddedHeaders) {
+    worksheet.insertRow(headerRowIndex, columns.map(formatColumnHeader));
+    const headerRow = worksheet.getRow(headerRowIndex);
+    headerRow.eachCell((cell) => {
+      cell.font = { ...defaultFont, bold: true };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } };
+      cell.border = borderStyle;
+    });
+  }
 
-  rows.forEach((rowData) => {
-    const row = worksheet.addRow(columns.map((column) => getExportValue(rowData[column.key])));
-    row.eachCell((cell, colNumber) => {
+  const styleDataRow = (row, { bold = false, fill = false } = {}) => {
+    for (let colNumber = 1; colNumber <= columns.length; colNumber += 1) {
+      const cell = row.getCell(colNumber);
       const column = columns[colNumber - 1];
-      cell.font = defaultFont;
+      cell.font = { ...defaultFont, bold };
       cell.alignment = {
         horizontal: isNumericColumn(column) ? "right" : "left",
         vertical: "middle",
@@ -459,14 +462,89 @@ export const createExcelExportBlob = async ({
       if (column.key === "usageCount") {
         cell.numFmt = "0";
       }
+      if (fill) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEEEEE" } };
+      }
       cell.border = borderStyle;
-    });
+    }
+  };
+
+  const getColumnNumberByKey = (key) => columns.findIndex((column) => column.key === key) + 1;
+
+  rows.forEach((rowData) => {
+    if (rowData?.__rowType === "spacer") {
+      worksheet.addRow(Array(columns.length).fill(""));
+      return;
+    }
+
+    if (rowData?.__rowType === "sectionTitle" || rowData?.__rowType === "boatTitle") {
+      const row = worksheet.addRow(Array(columns.length).fill(""));
+      worksheet.mergeCells(row.number, 1, row.number, columns.length);
+      const cell = row.getCell(1);
+      cell.value = rowData.__label || "";
+      cell.font = { ...defaultFont, bold: true };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } };
+      cell.border = borderStyle;
+      return;
+    }
+
+    if (rowData?.__rowType === "tableHeader") {
+      const row = worksheet.addRow(columns.map(formatColumnHeader));
+      row.eachCell((cell) => {
+        cell.font = { ...defaultFont, bold: true };
+        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } };
+        cell.border = borderStyle;
+      });
+      return;
+    }
+
+    if (rowData?.__rowType === "summaryHeader") {
+      const row = worksheet.addRow(Array(columns.length).fill(""));
+      row.getCell(1).value = "Boat Name";
+      row.getCell(columns.length).value = "Total Balance Due(PHP)";
+      styleDataRow(row, { bold: true, fill: true });
+      return;
+    }
+
+    if (rowData?.__rowType === "summaryRow" || rowData?.__rowType === "summaryTotal") {
+      const row = worksheet.addRow(Array(columns.length).fill(""));
+      row.getCell(1).value = rowData.boatName || "";
+      row.getCell(columns.length).value = Number(rowData.balanceDue || 0);
+      styleDataRow(row, {
+        bold: rowData.__rowType === "summaryTotal",
+        fill: rowData.__rowType === "summaryTotal",
+      });
+      return;
+    }
+
+    if (rowData?.__rowType === "transactionTotal") {
+      const row = worksheet.addRow(Array(columns.length).fill(""));
+      const amountColumn = getColumnNumberByKey("amount");
+      const lineTotalColumn = getColumnNumberByKey("running_balance");
+      row.getCell(1).value = "Total(PHP)";
+      if (amountColumn > 0) row.getCell(amountColumn).value = Number(rowData.amount || 0);
+      if (lineTotalColumn > 0) row.getCell(lineTotalColumn).value = Number(rowData.running_balance || 0);
+      styleDataRow(row, { bold: true, fill: true });
+      return;
+    }
+
+    const row = worksheet.addRow(columns.map((column) => getExportValue(rowData[column.key])));
+    styleDataRow(row);
   });
 
   const totals = {};
   let totalFound = false;
+  columns.forEach((column) => {
+    if (column.totalValue === undefined) return;
+    totals[column.key] = column.totalValue;
+    totalFound = true;
+  });
   rows.forEach((rowData) => {
+    if (rowData?.__rowType) return;
     columns.forEach((column) => {
+      if (column.totalValue !== undefined) return;
       if (!isNumericColumn(column)) return;
       const raw = rowData[column.key];
       const numeric = typeof raw === "number" ? raw : Number(raw);
@@ -477,11 +555,11 @@ export const createExcelExportBlob = async ({
     });
   });
 
-  if (totalFound && sheetName !== "BoatTypes") {
+  if (totalFound && sheetName !== "BoatTypes" && sheetName !== "OwnerStatement") {
     const totalRow = worksheet.addRow(
       columns.map((column, index) => {
         if (index === 0) return "Total";
-        const value = totals[column.key];
+        const value = column.totalValue !== undefined ? column.totalValue : totals[column.key];
         return value !== undefined ? value : "";
       }),
     );

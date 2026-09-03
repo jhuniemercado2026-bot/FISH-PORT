@@ -10,7 +10,6 @@ import {
   IoEyeOutline,
   IoHeadsetOutline,
   IoLockClosedOutline,
-  IoLogInOutline,
   IoMailOutline,
   IoPersonOutline,
   IoShieldCheckmarkOutline,
@@ -28,6 +27,9 @@ import Spinner from "../../components/Spinner";
 import { notifyRealtimeAuthChanged } from "../../lib/realtime";
 
 const FORCED_LOGOUT_MESSAGE_KEY = "forcedLogoutMessage";
+const FORGOT_PASSWORD_EMAIL_KEY = "forgotPasswordEmail";
+const FORGOT_PASSWORD_RESEND_COUNT_KEY = "forgotPasswordResendCount";
+const FORGOT_PASSWORD_CODE_ERROR_KEY = "forgotPasswordCodeError";
 
 const normalizeProfileImageUrl = (user) => {
   if (!user) return user;
@@ -103,6 +105,22 @@ const Login = () => {
   const isResetCodeComplete = resetCode.every((digit) => String(digit || "").trim() !== "");
   const forgotStep = forgotCodeVerified ? 3 : forgotEmailVerified ? 2 : 1;
 
+  const saveForgotResendCount = (count) => {
+    const normalizedCount = Math.max(0, Number(count) || 0);
+    setForgotResendCount(normalizedCount);
+    sessionStorage.setItem(FORGOT_PASSWORD_RESEND_COUNT_KEY, String(normalizedCount));
+  };
+
+  const saveForgotCodeError = (message) => {
+    setForgotCodeError(message);
+
+    if (message) {
+      sessionStorage.setItem(FORGOT_PASSWORD_CODE_ERROR_KEY, message);
+    } else {
+      sessionStorage.removeItem(FORGOT_PASSWORD_CODE_ERROR_KEY);
+    }
+  };
+
   useEffect(() => {
     const forcedLogoutMessage = sessionStorage.getItem(FORCED_LOGOUT_MESSAGE_KEY);
 
@@ -148,6 +166,35 @@ const Login = () => {
   }, [location.search, navigate]);
 
   useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const isForgotRoute = searchParams.get("forgot") === "1";
+    const forgotRouteStep = searchParams.get("forgotStep");
+
+    setShowForgotOverlay(isForgotRoute);
+    setForgotEmailVerified(isForgotRoute && ["code", "reset"].includes(forgotRouteStep));
+    setForgotCodeVerified(isForgotRoute && forgotRouteStep === "reset");
+
+    if (isForgotRoute) {
+      setForgotEmail((current) => current || sessionStorage.getItem(FORGOT_PASSWORD_EMAIL_KEY) || "");
+      setForgotResendCount(Number(sessionStorage.getItem(FORGOT_PASSWORD_RESEND_COUNT_KEY) || 0));
+      setForgotCodeError(sessionStorage.getItem(FORGOT_PASSWORD_CODE_ERROR_KEY) || "");
+    }
+  }, [location.search]);
+
+  const navigateForgotStep = (step) => {
+    const searchParams = new URLSearchParams(location.search);
+    searchParams.set("forgot", "1");
+
+    if (step) {
+      searchParams.set("forgotStep", step);
+    } else {
+      searchParams.delete("forgotStep");
+    }
+
+    navigate(`/login?${searchParams.toString()}`, { replace: true });
+  };
+
+  useEffect(() => {
     if (forgotResendCountdown <= 0) return undefined;
 
     const timer = window.setInterval(() => {
@@ -181,7 +228,7 @@ const Login = () => {
 
   const handleResetCodeChange = (index, value) => {
     const sanitizedValue = value.replace(/\D/g, "").slice(-1);
-    setForgotCodeError("");
+    saveForgotCodeError("");
 
     setResetCode((current) => {
       const next = [...current];
@@ -202,13 +249,16 @@ const Login = () => {
 
   const openForgotOverlay = () => {
     const nextEmail = email.trim();
+    if (nextEmail) {
+      sessionStorage.setItem(FORGOT_PASSWORD_EMAIL_KEY, nextEmail);
+    }
     setForgotEmail(nextEmail);
     setForgotEmailError("");
     setForgotEmailVerified(false);
     setForgotCodeVerified(false);
     setForgotResendCountdown(0);
-    setForgotResendCount(0);
-    setForgotCodeError("");
+    saveForgotResendCount(0);
+    saveForgotCodeError("");
     setForgotNewPassword("");
     setForgotConfirmPassword("");
     setForgotPasswordErrors({});
@@ -216,9 +266,16 @@ const Login = () => {
     setShowForgotConfirmPassword(false);
     setResetCode(["", "", "", "", "", ""]);
     setShowForgotOverlay(true);
+    navigateForgotStep("");
   };
 
   const closeForgotOverlay = () => {
+    const searchParams = new URLSearchParams(location.search);
+    searchParams.delete("forgot");
+    searchParams.delete("forgotStep");
+    sessionStorage.removeItem(FORGOT_PASSWORD_EMAIL_KEY);
+    sessionStorage.removeItem(FORGOT_PASSWORD_RESEND_COUNT_KEY);
+    sessionStorage.removeItem(FORGOT_PASSWORD_CODE_ERROR_KEY);
     setShowForgotOverlay(false);
     setForgotEmail("");
     setForgotEmailError("");
@@ -236,6 +293,8 @@ const Login = () => {
     setShowForgotNewPassword(false);
     setShowForgotConfirmPassword(false);
     setResetCode(["", "", "", "", "", ""]);
+    const nextSearch = searchParams.toString();
+    navigate(`/login${nextSearch ? `?${nextSearch}` : ""}`, { replace: true });
   };
 
   const handleForgotBack = () => {
@@ -246,14 +305,16 @@ const Login = () => {
       setForgotPasswordErrors({});
       setShowForgotNewPassword(false);
       setShowForgotConfirmPassword(false);
+      navigateForgotStep("code");
       return;
     }
 
     if (forgotEmailVerified) {
       setForgotEmailVerified(false);
       setForgotCodeVerified(false);
-      setForgotCodeError("");
+      saveForgotCodeError("");
       setResetCode(["", "", "", "", "", ""]);
+      navigateForgotStep("");
       return;
     }
 
@@ -264,6 +325,7 @@ const Login = () => {
     const nextEmail = forgotEmail.trim();
 
     setForgotEmailError("");
+    saveForgotCodeError("");
     setForgotEmailVerified(false);
     setForgotCodeVerified(false);
     setResetCode(["", "", "", "", "", ""]);
@@ -273,27 +335,31 @@ const Login = () => {
       return;
     }
 
+    sessionStorage.setItem(FORGOT_PASSWORD_EMAIL_KEY, nextEmail);
+
     setIsCheckingForgotEmail(true);
 
     try {
       const response = await api.post("/forgot-password/check-email", { email: nextEmail });
-      setForgotResendCount(
+      saveForgotResendCount(
         FORGOT_PASSWORD_RESEND_DAILY_LIMIT - Number(response.data?.remaining_resends ?? FORGOT_PASSWORD_RESEND_DAILY_LIMIT)
       );
       setForgotEmailVerified(true);
+      navigateForgotStep("code");
       requestAnimationFrame(() => {
         codeInputRefs.current[0]?.focus();
       });
     } catch (error) {
       const remainingResends = error?.response?.data?.remaining_resends;
       if (typeof remainingResends === "number") {
-        setForgotResendCount(FORGOT_PASSWORD_RESEND_DAILY_LIMIT - remainingResends);
+        saveForgotResendCount(FORGOT_PASSWORD_RESEND_DAILY_LIMIT - remainingResends);
       }
 
       if (remainingResends === 0) {
         setForgotEmailError("");
         setForgotEmailVerified(true);
-        setForgotCodeError(VERIFICATION_CODE_LIMIT_MESSAGE);
+        saveForgotCodeError(VERIFICATION_CODE_LIMIT_MESSAGE);
+        navigateForgotStep("code");
         requestAnimationFrame(() => {
           codeInputRefs.current[0]?.focus();
         });
@@ -319,7 +385,7 @@ const Login = () => {
       return;
     }
 
-    setForgotCodeError("");
+    saveForgotCodeError("");
     setForgotResendCountdown(FORGOT_PASSWORD_RESEND_COOLDOWN_SECONDS);
     setIsCheckingForgotEmail(true);
 
@@ -328,7 +394,7 @@ const Login = () => {
         email: forgotEmail.trim(),
         resend: true,
       });
-      setForgotResendCount(
+      saveForgotResendCount(
         FORGOT_PASSWORD_RESEND_DAILY_LIMIT - Number(response.data?.remaining_resends ?? FORGOT_PASSWORD_RESEND_DAILY_LIMIT)
       );
       setResetCode(["", "", "", "", "", ""]);
@@ -338,10 +404,10 @@ const Login = () => {
     } catch (error) {
       const remainingResends = error?.response?.data?.remaining_resends;
       if (typeof remainingResends === "number") {
-        setForgotResendCount(FORGOT_PASSWORD_RESEND_DAILY_LIMIT - remainingResends);
+        saveForgotResendCount(FORGOT_PASSWORD_RESEND_DAILY_LIMIT - remainingResends);
       }
       setForgotResendCountdown(0);
-      setForgotCodeError(
+      saveForgotCodeError(
         remainingResends === 0
           ? VERIFICATION_CODE_LIMIT_MESSAGE
           : error?.response?.data?.errors?.email?.[0] ||
@@ -356,10 +422,10 @@ const Login = () => {
   const handleForgotVerifyCode = async () => {
     const verificationCode = resetCode.join("");
 
-    setForgotCodeError("");
+    saveForgotCodeError("");
 
     if (!/^\d{6}$/.test(verificationCode)) {
-      setForgotCodeError("Enter the 6 digits code sent to your email.");
+      saveForgotCodeError("Enter the 6 digits code sent to your email.");
       return;
     }
 
@@ -372,8 +438,9 @@ const Login = () => {
       });
       setForgotCodeVerified(true);
       setForgotPasswordErrors({});
+      navigateForgotStep("reset");
     } catch (error) {
-      setForgotCodeError(
+      saveForgotCodeError(
         error?.response?.data?.errors?.verification_code?.[0] ||
         error?.response?.data?.message ||
         "Failed to verify the code."
@@ -480,10 +547,10 @@ const Login = () => {
   // Render mobile-friendly single form layout
   return (
     <div
-      className="login-page min-h-screen overflow-hidden bg-[#f8fafc]"
+      className="login-page min-h-screen min-h-[100dvh] bg-[#f8fafc]"
       style={{ fontFamily: "'Montserrat', sans-serif" }}
     >
-      <div className="flex min-h-screen w-full flex-col lg:flex-row">
+      <div className="flex min-h-screen min-h-[100dvh] w-full flex-col lg:flex-row">
         <div className="relative hidden flex-col items-center justify-center overflow-hidden lg:flex lg:w-1/2">
           <div
             className="absolute inset-0 bg-cover bg-center bg-no-repeat"
@@ -551,26 +618,55 @@ const Login = () => {
           </div>
         </div>
 
-        <div className="relative flex w-full items-center justify-center overflow-hidden px-4 py-8 sm:px-6 lg:w-1/2 lg:px-10 lg:py-10">
+        <div className="relative flex min-h-[100dvh] w-full flex-col items-stretch justify-start overflow-hidden bg-[#1A1F36] px-0 py-0 lg:w-1/2 lg:items-center lg:justify-center lg:bg-transparent lg:px-10 lg:py-10">
           <div
-            className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-35"
+            className="absolute inset-0 hidden bg-cover bg-center bg-no-repeat opacity-35 lg:block"
             style={{ backgroundImage: "url('/images/bg2.jpg')" }}
           />
-          <div className="absolute inset-0 bg-white/85" />
-          <div className="relative z-10 w-full max-w-[565px]">
-            <div className="rounded-[10px] border border-slate-200 bg-white/95 p-8 shadow-[0_20px_60px_rgba(15,23,42,0.08)] sm:p-10">
+          <div className="absolute inset-0 hidden bg-white/85 lg:block" />
+          <div className="relative z-10 flex min-h-[100dvh] w-full flex-col lg:min-h-0 lg:max-w-[565px]">
+            <div className="flex min-h-[230px] flex-col items-center justify-center px-6 py-8 text-center lg:hidden">
+              <img
+                src="/images/opol_fish_port.png"
+                alt="Opol Fish Port Logo"
+                className="h-[145px] w-[145px] object-contain"
+              />
+              <p
+                className="m-0 mt-3 text-[36px] font-normal uppercase leading-none tracking-[0.04em] text-white"
+                style={{ fontFamily: "'Anton', sans-serif" }}
+              >
+                Opol&nbsp;Fish&nbsp;
+                <span
+                  style={{
+                    color: "#2563eb",
+                    fontFamily: "inherit",
+                    fontSize: "inherit",
+                    fontWeight: "inherit",
+                    lineHeight: "inherit",
+                    textTransform: "inherit",
+                  }}
+                >
+                  Port
+                </span>
+              </p>
+            </div>
+            <div
+              className={`flex-1 rounded-t-[46px] bg-[#FFFDFB] px-7 pb-10 pt-10 lg:flex-none lg:rounded-[10px] lg:border lg:border-slate-200 lg:bg-white/95 lg:p-10 lg:shadow-[0_20px_60px_rgba(15,23,42,0.08)] ${
+                showForgotOverlay ? "hidden lg:block" : ""
+              }`}
+            >
               <div className="relative mx-auto w-full">
-                <div className="mb-8 text-left">
-                  <h1 className="text-3xl font-bold leading-none text-[#0f172a] sm:text-4xl">
+                <div className="mb-8 text-center">
+                  <h1 className="text-[25px] font-extrabold leading-none text-[#1A1F36] lg:text-4xl">
                     Sign In
                   </h1>
-                  <p className="mt-0.5 text-sm tracking-[0.03em] text-slate-500 sm:text-base">
+                  <p className="mt-1 text-[12.5px] text-[#6F7883] lg:text-base">
                     Enter your account to continue!
                   </p>
                 </div>
 
                 {/* Login form with fields */}
-                <form onSubmit={handleSubmit} className="mt-8 space-y-6">
+                <form onSubmit={handleSubmit} className="mt-8 space-y-[18px] lg:space-y-6">
                 {/* Email input field */}
                 <div>
                   <label className="text-sm font-normal text-[#0f172a]">
@@ -589,10 +685,10 @@ const Login = () => {
                       required
                       disabled={isLoading}
                       style={{ fontFamily: "'Montserrat', sans-serif" }}
-                      className={`w-full rounded-xl border bg-[#f8fbff] py-3.5 pl-12 pr-4 text-md focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+                      className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-4 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] ${
                         fieldErrors.email
                           ? "border-red-300 focus:border-red-300 focus:ring-0"
-                          : "border-slate-200 focus:ring-1 focus:ring-[#2563eb]/90"
+                          : "border-[#F2E6EB] focus:ring-1 focus:ring-[#2563eb]/90 lg:border-slate-200"
                       }`}
                     />
                   </div>
@@ -617,10 +713,10 @@ const Login = () => {
                       required
                       disabled={isLoading}
                       style={{ fontFamily: "'Montserrat', sans-serif" }}
-                      className={`w-full rounded-xl border bg-[#f8fbff] py-3.5 pl-12 pr-12 text-md focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+                      className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-12 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] ${
                         fieldErrors.password
                           ? "border-red-300 focus:border-red-300 focus:ring-0"
-                          : "border-slate-200 focus:ring-1 focus:ring-[#2563eb]/90"
+                          : "border-[#F2E6EB] focus:ring-1 focus:ring-[#2563eb]/90 lg:border-slate-200"
                       }`}
                     />
                     <button
@@ -640,7 +736,7 @@ const Login = () => {
                 </div>
 
                 {/* Remember me and forgot password row */}
-                <div className="flex items-center justify-between">
+                <div className="mt-3 flex items-center justify-between">
                   <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
                     <input
                       type="checkbox"
@@ -676,7 +772,7 @@ const Login = () => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="flex w-full items-center justify-center gap-2 rounded-md bg-[#0a162b] py-3.5 text-sm font-normal text-white transition hover:bg-[#0f1729] disabled:cursor-not-allowed disabled:opacity-80"
+                  className="mt-2 flex h-14 w-full items-center justify-center gap-2 rounded-[8px] bg-[#1A1F36] text-base font-normal text-white transition hover:bg-[#0f1729] disabled:cursor-not-allowed disabled:opacity-80 lg:h-auto lg:py-3.5 lg:text-sm"
                 >
                   {isLoading ? (
                     <>
@@ -691,9 +787,11 @@ const Login = () => {
                   <div className="h-px w-full bg-slate-200" />
                 </div>
 
-                <p className="!mt-8 flex items-center justify-center gap-2 text-center text-sm text-slate-500">
-                  <IoHeadsetOutline className="text-base text-slate-400" />
-                  Need Help? Contact the{' '}
+                <p className="!mt-8 flex flex-col items-center justify-center gap-1 text-center text-sm text-slate-500 sm:flex-row sm:gap-2">
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <IoHeadsetOutline className="text-base text-slate-400" />
+                    Need Help? Contact the
+                  </span>
                   <button
                     type="button"
                     className="font-medium text-[#2563eb] hover:underline"
@@ -705,14 +803,14 @@ const Login = () => {
               </div>
             </div>
 
-            <p className="mt-8 text-center text-[14px] text-slate-500">
+            <p className="mt-8 hidden text-center text-[14px] text-slate-500 lg:block">
               © 2026 Fish Port Management System. All rights reserved.
             </p>
 
             {showForgotOverlay && (
-                  <div className="absolute inset-0 z-10 rounded-[10px] bg-white">
-                    <div className="flex h-full flex-col justify-center rounded-[10px] border border-slate-200 bg-white p-6 sm:p-8">
-                      <div className="absolute left-6 right-6 top-6 flex items-center justify-between sm:left-8 sm:right-8 sm:top-8">
+                  <div className="relative z-10 flex-1 rounded-t-[46px] bg-[#FFFDFB] lg:absolute lg:inset-0 lg:rounded-[10px] lg:bg-white">
+                    <div className="flex h-full flex-col rounded-t-[46px] bg-[#FFFDFB] px-7 pb-10 pt-10 lg:justify-center lg:rounded-[10px] lg:border lg:border-slate-200 lg:bg-white lg:p-8">
+                      <div className="mb-3 flex items-center justify-between lg:absolute lg:left-8 lg:right-8 lg:top-8 lg:mb-0">
                         <button
                           type="button"
                           onClick={handleForgotBack}
@@ -721,22 +819,22 @@ const Login = () => {
                             isVerifyingForgotCode ||
                             isResettingForgotPassword
                           }
-                          className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-md text-[#1A1F36] transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 lg:border lg:border-slate-200 lg:text-slate-700"
                         >
-                          <IoArrowBackOutline className="text-base" />
+                          <IoArrowBackOutline className="text-[22px] lg:text-base" />
                         </button>
-                        <span className="text-[13px] font-semibold text-slate-500">
+                        <span className="text-[13px] font-semibold text-[#6F7883]">
                           {forgotStep}/3
                         </span>
                       </div>
 
                       {!forgotEmailVerified ? (
                         <div className="mx-auto w-full max-w-md text-center">
-                          <div className="mt-6">
-                            <h2 className="text-2xl font-semibold text-[#0f172a]">
+                          <div>
+                            <h2 className="text-[25px] font-extrabold text-[#1A1F36] lg:text-2xl lg:font-semibold lg:text-[#0f172a]">
                               Forgot Password
                             </h2>
-                            <p className="mt-2 text-sm text-slate-500">
+                            <p className="mt-1 text-[12.5px] text-[#6F7883] lg:mt-2 lg:text-sm lg:text-slate-500">
                               Enter your email address first to verify your account.
                             </p>
                           </div>
@@ -757,10 +855,10 @@ const Login = () => {
                                 }}
                                 placeholder="you@gmail.com"
                                 disabled={isCheckingForgotEmail}
-                                className={`w-full rounded-xl border bg-[#f8fbff] py-3.5 pl-12 pr-4 text-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+                                className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-4 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] lg:text-sm ${
                                   forgotEmailError
                                     ? "border-red-300 focus:border-red-300 focus:ring-0"
-                                    : "border-slate-200 focus:ring-1 focus:ring-[#2563eb]/90"
+                                    : "border-[#F2E6EB] focus:ring-1 focus:ring-[#2563eb]/90 lg:border-slate-200"
                                 }`}
                               />
                             </div>
@@ -769,7 +867,7 @@ const Login = () => {
                               type="button"
                               onClick={handleForgotEmailCheck}
                               disabled={isCheckingForgotEmail}
-                              className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-[#0a162b] py-3.5 text-sm font-normal text-white transition hover:bg-[#0f1729] disabled:cursor-not-allowed disabled:opacity-80"
+                              className="mt-5 flex h-14 w-full items-center justify-center gap-2 rounded-[8px] bg-[#1A1F36] text-base font-normal text-white transition hover:bg-[#0f1729] disabled:cursor-not-allowed disabled:opacity-80 lg:h-auto lg:bg-[#0a162b] lg:py-3.5 lg:text-sm"
                             >
                               {isCheckingForgotEmail ? <Spinner size={20} className="text-white" /> : "Check Email"}
                             </button>
@@ -777,11 +875,11 @@ const Login = () => {
                         </div>
                       ) : !forgotCodeVerified ? (
                         <div className="mx-auto w-full max-w-md text-center">
-                          <div className="mt-6">
-                            <h2 className="text-2xl font-semibold text-[#0f172a]">
-                              Email verified
+                          <div>
+                            <h2 className="text-[25px] font-extrabold text-[#1A1F36] lg:text-2xl lg:font-semibold lg:text-[#0f172a]">
+                              Email Verified
                             </h2>
-                            <p className="mt-2 text-sm text-slate-500">
+                            <p className="mt-1 text-[12.5px] text-[#6F7883] lg:mt-2 lg:text-sm lg:text-slate-500">
                               Enter the 6-digit verification code sent to your email.
                             </p>
                           </div>
@@ -803,13 +901,15 @@ const Login = () => {
                                 onKeyDown={(event) =>
                                   handleResetCodeKeyDown(index, event)
                                 }
-                                className="h-14 w-12 rounded-xl border border-slate-200 bg-[#f8fbff] text-center text-xl font-semibold text-[#0f172a] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/20 sm:w-14"
+                                className={`h-14 w-11 rounded-xl border bg-[#F8FBFF] text-center text-xl font-semibold text-[#1A1F36] outline-none focus:border-[#2563eb] focus:ring-2 focus:ring-[#2563eb]/20 sm:w-14 ${
+                                  forgotCodeError ? "border-red-300" : "border-[#E8E1E6] lg:border-slate-200"
+                                }`}
                               />
                             ))}
                           </div>
 
-                          <p className="mt-4 text-sm text-slate-500">
-                            Didn&apos;t receive the code?{" "}
+                          <p className="mt-4 text-[13px] text-[#6F7883] lg:text-sm lg:text-slate-500">
+                            Did not receive the code?{" "}
                             {forgotResendCountdown > 0 ? (
                               <span className="font-semibold uppercase text-[#2563eb]">
                                 {forgotResendCountdown}
@@ -833,11 +933,11 @@ const Login = () => {
                         </div>
                       ) : (
                         <div className="mx-auto w-full max-w-md text-center">
-                          <div className="mt-6">
-                            <h2 className="text-2xl font-semibold text-[#0f172a]">
+                          <div>
+                            <h2 className="text-[25px] font-extrabold text-[#1A1F36] lg:text-2xl lg:font-semibold lg:text-[#0f172a]">
                               Change Password
                             </h2>
-                            <p className="mt-2 text-sm text-slate-500">
+                            <p className="mt-1 text-[12.5px] text-[#6F7883] lg:mt-2 lg:text-sm lg:text-slate-500">
                               Enter your new password to finish resetting your account.
                             </p>
                           </div>
@@ -858,10 +958,10 @@ const Login = () => {
                                   }}
                                   placeholder="Enter new password"
                                   disabled={isResettingForgotPassword}
-                                  className={`w-full rounded-xl border bg-[#f8fbff] py-3.5 pl-12 pr-12 text-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-12 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] lg:text-sm ${
                                     forgotPasswordErrors.password
                                       ? "border-red-300 focus:border-red-300 focus:ring-0"
-                                      : "border-slate-200 focus:ring-1 focus:ring-[#2563eb]/90"
+                                      : "border-[#F2E6EB] focus:ring-1 focus:ring-[#2563eb]/90 lg:border-slate-200"
                                   }`}
                                 />
                                 <button
@@ -891,10 +991,10 @@ const Login = () => {
                                   }}
                                   placeholder="Confirm new password"
                                   disabled={isResettingForgotPassword}
-                                  className={`w-full rounded-xl border bg-[#f8fbff] py-3.5 pl-12 pr-12 text-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-12 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] lg:text-sm ${
                                     forgotPasswordErrors.password_confirmation
                                       ? "border-red-300 focus:border-red-300 focus:ring-0"
-                                      : "border-slate-200 focus:ring-1 focus:ring-[#2563eb]/90"
+                                      : "border-[#F2E6EB] focus:ring-1 focus:ring-[#2563eb]/90 lg:border-slate-200"
                                   }`}
                                 />
                                 <button
@@ -919,7 +1019,7 @@ const Login = () => {
                           type="button"
                           onClick={handleForgotVerifyCode}
                           disabled={!isResetCodeComplete}
-                          className="mx-auto mt-8 flex w-full max-w-md items-center justify-center gap-2 rounded-md bg-[#0a162b] py-3.5 text-sm font-normal text-white transition hover:bg-[#0f1729] disabled:cursor-not-allowed disabled:opacity-80"
+                          className="mx-auto mt-8 flex h-14 w-full max-w-md items-center justify-center gap-2 rounded-[8px] bg-[#1A1F36] text-base font-normal text-white transition hover:bg-[#0f1729] disabled:cursor-not-allowed disabled:opacity-80 lg:h-auto lg:bg-[#0a162b] lg:py-3.5 lg:text-sm"
                         >
                           {isVerifyingForgotCode ? <Spinner size={20} className="text-white" /> : "Verify Code"}
                         </button>
@@ -929,7 +1029,7 @@ const Login = () => {
                           type="button"
                           onClick={handleForgotResetPassword}
                           disabled={isResettingForgotPassword}
-                          className="mx-auto mt-8 flex w-full max-w-md items-center justify-center gap-2 rounded-md bg-[#0a162b] py-3.5 text-sm font-normal text-white transition hover:bg-[#0f1729] disabled:cursor-not-allowed disabled:opacity-80"
+                          className="mx-auto mt-8 flex h-14 w-full max-w-md items-center justify-center gap-2 rounded-[8px] bg-[#1A1F36] text-base font-normal text-white transition hover:bg-[#0f1729] disabled:cursor-not-allowed disabled:opacity-80 lg:h-auto lg:bg-[#0a162b] lg:py-3.5 lg:text-sm"
                         >
                           {isResettingForgotPassword ? <Spinner size={20} className="text-white" /> : "Change Password"}
                         </button>

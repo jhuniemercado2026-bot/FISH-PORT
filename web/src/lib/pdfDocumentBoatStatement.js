@@ -901,9 +901,9 @@ export const buildStatementOfAccountPdf = async ({
       borderColor: COLORS.black,
       borderWidth: soaBorderWidth,
     });
-    composer.drawText(
+    composer.drawCenteredText(
       "No billing or payment transactions found for this boat.",
-      MARGIN_X + 8,
+      MARGIN_X + tableWidth / 2,
       composer.cursorY - 15,
       {
         fontSize: 9,

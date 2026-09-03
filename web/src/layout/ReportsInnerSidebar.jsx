@@ -10,6 +10,7 @@ import {
   IoCarOutline,
   IoMailOutline,
   IoReceiptOutline,
+  IoDocumentTextOutline,
 } from "react-icons/io5";
 import "typeface-montserrat";
 
@@ -20,6 +21,8 @@ export const REPORT_TABS = [
   { key: "registered-boats", label: "Registered Boats", icon: IoBoatOutline },
   { key: "boat-types", label: "Boat Types", icon: IoBoatOutline },
   { key: "owner-info", label: "Boat Owner", icon: IoPeopleOutline },
+  { key: "boat-statement-report", label: "Boat Statement", icon: IoDocumentTextOutline },
+  { key: "owner-statement-report", label: "Owner Statement", icon: IoPeopleOutline },
   { key: "docking", label: "Docking", icon: IoBoatOutline },
   { key: "banyera", label: "Banyera", icon: IoFishOutline },
   { key: "fisheries-bfar", label: "Fisheries (BFAR)", icon: IoFishOutline },

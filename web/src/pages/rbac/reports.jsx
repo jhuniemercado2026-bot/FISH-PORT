@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ConfigProvider } from "antd";
+import { useQueryClient } from "@tanstack/react-query";
+import { PDFDocument } from "pdf-lib";
 import "typeface-montserrat";
 import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
@@ -13,9 +15,12 @@ import { useMonthlyReportDataQuery } from "../../hooks/useMonthlyReportDataQuery
 import { useYearlyReportDataQuery } from "../../hooks/useYearlyReportDataQuery";
 import { useRemittanceReportDataQuery } from "../../hooks/useRemittanceReportDataQuery";
 import {
+  useRegisteredBoatsDataQuery,
   useRegisteredBoatsReportDataQuery,
   useOwnerInfoReportDataQuery,
   useBoatTypesReportDataQuery,
+  useBoatTypesQuery,
+  useBoatOwnersQuery,
 } from "../../hooks/useBoatManagement";
 import { useDockingReportDataQuery } from "../../hooks/useDockingsDataQuery";
 import { useVehicleTicketReportDataQuery } from "../../hooks/useVehicleTicketReportDataQuery";
@@ -32,11 +37,17 @@ import { buildBfarPdf } from "../../lib/pdfDocumentBfar";
 import { buildRegisteredBoatsPdf } from "../../lib/pdfDocumentRegisteredBoats";
 import { buildOwnerInfoPdf } from "../../lib/pdfDocumentOwnerInfo";
 import { buildBoatTypesPdf } from "../../lib/pdfDocumentBoatTypes";
+import { buildStatementOfAccountPdf } from "../../lib/pdfDocumentBoatStatement";
+import { buildOwnerStatementPdf } from "../../lib/pdfDocumentOwnerStatement";
 import { useSidebar } from "../../store/sidebarStore";
 import { createExcelExportBlob } from "../../lib/excelFormat";
 import { useBanyeraReportDataQuery } from "../../hooks/useBanyeraDataQuery";
 import { useBfarReportDataQuery } from "../../hooks/useBfarReportDataQuery";
 import { useReportUsersQuery } from "../../hooks/useReportUsersQuery";
+import {
+  getStatementOfAccountDataQueryOptions,
+  useStatementOfAccountDataQuery,
+} from "../../hooks/useStatementOfAccountDataQuery";
 import { useFiscalYearStore, getFiscalYearOptions } from "../../store/fiscalYearStore";
 import { showBottomToast } from "../../store/bottomToastStore";
 import { cacheTab, getCachedTab } from "../../utils/tabSession";
@@ -60,6 +71,8 @@ const REPORT_CONTENT = {
   "registered-boats": { title: "Registered Boats" },
   "boat-types": { title: "Boat Types" },
   "owner-info": { title: "Boat Owner" },
+  "boat-statement-report": { title: "Boat Statement" },
+  "owner-statement-report": { title: "Owner Statement" },
   docking: { title: "Docking" },
   banyera: { title: "Banyera" },
   "fisheries-bfar": { title: "Fisheries (BFAR)" },
@@ -92,6 +105,9 @@ const MONTH_OPTIONS = [
 
 const YEAR_OPTIONS = getFiscalYearOptions().map((year) => ({ value: year, label: year }));
 const ALL_REPORT_USERS_VALUE = "all";
+const ALL_REGISTERED_BOATS_VALUE = "all";
+const ALL_BOAT_TYPES_VALUE = "all";
+const ALL_BOAT_OWNERS_VALUE = "all";
 const REPORT_USER_ROLE_ORDER = {
   coordinator: 0,
   inspector: 1,
@@ -110,6 +126,133 @@ const formatReportUserName = (user) => {
 const formatReportUserRole = (role) => {
   const normalizedRole = String(role || "").trim().toLowerCase();
   return normalizedRole ? normalizedRole.replace(/\b\w/g, (letter) => letter.toUpperCase()) : "User";
+};
+
+const formatReportBoatName = (boat) =>
+  String(boat?.boat_name || boat?.boatName || boat?.name || "Unnamed Boat").trim();
+
+const formatReportBoatTypeName = (boatType) =>
+  String(boatType?.type_name || boatType?.typeName || boatType?.name || "Unnamed Boat Type").trim();
+
+const formatReportOwnerName = (owner) =>
+  String(
+    owner?.full_name ||
+      owner?.owner_name ||
+      `${owner?.owner_firstname || ""} ${owner?.owner_lastname || ""}`.trim() ||
+      "Unnamed Owner",
+  ).trim();
+
+const normalizeTransactionLabel = (value) => {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "ticket") return "Vehicle Ticket";
+  if (normalized === "banyera") return "Banyera";
+  if (normalized === "docking") return "Docking";
+  return String(value || "-")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const buildBoatStatementTransactions = (boatDetailRecord) => {
+  if (!boatDetailRecord) return [];
+
+  const transactions = [];
+  const getPaymentDescription = (bill, payment) => {
+    const totalAmount = Number(bill?.total_amount || bill?.balance_due || bill?.amount_due || 0);
+    const amountPaid = Number(payment?.amount_paid || 0);
+    return Math.max(0, totalAmount - amountPaid) <= 0.009
+      ? "Full Payment Received"
+      : "Partial Payment Received";
+  };
+
+  (boatDetailRecord.bills || []).forEach((bill) => {
+    (Array.isArray(bill.line_items) ? bill.line_items : [])
+      .filter((item) => ["docking", "banyera", "ticket"].includes(String(item.transaction_type || "").toLowerCase()))
+      .forEach((item, index) => {
+        const transactionType = String(item.transaction_type || "").toLowerCase();
+        transactions.push({
+          transaction_key: `charge-${bill.bill_id}-${transactionType}-${index}`,
+          date: bill.date_billed,
+          bill_reference: bill.bill_reference,
+          type: "Bill",
+          reference: "-",
+          description: transactionType === "ticket" ? "Vehicle Ticket Fee" : `${normalizeTransactionLabel(transactionType)} Fee`,
+          charge: Number(item.amount || 0),
+          payment: 0,
+        });
+      });
+
+    (bill.payments || [])
+      .slice()
+      .sort((a, b) => String(a.payment_date || "").localeCompare(String(b.payment_date || "")))
+      .forEach((payment, index) => {
+        transactions.push({
+          transaction_key: `payment-${bill.bill_id}-${payment.payment_id ?? index}`,
+          date: payment.payment_date,
+          bill_reference: bill.bill_reference,
+          type: "Payment",
+          reference: String(
+            payment.payment_reference_no ||
+              payment.payment_reference ||
+              payment.reference_no ||
+              payment.reference_number ||
+              payment.official_receipt_no ||
+              payment.official_receipt_number ||
+              payment.or_no ||
+              payment.or_number ||
+              payment.receipt_no ||
+              payment.receipt_number ||
+              "-",
+          ),
+          description: getPaymentDescription(bill, payment),
+          charge: 0,
+          payment: Number(payment.amount_paid || 0),
+        });
+      });
+  });
+
+  (boatDetailRecord.unbilled_charges || []).forEach((charge) => {
+    transactions.push(charge);
+  });
+
+  const sortedTransactions = transactions.sort((a, b) => {
+    const dateCompare = String(a.date || "").localeCompare(String(b.date || ""));
+    if (dateCompare !== 0) return dateCompare;
+    if (a.type === b.type) return 0;
+    if (a.type === "Bill") return -1;
+    if (b.type === "Bill") return 1;
+    if (a.type === "Unbilled") return -1;
+    if (b.type === "Unbilled") return 1;
+    return 1;
+  });
+
+  let runningBalance = 0;
+  return sortedTransactions.map((transaction) => {
+    runningBalance += Number(transaction.charge || 0) - Number(transaction.payment || 0);
+    return { ...transaction, running_balance: runningBalance };
+  });
+};
+
+const getBoatStatementPeriod = (transactions) => {
+  const dates = transactions
+    .map((transaction) => String(transaction.date || "").slice(0, 10))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+
+  if (!dates.length) return "-";
+  if (dates[0] === dates[dates.length - 1]) return formatCoverageDateLabel(dates[0]);
+  return `${formatCoverageDateLabel(dates[0])} - ${formatCoverageDateLabel(dates[dates.length - 1])}`;
+};
+
+const mergePdfBytes = async (pdfBytesList) => {
+  const mergedPdf = await PDFDocument.create();
+
+  for (const pdfBytes of pdfBytesList) {
+    const sourcePdf = await PDFDocument.load(pdfBytes);
+    const pages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+    pages.forEach((page) => mergedPdf.addPage(page));
+  }
+
+  return mergedPdf.save();
 };
 
 const getExportValue = (value) => {
@@ -404,6 +547,40 @@ const getExportReportHeader = ({ activeReport, filters }) => {
             ? formattedYear
             : formattedDate,
       };
+    case "boat-statement-report":
+      return {
+        reportTitle: "Boat Statement Report",
+        reportTypeLabel:
+          filterType === "monthly"
+            ? "Monthly Boat Statement"
+            : filterType === "yearly"
+            ? "Yearly Boat Statement"
+            : "Daily Boat Statement",
+        coverageLabel: "Coverage",
+        coverageValue:
+          filterType === "monthly"
+            ? formattedMonth
+            : filterType === "yearly"
+            ? formattedYear
+            : formattedDate,
+      };
+    case "owner-statement-report":
+      return {
+        reportTitle: "Owner Statement Report",
+        reportTypeLabel:
+          filterType === "monthly"
+            ? "Monthly Owner Statement"
+            : filterType === "yearly"
+            ? "Yearly Owner Statement"
+            : "Daily Owner Statement",
+        coverageLabel: "Coverage",
+        coverageValue:
+          filterType === "monthly"
+            ? formattedMonth
+            : filterType === "yearly"
+            ? formattedYear
+            : formattedDate,
+      };
     case "fees":
       return {
         reportTitle: "Fees Report",
@@ -450,6 +627,8 @@ const getExportReportSummary = ({
   registeredBoatsReportData,
   ownerInfoReportData,
   boatTypesReportData,
+  boatStatementReportData,
+  ownerStatementReportData,
 }) => {
   const sumRows = (rows, key) =>
     Array.isArray(rows)
@@ -541,6 +720,22 @@ const getExportReportSummary = ({
         totalValue: formatCurrency(billingTotal),
       };
     }
+    case "boat-statement-report": {
+      const rows = boatStatementReportData?.selectedBoatRecord
+        ? [boatStatementReportData.selectedBoatRecord]
+        : boatStatementReportData?.boatRecords ?? [];
+      return {
+        totalLabel: "Total Receivables:",
+        totalValue: formatCurrency(sumRows(rows, "balance_due")),
+      };
+    }
+    case "owner-statement-report": {
+      const rows = ownerStatementReportData?.ownerRecords ?? [];
+      return {
+        totalLabel: "Total Receivables:",
+        totalValue: formatCurrency(sumRows(rows, "balance_due")),
+      };
+    }
     case "fees": {
       const feeCount = Array.isArray(feeReportData?.fees) ? feeReportData.fees.length : 0;
       return {
@@ -625,6 +820,8 @@ const getReportRowsForExport = ({
   registeredBoatsReportData,
   ownerInfoReportData,
   boatTypesReportData,
+  boatStatementReportData,
+  ownerStatementReportData,
   dockingReportData,
   banyeraData,
   bfarData,
@@ -637,6 +834,11 @@ const getReportRowsForExport = ({
   if (activeReport === "registered-boats") return registeredBoatsReportData?.boats ?? [];
   if (activeReport === "owner-info") return ownerInfoReportData?.owners ?? [];
   if (activeReport === "boat-types") return boatTypesReportData?.boatTypes ?? [];
+  if (activeReport === "boat-statement-report") {
+    const boatRecord = boatStatementReportData?.selectedBoatRecord ?? boatStatementReportData?.boatRecords?.[0];
+    return buildBoatStatementTransactions(boatRecord);
+  }
+  if (activeReport === "owner-statement-report") return ownerStatementReportData?.ownerRecords ?? [];
   if (activeReport === "docking") return dockingReportData?.dockings ?? [];
   if (activeReport === "banyera") return banyeraData?.rows ?? banyeraData?.banyeraTransactions ?? [];
   if (activeReport === "fisheries-bfar") return bfarData?.rows ?? [];
@@ -644,6 +846,78 @@ const getReportRowsForExport = ({
   if (activeReport === "billing") return billingReportData?.rows ?? billingReportData?.bills ?? [];
   if (activeReport === "fees") return feeReportData?.fees ?? [];
   return [];
+};
+
+const getBoatStatementDetailRecordForExcelExport = async (context, boat) => {
+  const boatKey = String(
+    boat?.boat_key ??
+      boat?.boat_id ??
+      context.generatedFilters?.boatId ??
+      "",
+  );
+
+  if (!boatKey) return boat;
+
+  const detailData = await context.queryClient.fetchQuery({
+    ...getStatementOfAccountDataQueryOptions({
+      ...context.statementReportFilters,
+      boat: boatKey,
+      perPage: 100,
+      selectedOnly: true,
+    }),
+  });
+
+  return detailData?.selectedBoatRecord ?? boat;
+};
+
+const getBoatStatementRowsForExcelExport = async (context) => {
+  const boatRecord =
+    context.boatStatementReportData?.selectedBoatRecord ??
+    context.boatStatementReportData?.boatRecords?.[0];
+  const detailRecord = await getBoatStatementDetailRecordForExcelExport(context, boatRecord);
+  return buildBoatStatementTransactions(detailRecord);
+};
+
+const getOwnerStatementRowsForExcelExport = async (context) => {
+  const ownerRecord = context.ownerStatementReportData?.ownerRecords?.[0];
+  const boats = Array.isArray(ownerRecord?.boats) ? ownerRecord.boats : [];
+  const rows = [];
+
+  for (const [index, boat] of boats.entries()) {
+    const detailRecord = await getBoatStatementDetailRecordForExcelExport(context, boat);
+    const transactions = buildBoatStatementTransactions(detailRecord);
+
+    if (index > 0) rows.push({ __rowType: "spacer" });
+    rows.push({
+      __rowType: "boatTitle",
+      __label: detailRecord?.boat_name || detailRecord?.boatName || boat?.boat_name || boat?.boatName || "Unnamed Boat",
+    });
+    rows.push({ __rowType: "tableHeader" });
+    rows.push(...transactions);
+    rows.push({
+      __rowType: "transactionTotal",
+      amount: Number(detailRecord?.total_billed || 0) - Number(detailRecord?.total_paid || 0),
+      running_balance: Number(detailRecord?.balance_due || 0),
+    });
+  }
+
+  if (rows.length) rows.push({ __rowType: "spacer" });
+  rows.push(
+    { __rowType: "sectionTitle", __label: "SUMMARY" },
+    { __rowType: "summaryHeader" },
+    ...boats.map((boat) => ({
+      __rowType: "summaryRow",
+      boatName: boat?.boat_name || boat?.boatName || "Unnamed Boat",
+      balanceDue: Number(boat?.balance_due ?? boat?.balanceDue ?? 0),
+    })),
+    {
+      __rowType: "summaryTotal",
+      boatName: "Total Balance Due(PHP):",
+      balanceDue: Number(ownerRecord?.balance_due ?? ownerRecord?.balanceDue ?? 0),
+    },
+  );
+
+  return rows;
 };
 
 const isVoidedVehicleTicket = (ticket) =>
@@ -721,7 +995,7 @@ const getExportColumnsForReport = ({
       : activeReport === "remittance" ? remittanceFilterType
       : activeReport === "docking" ? dockingFilterType
       : activeReport === "banyera" || activeReport === "fisheries-bfar" ? banyeraFilterType
-      : activeReport === "billing" ? billingFilterType
+      : activeReport === "billing" || activeReport === "boat-statement-report" || activeReport === "owner-statement-report" ? billingFilterType
       : activeReport === "daily-vehicle-ticket" ? vehicleDailyFilterType
       : undefined);
 
@@ -797,6 +1071,30 @@ const getExportColumnsForReport = ({
     return [
       { key: "typeName", label: "Boat Types" },
       { key: "usageCount", label: "Usage Count" },
+    ];
+  }
+
+  if (activeReport === "boat-statement-report") {
+    return [
+      { key: "date", label: "Date" },
+      { key: "bill_reference", label: "Bill Ref." },
+      { key: "reference", label: "Payment Ref." },
+      { key: "type", label: "Type" },
+      { key: "description", label: "Description" },
+      { key: "amount", label: "Amount (PHP)" },
+      { key: "running_balance", label: "Line Total (PHP)" },
+    ];
+  }
+
+  if (activeReport === "owner-statement-report") {
+    return [
+      { key: "date", label: "Date" },
+      { key: "bill_reference", label: "Bill Ref." },
+      { key: "reference", label: "Payment Ref." },
+      { key: "type", label: "Type" },
+      { key: "description", label: "Description" },
+      { key: "amount", label: "Amount (PHP)" },
+      { key: "running_balance", label: "Line Total (PHP)" },
     ];
   }
 
@@ -1027,8 +1325,10 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
     ? rows.map(normalizeVehicleTicketRow)
     : rows;
 
-  return normalizedRows.map((row) =>
-    columns.reduce((acc, column) => {
+  return normalizedRows.map((row) => {
+    if (row?.__rowType) return row;
+
+    return columns.reduce((acc, column) => {
       const resolveRowValue = (src, k) => {
         if (!src) return undefined;
         // direct match
@@ -1083,6 +1383,14 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
         val = Number(row?.total_fee ?? row?.total ?? 0);
       } else if (column.key === "date") {
         val = formatExportDate(row?.date ?? row?.billing_date ?? row?.bill_date ?? row?.date_billed ?? row?.transaction_date ?? row?.created_at ?? row?.transactionDate);
+      } else if ((activeReport === "boat-statement-report" || activeReport === "owner-statement-report") && column.key === "amount") {
+        const charge = Number(row?.charge ?? 0);
+        const payment = Number(row?.payment ?? 0);
+        val = charge > 0 ? charge : payment > 0 ? -payment : "";
+      } else if ((activeReport === "boat-statement-report" || activeReport === "owner-statement-report") && column.key === "running_balance") {
+        val = row?.type === "Unbilled"
+          ? Number(row?.charge ?? 0)
+          : Number(row?.running_balance ?? 0);
       } else if (column.key === "fishClassification") {
         val = row?.classification_name || row?.fishClassification || row?.classification?.classification_name || "";
       } else if (column.key === "qty") {
@@ -1096,6 +1404,18 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
           row?.boat_name ||
           row?.boat?.boatName ||
           "";
+      } else if (column.key === "ownerName") {
+        val = row?.owner_name || row?.ownerName || "";
+      } else if (column.key === "boatCount") {
+        val = Number(row?.boat_count ?? row?.boatCount ?? 0);
+      } else if (column.key === "totalBilled") {
+        val = Number(row?.total_billed ?? row?.totalBilled ?? 0);
+      } else if (column.key === "totalPaid") {
+        val = Number(row?.total_paid ?? row?.paid_total ?? row?.totalPaid ?? 0);
+      } else if (column.key === "balanceDue") {
+        val = Number(row?.balance_due ?? row?.balanceDue ?? 0);
+      } else if (column.key === "statementStatus") {
+        val = row?.statement_status_label || formatStatus(row?.statement_status ?? row?.statementStatus ?? "");
       } else if (column.key === "boatType") {
         val =
           row?.boat?.boat_type?.type_name ||
@@ -1125,8 +1445,8 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
 
       acc[column.key] = getExportValue(val);
       return acc;
-    }, {}),
-  );
+    }, {});
+  });
 };
 
 const getExportFilters = ({
@@ -1211,6 +1531,15 @@ const getExportFilters = ({
     };
   }
 
+  if (activeReport === "boat-statement-report" || activeReport === "owner-statement-report") {
+    return {
+      filterType: billingFilterType,
+      date: billingFilterType === "daily" ? dailyDate : undefined,
+      month: billingFilterType === "monthly" ? monthlyMonth : undefined,
+      year: billingFilterType === "monthly" ? monthlyYear : billingFilterType === "yearly" ? yearlyDate : undefined,
+    };
+  }
+
   return {};
 };
 
@@ -1221,6 +1550,8 @@ const getExportSheetName = (reportKey) => {
     case "registered-boats": return "RegisteredBoats";
     case "boat-types": return "BoatTypes";
     case "owner-info": return "BoatOwner";
+    case "boat-statement-report": return "BoatStatement";
+    case "owner-statement-report": return "OwnerStatement";
     case "docking": return "Docking";
     case "banyera": return "Banyera";
     case "fisheries-bfar": return "BFAR";
@@ -1240,6 +1571,8 @@ const getExportRowCount = ({
   registeredBoatsReportData,
   ownerInfoReportData,
   boatTypesReportData,
+  boatStatementReportData,
+  ownerStatementReportData,
   dockingReportData,
   banyeraData,
   bfarData,
@@ -1254,6 +1587,8 @@ const getExportRowCount = ({
     registeredBoatsReportData,
     ownerInfoReportData,
     boatTypesReportData,
+    boatStatementReportData,
+    ownerStatementReportData,
     dockingReportData,
     banyeraData,
     bfarData,
@@ -1284,6 +1619,8 @@ const getExportStatus = ({
   registeredBoatsReportData,
   ownerInfoReportData,
   boatTypesReportData,
+  boatStatementReportData,
+  ownerStatementReportData,
   dockingReportData,
   banyeraData,
   bfarData,
@@ -1298,6 +1635,8 @@ const getExportStatus = ({
     registeredBoatsReportData,
     ownerInfoReportData,
     boatTypesReportData,
+    boatStatementReportData,
+    ownerStatementReportData,
     dockingReportData,
     banyeraData,
     bfarData,
@@ -1314,6 +1653,8 @@ const getExportData = ({
   registeredBoatsReportData,
   ownerInfoReportData,
   boatTypesReportData,
+  boatStatementReportData,
+  ownerStatementReportData,
   dockingReportData,
   banyeraData,
   bfarData,
@@ -1327,6 +1668,8 @@ const getExportData = ({
   registeredBoatsReportData,
   ownerInfoReportData,
   boatTypesReportData,
+  boatStatementReportData,
+  ownerStatementReportData,
   dockingReportData,
   banyeraData,
   bfarData,
@@ -1337,16 +1680,21 @@ const getExportData = ({
 
 const getExportBlobAndName = async (context) => {
   const filters = getExportFilters(context);
+  const rawRows = context.activeReport === "boat-statement-report"
+    ? await getBoatStatementRowsForExcelExport(context)
+    : context.activeReport === "owner-statement-report"
+      ? await getOwnerStatementRowsForExcelExport(context)
+      : getExportData(context);
   const rows = getRowsForExcelExport({
     activeReport: context.activeReport,
-    rows: getExportData(context),
+    rows: rawRows,
     filters,
   });
   if (!Array.isArray(rows) || rows.length === 0) {
     return null;
   }
   const fileName = getExportFileName(context.activeReport, filters);
-  const columns = getExportColumnsForReport({
+  let columns = getExportColumnsForReport({
     activeReport: context.activeReport,
     generatedFilters: context.generatedFilters,
     revenueFilterType: context.revenueFilterType,
@@ -1356,6 +1704,20 @@ const getExportBlobAndName = async (context) => {
     billingFilterType: context.billingFilterType,
     vehicleDailyFilterType: context.vehicleDailyFilterType,
   });
+  if (context.activeReport === "boat-statement-report") {
+    const boatRecord =
+      context.boatStatementReportData?.selectedBoatRecord ??
+      context.boatStatementReportData?.boatRecords?.[0];
+    const statementTotal =
+      Number(boatRecord?.total_billed || 0) - Number(boatRecord?.total_paid || 0);
+    const balanceDue = Number(boatRecord?.balance_due || 0);
+
+    columns = columns.map((column) => {
+      if (column.key === "amount") return { ...column, totalValue: statementTotal };
+      if (column.key === "running_balance") return { ...column, totalValue: balanceDue };
+      return column;
+    });
+  }
   const reportHeader = getExportReportHeader({
     activeReport: context.activeReport,
     filters,
@@ -1373,6 +1735,8 @@ const getExportBlobAndName = async (context) => {
     registeredBoatsReportData: context.registeredBoatsReportData,
     ownerInfoReportData: context.ownerInfoReportData,
     boatTypesReportData: context.boatTypesReportData,
+    boatStatementReportData: context.boatStatementReportData,
+    ownerStatementReportData: context.ownerStatementReportData,
   });
   const exportRows = getExportRowsForColumns(rows, columns, context.activeReport);
   const hasExportableRows = Array.isArray(exportRows) && exportRows.some((row) =>
@@ -1450,6 +1814,7 @@ const SuperReports = () => {
   const normalizedRole = String(currentUser?.role || "").trim().toLowerCase();
   const isHead = normalizedRole === "head";
   const isCoordinator = normalizedRole === "coordinator";
+  const queryClient = useQueryClient();
   const preparedBy = useMemo(
     () =>
       currentUser?.full_name ||
@@ -1500,6 +1865,8 @@ const SuperReports = () => {
   const reportPreviewCacheRef = useRef(readStoredReportPreviewCache());
   const ownerInfoReportDataRef = useRef(null);
   const boatTypesReportDataRef = useRef(null);
+  const boatStatementReportDataRef = useRef(null);
+  const ownerStatementReportDataRef = useRef(null);
   const dockingReportDataRef = useRef(null);
   const banyeraReportDataRef = useRef(null);
   const bfarReportDataRef = useRef(null);
@@ -1529,6 +1896,11 @@ const SuperReports = () => {
     ["daily", "monthly", "yearly"].includes(requestedTab) ? requestedTab : "daily",
   );
   const [reportUserFilter, setReportUserFilter] = useState(ALL_REPORT_USERS_VALUE);
+  const [registeredBoatFilter, setRegisteredBoatFilter] = useState(ALL_REGISTERED_BOATS_VALUE);
+  const [boatTypeFilter, setBoatTypeFilter] = useState(ALL_BOAT_TYPES_VALUE);
+  const [boatOwnerFilter, setBoatOwnerFilter] = useState(ALL_BOAT_OWNERS_VALUE);
+  const [statementBoatFilter, setStatementBoatFilter] = useState(undefined);
+  const [statementOwnerFilter, setStatementOwnerFilter] = useState(undefined);
 
   useEffect(() => {
     if (isAllowedReportKey(requestedReportTab)) {
@@ -1583,6 +1955,8 @@ const SuperReports = () => {
   const isRegisteredBoatsReport = activeReport === "registered-boats";
   const isBoatTypesReport = activeReport === "boat-types";
   const isOwnerInfoReport = activeReport === "owner-info";
+  const isBoatStatementReport = activeReport === "boat-statement-report";
+  const isOwnerStatementReport = activeReport === "owner-statement-report";
   const isDockingReport = activeReport === "docking";
   const isBanyeraReport = activeReport === "banyera";
   const isBfarReport = activeReport === "fisheries-bfar";
@@ -1640,12 +2014,175 @@ const SuperReports = () => {
     const selectedOption = reportUserOptions.find((option) => option.value === String(reportUserFilter));
     return selectedOption?.displayLabel || "All Users";
   }, [reportUserOptions, reportUserFilter]);
+  const registeredBoatsLookupQuery = useRegisteredBoatsDataQuery(
+    {
+      includeBoats: true,
+      boatsPaginated: false,
+      includeBoatTypes: true,
+      includeOwners: false,
+      perPage: 1000,
+    },
+    {
+      enabled: isRegisteredBoatsReport || isBoatStatementReport,
+    },
+  );
+  const registeredBoatOptions = useMemo(() => {
+    const boats = Array.isArray(registeredBoatsLookupQuery.data?.boats)
+      ? registeredBoatsLookupQuery.data.boats
+      : [];
+
+    return [
+      {
+        value: ALL_REGISTERED_BOATS_VALUE,
+        displayLabel: "Registered Boats",
+        label: <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">Registered Boats</span>,
+      },
+      ...boats.map((boat) => {
+        const name = formatReportBoatName(boat);
+        const typeName = boat?.boatType?.type_name || boat?.boat_type?.type_name || boat?.type?.type_name || "Boat";
+        return {
+          value: String(boat.boat_id),
+          displayLabel: name,
+          label: (
+            <div className="flex flex-col leading-tight">
+              <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">{name}</span>
+              <span className="report-user-option-role mt-0.5 text-[11px] font-medium text-slate-500">{typeName}</span>
+            </div>
+          ),
+        };
+      }),
+    ];
+  }, [registeredBoatsLookupQuery.data]);
+  const selectedRegisteredBoatLabel = useMemo(() => {
+    const selectedOption = registeredBoatOptions.find((option) => option.value === String(registeredBoatFilter));
+    return selectedOption?.displayLabel || "Registered Boats";
+  }, [registeredBoatFilter, registeredBoatOptions]);
+  const statementBoatOptions = useMemo(
+    () => registeredBoatOptions.filter((option) => option.value !== ALL_REGISTERED_BOATS_VALUE),
+    [registeredBoatOptions],
+  );
+  const selectedStatementBoatLabel = useMemo(() => {
+    const selectedOption = statementBoatOptions.find((option) => option.value === String(statementBoatFilter));
+    return selectedOption?.displayLabel;
+  }, [statementBoatFilter, statementBoatOptions]);
+  const boatTypesLookupQuery = useBoatTypesQuery(
+    {
+      all: true,
+    },
+    {
+      enabled: isBoatTypesReport,
+    },
+  );
+  const boatTypeOptions = useMemo(() => {
+    const boatTypes = Array.isArray(boatTypesLookupQuery.data?.boatTypes)
+      ? boatTypesLookupQuery.data.boatTypes
+      : [];
+
+    return [
+      {
+        value: ALL_BOAT_TYPES_VALUE,
+        displayLabel: "Boat Types",
+        label: <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">Boat Types</span>,
+      },
+      ...boatTypes.map((boatType) => {
+        const name = formatReportBoatTypeName(boatType);
+        const usageCount = Number(boatType?.boats_count ?? boatType?.usage_count ?? 0);
+        return {
+          value: String(boatType.boat_type_id),
+          displayLabel: name,
+          label: (
+            <div className="flex flex-col leading-tight">
+              <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">{name}</span>
+              <span className="report-user-option-role mt-0.5 text-[11px] font-medium text-slate-500">
+                {Number.isFinite(usageCount) ? `${usageCount} usage` : "Boat Type"}
+              </span>
+            </div>
+          ),
+        };
+      }),
+    ];
+  }, [boatTypesLookupQuery.data]);
+  const selectedBoatTypeLabel = useMemo(() => {
+    const selectedOption = boatTypeOptions.find((option) => option.value === String(boatTypeFilter));
+    return selectedOption?.displayLabel || "Boat Types";
+  }, [boatTypeFilter, boatTypeOptions]);
+  const boatOwnersLookupQuery = useBoatOwnersQuery(
+    {
+      all: true,
+    },
+    {
+      enabled: isOwnerInfoReport || isOwnerStatementReport,
+    },
+  );
+  const boatOwnerOptions = useMemo(() => {
+    const owners = Array.isArray(boatOwnersLookupQuery.data?.owners)
+      ? boatOwnersLookupQuery.data.owners
+      : [];
+
+    return [
+      {
+        value: ALL_BOAT_OWNERS_VALUE,
+        displayLabel: "Boat Owner",
+        label: <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">Boat Owner</span>,
+      },
+      ...owners.map((owner) => {
+        const name = formatReportOwnerName(owner);
+        return {
+          value: String(owner.owner_id),
+          displayLabel: name,
+          label: <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">{name}</span>,
+        };
+      }),
+    ];
+  }, [boatOwnersLookupQuery.data]);
+  const selectedBoatOwnerLabel = useMemo(() => {
+    const selectedOption = boatOwnerOptions.find((option) => option.value === String(boatOwnerFilter));
+    return selectedOption?.displayLabel || "Boat Owner";
+  }, [boatOwnerFilter, boatOwnerOptions]);
+  const statementOwnerOptions = useMemo(
+    () => boatOwnerOptions.filter((option) => option.value !== ALL_BOAT_OWNERS_VALUE),
+    [boatOwnerOptions],
+  );
+  const selectedStatementOwnerLabel = useMemo(() => {
+    const selectedOption = statementOwnerOptions.find((option) => option.value === String(statementOwnerFilter));
+    return selectedOption?.displayLabel;
+  }, [statementOwnerFilter, statementOwnerOptions]);
   useEffect(() => {
     if (!showReportUserFilter || reportUserFilter === ALL_REPORT_USERS_VALUE || reportUsersQuery.isFetching) return;
     if (reportUserOptions.some((option) => option.value === String(reportUserFilter))) return;
 
     setReportUserFilter(ALL_REPORT_USERS_VALUE);
   }, [reportUserFilter, reportUserOptions, reportUsersQuery.isFetching, showReportUserFilter]);
+  useEffect(() => {
+    if (!isRegisteredBoatsReport || registeredBoatFilter === ALL_REGISTERED_BOATS_VALUE || registeredBoatsLookupQuery.isFetching) return;
+    if (registeredBoatOptions.some((option) => option.value === String(registeredBoatFilter))) return;
+
+    setRegisteredBoatFilter(ALL_REGISTERED_BOATS_VALUE);
+  }, [isRegisteredBoatsReport, registeredBoatFilter, registeredBoatOptions, registeredBoatsLookupQuery.isFetching]);
+  useEffect(() => {
+    if (!isBoatStatementReport || !statementBoatFilter || registeredBoatsLookupQuery.isFetching) return;
+    if (statementBoatOptions.some((option) => option.value === String(statementBoatFilter))) return;
+
+    setStatementBoatFilter(undefined);
+  }, [isBoatStatementReport, registeredBoatsLookupQuery.isFetching, statementBoatFilter, statementBoatOptions]);
+  useEffect(() => {
+    if (!isBoatTypesReport || boatTypeFilter === ALL_BOAT_TYPES_VALUE || boatTypesLookupQuery.isFetching) return;
+    if (boatTypeOptions.some((option) => option.value === String(boatTypeFilter))) return;
+
+    setBoatTypeFilter(ALL_BOAT_TYPES_VALUE);
+  }, [boatTypeFilter, boatTypeOptions, boatTypesLookupQuery.isFetching, isBoatTypesReport]);
+  useEffect(() => {
+    if (!isOwnerInfoReport || boatOwnerFilter === ALL_BOAT_OWNERS_VALUE || boatOwnersLookupQuery.isFetching) return;
+    if (boatOwnerOptions.some((option) => option.value === String(boatOwnerFilter))) return;
+
+    setBoatOwnerFilter(ALL_BOAT_OWNERS_VALUE);
+  }, [boatOwnerFilter, boatOwnerOptions, boatOwnersLookupQuery.isFetching, isOwnerInfoReport]);
+  useEffect(() => {
+    if (!isOwnerStatementReport || !statementOwnerFilter || boatOwnersLookupQuery.isFetching) return;
+    if (statementOwnerOptions.some((option) => option.value === String(statementOwnerFilter))) return;
+
+    setStatementOwnerFilter(undefined);
+  }, [boatOwnersLookupQuery.isFetching, isOwnerStatementReport, statementOwnerFilter, statementOwnerOptions]);
   const dailyDateParts = useMemo(() => getDateParts(dailyDate), [dailyDate]);
   const selectedMonthLabel = useMemo(
     () =>
@@ -1731,18 +2268,57 @@ const SuperReports = () => {
   const registeredBoatsReportQuery = useRegisteredBoatsReportDataQuery({
     enabled: reportGenerated && isRegisteredBoatsReport,
     userId: generatedFilters.userId,
+    boatId: generatedFilters.boatId,
   });
   const registeredBoatsReportData = registeredBoatsReportQuery.data;
   const ownerInfoReportQuery = useOwnerInfoReportDataQuery({
     enabled: reportGenerated && isOwnerInfoReport,
     userId: generatedFilters.userId,
+    ownerId: generatedFilters.ownerId,
   });
   const ownerInfoReportData = ownerInfoReportQuery.data;
   const boatTypesReportQuery = useBoatTypesReportDataQuery(
-    { year: generatedFilters.year, userId: generatedFilters.userId },
+    { year: generatedFilters.year, userId: generatedFilters.userId, boatTypeId: generatedFilters.boatTypeId },
     { enabled: reportGenerated && isBoatTypesReport && Boolean(generatedFilters.year) },
   );
   const boatTypesReportData = boatTypesReportQuery.data;
+  const statementReportFilters = useMemo(() => ({
+    filterType: generatedFilters.filterType || billingFilterType,
+    selectedDate: generatedFilters.date,
+    selectedMonth: generatedFilters.month && generatedFilters.year ? `${generatedFilters.year}-${generatedFilters.month}` : undefined,
+    selectedYear: generatedFilters.year,
+  }), [billingFilterType, generatedFilters.date, generatedFilters.filterType, generatedFilters.month, generatedFilters.year]);
+  const shouldFetchBoatStatementReport = reportGenerated && isBoatStatementReport && (
+    (generatedFilters.filterType === "daily" && Boolean(generatedFilters.date)) ||
+    (generatedFilters.filterType === "monthly" && Boolean(generatedFilters.month) && Boolean(generatedFilters.year)) ||
+    (generatedFilters.filterType === "yearly" && Boolean(generatedFilters.year))
+  );
+  const shouldFetchOwnerStatementReport = reportGenerated && isOwnerStatementReport && (
+    (generatedFilters.filterType === "daily" && Boolean(generatedFilters.date)) ||
+    (generatedFilters.filterType === "monthly" && Boolean(generatedFilters.month) && Boolean(generatedFilters.year)) ||
+    (generatedFilters.filterType === "yearly" && Boolean(generatedFilters.year))
+  );
+  const boatStatementReportQuery = useStatementOfAccountDataQuery(
+    {
+      ...statementReportFilters,
+      statementType: "boats",
+      boat: generatedFilters.boatId,
+      perPage: 100,
+      selectedOnly: Boolean(generatedFilters.boatId),
+    },
+    { enabled: shouldFetchBoatStatementReport },
+  );
+  const boatStatementReportData = boatStatementReportQuery.data;
+  const ownerStatementReportQuery = useStatementOfAccountDataQuery(
+    {
+      ...statementReportFilters,
+      statementType: "owners",
+      ownerId: generatedFilters.ownerId,
+      perPage: 100,
+    },
+    { enabled: shouldFetchOwnerStatementReport },
+  );
+  const ownerStatementReportData = ownerStatementReportQuery.data;
   const shouldFetchDocking = reportGenerated && isDockingReport && (
     (generatedFilters.filterType === "daily" && Boolean(generatedFilters.date)) ||
     (generatedFilters.filterType === "monthly" && Boolean(generatedFilters.month) && Boolean(generatedFilters.year)) ||
@@ -1851,7 +2427,7 @@ const SuperReports = () => {
   );
   const billingReportData = billingReportQuery.data;
 
-  const reportViewerUrl = (isRevenueReport || isRemittanceReport || isRegisteredBoatsReport || isOwnerInfoReport || isBoatTypesReport || isDockingReport || isBanyeraReport || isBfarReport || isDailyVehicleTicketReport || isVehicleTicketReport || isBillingReport || isFeesReport) && reportPdfUrl
+  const reportViewerUrl = (isRevenueReport || isRemittanceReport || isRegisteredBoatsReport || isOwnerInfoReport || isBoatTypesReport || isBoatStatementReport || isOwnerStatementReport || isDockingReport || isBanyeraReport || isBfarReport || isDailyVehicleTicketReport || isVehicleTicketReport || isBillingReport || isFeesReport) && reportPdfUrl
     ? `${reportPdfUrl}#view=FitH`
     : "about:blank";
 
@@ -1860,6 +2436,18 @@ const SuperReports = () => {
 
     if (cachedPreview?.generatedFilters?.userId && STATIC_REPORT_KEYS.has(reportKey)) {
       if (cachedPreview.url?.startsWith("blob:")) URL.revokeObjectURL(cachedPreview.url);
+      delete reportPreviewCacheRef.current[reportKey];
+      writeStoredReportPreviewCache(reportPreviewCacheRef.current);
+    }
+
+    if (reportKey === "boat-statement-report" && cachedPreview?.url && !cachedPreview.generatedFilters?.boatId) {
+      if (cachedPreview.url.startsWith("blob:")) URL.revokeObjectURL(cachedPreview.url);
+      delete reportPreviewCacheRef.current[reportKey];
+      writeStoredReportPreviewCache(reportPreviewCacheRef.current);
+    }
+
+    if (reportKey === "owner-statement-report" && cachedPreview?.url && !cachedPreview.generatedFilters?.ownerId) {
+      if (cachedPreview.url.startsWith("blob:")) URL.revokeObjectURL(cachedPreview.url);
       delete reportPreviewCacheRef.current[reportKey];
       writeStoredReportPreviewCache(reportPreviewCacheRef.current);
     }
@@ -1873,6 +2461,21 @@ const SuperReports = () => {
       setReportPdfLoading(false);
       setGeneratedFilters({});
       setReportUserFilter(ALL_REPORT_USERS_VALUE);
+      if (reportKey === "registered-boats") {
+        setRegisteredBoatFilter(ALL_REGISTERED_BOATS_VALUE);
+      }
+      if (reportKey === "boat-statement-report") {
+        setStatementBoatFilter(undefined);
+      }
+      if (reportKey === "boat-types") {
+        setBoatTypeFilter(ALL_BOAT_TYPES_VALUE);
+      }
+      if (reportKey === "owner-info") {
+        setBoatOwnerFilter(ALL_BOAT_OWNERS_VALUE);
+      }
+      if (reportKey === "owner-statement-report") {
+        setStatementOwnerFilter(undefined);
+      }
       setReportBuildRequest(null);
       return;
     }
@@ -1883,6 +2486,21 @@ const SuperReports = () => {
     setReportPdfLoading(false);
     setGeneratedFilters(nextCachedPreview.generatedFilters ?? {});
     setReportUserFilter(nextCachedPreview.generatedFilters?.userId || ALL_REPORT_USERS_VALUE);
+    if (reportKey === "registered-boats") {
+      setRegisteredBoatFilter(nextCachedPreview.generatedFilters?.boatId || ALL_REGISTERED_BOATS_VALUE);
+    }
+    if (reportKey === "boat-statement-report") {
+      setStatementBoatFilter(nextCachedPreview.generatedFilters?.boatId || undefined);
+    }
+    if (reportKey === "boat-types") {
+      setBoatTypeFilter(nextCachedPreview.generatedFilters?.boatTypeId || ALL_BOAT_TYPES_VALUE);
+    }
+    if (reportKey === "owner-info") {
+      setBoatOwnerFilter(nextCachedPreview.generatedFilters?.ownerId || ALL_BOAT_OWNERS_VALUE);
+    }
+    if (reportKey === "owner-statement-report") {
+      setStatementOwnerFilter(nextCachedPreview.generatedFilters?.ownerId || undefined);
+    }
     setReportBuildRequest(null);
   };
 
@@ -1916,6 +2534,11 @@ const SuperReports = () => {
     setBillingFilterType("daily");
     setVehicleDailyFilterType("daily");
     setReportUserFilter(ALL_REPORT_USERS_VALUE);
+    setRegisteredBoatFilter(ALL_REGISTERED_BOATS_VALUE);
+    setBoatTypeFilter(ALL_BOAT_TYPES_VALUE);
+    setBoatOwnerFilter(ALL_BOAT_OWNERS_VALUE);
+    setStatementBoatFilter(undefined);
+    setStatementOwnerFilter(undefined);
   };
 
   const handleReportChange = (nextReport) => {
@@ -1952,7 +2575,11 @@ const SuperReports = () => {
     if (!value) return;
     setYearlyDate(value);
     setMonthlyYear(value);
-    if ((isRevenueReport && revenueFilterType === "monthly") || isBfarReport) {
+    if (
+      (isRevenueReport && revenueFilterType === "monthly") ||
+      isBfarReport ||
+      ((isBoatStatementReport || isOwnerStatementReport) && billingFilterType === "monthly")
+    ) {
       if (monthlyMonth) {
         setMonthlyDate(`${value}-${monthlyMonth}`);
       }
@@ -1972,6 +2599,26 @@ const SuperReports = () => {
 
   const handleReportUserFilterChange = (value) => {
     setReportUserFilter(value || ALL_REPORT_USERS_VALUE);
+  };
+
+  const handleRegisteredBoatFilterChange = (value) => {
+    setRegisteredBoatFilter(value || ALL_REGISTERED_BOATS_VALUE);
+  };
+
+  const handleBoatTypeFilterChange = (value) => {
+    setBoatTypeFilter(value || ALL_BOAT_TYPES_VALUE);
+  };
+
+  const handleBoatOwnerFilterChange = (value) => {
+    setBoatOwnerFilter(value || ALL_BOAT_OWNERS_VALUE);
+  };
+
+  const handleStatementBoatFilterChange = (value) => {
+    setStatementBoatFilter(value || undefined);
+  };
+
+  const handleStatementOwnerFilterChange = (value) => {
+    setStatementOwnerFilter(value || undefined);
   };
 
   const handleDockingFilterTypeChange = (value) => {
@@ -2035,6 +2682,28 @@ const SuperReports = () => {
       };
     }
 
+    if (isBoatStatementReport) {
+      return {
+        filterType: billingFilterType,
+        date: billingFilterType === "daily" ? dailyDate : undefined,
+        month: billingFilterType === "monthly" ? monthlyMonth : undefined,
+        year: billingFilterType === "monthly" ? monthlyYear : billingFilterType === "yearly" ? yearlyDate : undefined,
+        boatId: statementBoatFilter,
+        boatLabel: selectedStatementBoatLabel,
+      };
+    }
+
+    if (isOwnerStatementReport) {
+      return {
+        filterType: billingFilterType,
+        date: billingFilterType === "daily" ? dailyDate : undefined,
+        month: billingFilterType === "monthly" ? monthlyMonth : undefined,
+        year: billingFilterType === "monthly" ? monthlyYear : billingFilterType === "yearly" ? yearlyDate : undefined,
+        ownerId: statementOwnerFilter,
+        ownerLabel: selectedStatementOwnerLabel,
+      };
+    }
+
     if (isDockingReport) {
       return {
         filterType: dockingFilterType,
@@ -2074,17 +2743,25 @@ const SuperReports = () => {
     }
 
     if (isRegisteredBoatsReport) {
-      return {};
+      return {
+        boatId: registeredBoatFilter !== ALL_REGISTERED_BOATS_VALUE ? registeredBoatFilter : undefined,
+        boatLabel: selectedRegisteredBoatLabel,
+      };
     }
 
     if (isOwnerInfoReport) {
-      return {};
+      return {
+        ownerId: boatOwnerFilter !== ALL_BOAT_OWNERS_VALUE ? boatOwnerFilter : undefined,
+        ownerLabel: selectedBoatOwnerLabel,
+      };
     }
 
     if (isBoatTypesReport) {
       return {
         filterType: "yearly",
         year: yearlyDate,
+        boatTypeId: boatTypeFilter !== ALL_BOAT_TYPES_VALUE ? boatTypeFilter : undefined,
+        boatTypeLabel: selectedBoatTypeLabel,
       };
     }
 
@@ -2112,6 +2789,12 @@ const SuperReports = () => {
       if (remittanceFilterType === "monthly" && !(remittanceMonthlyMonth && remittanceMonthlyYear)) { missing("Please select month and year."); return; }
       if (remittanceFilterType === "yearly" && !remittanceYearlyDate) { missing("Please select a year."); return; }
     } else if (isBillingReport) {
+      if (billingFilterType === "daily" && !dailyDate) { missing("Please select a day."); return; }
+      if (billingFilterType === "monthly" && !(monthlyMonth && monthlyYear)) { missing("Please select month and year."); return; }
+      if (billingFilterType === "yearly" && !yearlyDate) { missing("Please select a year."); return; }
+    } else if (isBoatStatementReport || isOwnerStatementReport) {
+      if (isBoatStatementReport && !statementBoatFilter) { missing("Please select a boat."); return; }
+      if (isOwnerStatementReport && !statementOwnerFilter) { missing("Please select an owner."); return; }
       if (billingFilterType === "daily" && !dailyDate) { missing("Please select a day."); return; }
       if (billingFilterType === "monthly" && !(monthlyMonth && monthlyYear)) { missing("Please select month and year."); return; }
       if (billingFilterType === "yearly" && !yearlyDate) { missing("Please select a year."); return; }
@@ -2164,12 +2847,16 @@ const SuperReports = () => {
       registeredBoatsReportData,
       ownerInfoReportData,
       boatTypesReportData,
+      boatStatementReportData,
+      ownerStatementReportData,
       dockingReportData,
       banyeraData,
       bfarData,
       vehicleTicketReportData,
       billingReportData,
       feeReportData,
+      queryClient,
+      statementReportFilters,
       generatedFilters,
       revenueFilterType,
       remittanceFilterType,
@@ -2233,6 +2920,10 @@ const SuperReports = () => {
             ? ownerInfoReportQuery.isSuccess && !ownerInfoReportQuery.isFetching
             : isBoatTypesReport
               ? boatTypesReportQuery.isSuccess && !boatTypesReportQuery.isFetching
+              : isBoatStatementReport
+                ? boatStatementReportQuery.isSuccess && !boatStatementReportQuery.isFetching
+                : isOwnerStatementReport
+                  ? ownerStatementReportQuery.isSuccess && !ownerStatementReportQuery.isFetching
               : isDockingReport
               ? dockingReportQuery.isSuccess && !dockingReportQuery.isFetching
               : isBanyeraReport
@@ -2308,6 +2999,52 @@ const SuperReports = () => {
       return nextBuildKey;
     });
   }, [boatTypesReportData, isBoatTypesReport, isQueryDataReady, reportBuildRequest, reportGenerated]);
+
+  useEffect(() => {
+    if (!reportGenerated || !isBoatStatementReport || !boatStatementReportData || !isQueryDataReady) {
+      boatStatementReportDataRef.current = boatStatementReportData || null;
+      return;
+    }
+
+    if (!boatStatementReportDataRef.current) {
+      boatStatementReportDataRef.current = boatStatementReportData;
+      return;
+    }
+
+    if (boatStatementReportDataRef.current === boatStatementReportData) return;
+
+    boatStatementReportDataRef.current = boatStatementReportData;
+    if (reportBuildRequest) return;
+
+    setReportBuildKey((currentKey) => {
+      const nextBuildKey = currentKey + 1;
+      setReportBuildRequest({ key: nextBuildKey, report: "boat-statement-report" });
+      return nextBuildKey;
+    });
+  }, [boatStatementReportData, isBoatStatementReport, isQueryDataReady, reportBuildRequest, reportGenerated]);
+
+  useEffect(() => {
+    if (!reportGenerated || !isOwnerStatementReport || !ownerStatementReportData || !isQueryDataReady) {
+      ownerStatementReportDataRef.current = ownerStatementReportData || null;
+      return;
+    }
+
+    if (!ownerStatementReportDataRef.current) {
+      ownerStatementReportDataRef.current = ownerStatementReportData;
+      return;
+    }
+
+    if (ownerStatementReportDataRef.current === ownerStatementReportData) return;
+
+    ownerStatementReportDataRef.current = ownerStatementReportData;
+    if (reportBuildRequest) return;
+
+    setReportBuildKey((currentKey) => {
+      const nextBuildKey = currentKey + 1;
+      setReportBuildRequest({ key: nextBuildKey, report: "owner-statement-report" });
+      return nextBuildKey;
+    });
+  }, [isOwnerStatementReport, isQueryDataReady, ownerStatementReportData, reportBuildRequest, reportGenerated]);
 
   useEffect(() => {
     if (!reportGenerated || !isDockingReport || !dockingReportData || !isQueryDataReady) {
@@ -2425,6 +3162,68 @@ const SuperReports = () => {
     });
   }, [feeReportData, isFeesReport, isQueryDataReady, reportBuildRequest, reportGenerated]);
 
+  const buildBoatStatementReportPdf = async () => {
+    const records = boatStatementReportData?.selectedBoatRecord
+      ? [boatStatementReportData.selectedBoatRecord]
+      : boatStatementReportData?.boatRecords ?? [];
+    const pdfBytesList = [];
+
+    for (const record of records) {
+      const detailData = record?.bills
+        ? { selectedBoatRecord: record }
+        : await queryClient.fetchQuery({
+            ...getStatementOfAccountDataQueryOptions({
+              ...statementReportFilters,
+              boat: String(record?.boat_key ?? record?.boat_id ?? ""),
+              perPage: 100,
+              selectedOnly: true,
+            }),
+          });
+      const detailRecord = detailData?.selectedBoatRecord ?? record;
+      const transactions = buildBoatStatementTransactions(detailRecord);
+      pdfBytesList.push(await buildStatementOfAccountPdf({
+        record: detailRecord,
+        transactions,
+        periodLabel: getBoatStatementPeriod(transactions),
+      }));
+    }
+
+    if (!pdfBytesList.length) return null;
+    return mergePdfBytes(pdfBytesList);
+  };
+
+  const buildOwnerStatementReportPdf = async () => {
+    const records = ownerStatementReportData?.ownerRecords ?? [];
+    const pdfBytesList = [];
+
+    for (const record of records) {
+      const boatStatements = await Promise.all(
+        (record?.boats ?? []).map(async (boat) => {
+          const detailData = await queryClient.fetchQuery({
+            ...getStatementOfAccountDataQueryOptions({
+              ...statementReportFilters,
+              boat: String(boat?.boat_key ?? boat?.boat_id ?? ""),
+              perPage: 100,
+              selectedOnly: true,
+            }),
+          });
+          const detailRecord = detailData?.selectedBoatRecord ?? boat;
+          const transactions = buildBoatStatementTransactions(detailRecord);
+          return {
+            boat: detailRecord,
+            transactions,
+            periodLabel: getBoatStatementPeriod(transactions),
+          };
+        }),
+      );
+
+      pdfBytesList.push(await buildOwnerStatementPdf({ record, boatStatements }));
+    }
+
+    if (!pdfBytesList.length) return null;
+    return mergePdfBytes(pdfBytesList);
+  };
+
   useEffect(() => {
     // Only build when user explicitly requested generation and data is ready
     if (
@@ -2443,7 +3242,7 @@ const SuperReports = () => {
     const buildPdf = async () => {
       if (!isActive.current) return;
 
-      if (!isRevenueReport && !isRemittanceReport && !isRegisteredBoatsReport && !isOwnerInfoReport && !isBoatTypesReport && !isDockingReport && !isBanyeraReport && !isBfarReport && !isDailyVehicleTicketReport && !isVehicleTicketReport && !isBillingReport && !isFeesReport) {
+      if (!isRevenueReport && !isRemittanceReport && !isRegisteredBoatsReport && !isOwnerInfoReport && !isBoatTypesReport && !isBoatStatementReport && !isOwnerStatementReport && !isDockingReport && !isBanyeraReport && !isBfarReport && !isDailyVehicleTicketReport && !isVehicleTicketReport && !isBillingReport && !isFeesReport) {
         setReportPdfUrl("");
         setReportPdfLoading(false);
         return;
@@ -2470,6 +3269,10 @@ const SuperReports = () => {
               ? await buildOwnerInfoPdf({ preparedBy, reportData: ownerInfoReportData })
               : isBoatTypesReport
                 ? await buildBoatTypesPdf({ year: generatedYearlyDate, yearlyDate: generatedYearlyDate, preparedBy, reportData: boatTypesReportData })
+                : isBoatStatementReport
+                  ? await buildBoatStatementReportPdf()
+                  : isOwnerStatementReport
+                    ? await buildOwnerStatementReportPdf()
               : isDockingReport
                 ? await buildDockingPdf({ filterType: generatedFilters.filterType, month: generatedSelectedMonthLabel, day: generatedDailyDateParts.day, year: generatedDailyDateParts.year, monthlyMonth: generatedMonthlyDateParts.month, monthlyYear: generatedMonthlyDateParts.year, yearlyDate: generatedYearlyDate, preparedBy, reportData: dockingReportData })
                 : isBanyeraReport
@@ -2537,6 +3340,8 @@ const SuperReports = () => {
     isRegisteredBoatsReport,
     isOwnerInfoReport,
     isBoatTypesReport,
+    isBoatStatementReport,
+    isOwnerStatementReport,
     isDockingReport,
     isBanyeraReport,
     isBfarReport,
@@ -2549,6 +3354,8 @@ const SuperReports = () => {
     registeredBoatsReportData,
     ownerInfoReportData,
     boatTypesReportData,
+    boatStatementReportData,
+    ownerStatementReportData,
     dockingReportData,
     banyeraData,
     bfarData,
@@ -2560,6 +3367,9 @@ const SuperReports = () => {
     generatedFilters.date,
     generatedFilters.month,
     generatedFilters.year,
+    generatedFilters.boatId,
+    generatedFilters.boatTypeId,
+    generatedFilters.ownerId,
     generatedSelectedMonthLabel,
     generatedDailyDateParts,
     generatedMonthlyDateParts,
@@ -2699,7 +3509,61 @@ const SuperReports = () => {
                   userFilterOptions={reportUserOptions}
                   onUserFilterChange={handleReportUserFilterChange}
                   isUserFilterLoading={reportUsersQuery.isFetching}
-                  showBoatFilter={false}
+                  showBoatFilter={isRegisteredBoatsReport || isBoatTypesReport || isOwnerInfoReport || isBoatStatementReport || isOwnerStatementReport}
+                  boatFilterValue={
+                    isOwnerStatementReport
+                      ? statementOwnerFilter
+                      : isBoatStatementReport
+                        ? statementBoatFilter
+                        : isOwnerInfoReport
+                      ? boatOwnerFilter
+                      : isBoatTypesReport
+                        ? boatTypeFilter
+                        : registeredBoatFilter
+                  }
+                  boatFilterOptions={
+                    isOwnerStatementReport
+                      ? statementOwnerOptions
+                      : isBoatStatementReport
+                        ? statementBoatOptions
+                        : isOwnerInfoReport
+                      ? boatOwnerOptions
+                      : isBoatTypesReport
+                        ? boatTypeOptions
+                        : registeredBoatOptions
+                  }
+                  onBoatFilterChange={
+                    isOwnerStatementReport
+                      ? handleStatementOwnerFilterChange
+                      : isBoatStatementReport
+                        ? handleStatementBoatFilterChange
+                        : isOwnerInfoReport
+                      ? handleBoatOwnerFilterChange
+                      : isBoatTypesReport
+                        ? handleBoatTypeFilterChange
+                        : handleRegisteredBoatFilterChange
+                  }
+                  isBoatFilterLoading={
+                    isOwnerInfoReport || isOwnerStatementReport
+                      ? boatOwnersLookupQuery.isFetching
+                      : isBoatTypesReport
+                        ? boatTypesLookupQuery.isFetching
+                        : registeredBoatsLookupQuery.isFetching
+                  }
+                  boatFilterPlaceholder={
+                    isOwnerStatementReport
+                      ? "Search for owner"
+                      : isBoatStatementReport
+                        ? "Search for boat"
+                        : undefined
+                  }
+                  boatFilterShowSearch={
+                    isRegisteredBoatsReport ||
+                    isBoatTypesReport ||
+                    isOwnerInfoReport ||
+                    isBoatStatementReport ||
+                    isOwnerStatementReport
+                  }
                 />
 
                 <div className="flex-1 min-h-0 overflow-hidden bg-white relative">

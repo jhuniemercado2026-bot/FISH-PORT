@@ -248,6 +248,7 @@ class BillController extends Controller
         $highlightBoatId = $request->query('highlight_boat_id', '');
         $statementType = (string) $request->query('statement_type', 'boats');
         $fiscalYear = null;
+        $period = $this->statementPeriod($request, $fiscalYear);
 
         if ($request->boolean('selected_only') && $selectedBoat !== '') {
             return response()->json([
@@ -265,12 +266,12 @@ class BillController extends Controller
                     'total_collected' => 0,
                     'total_receivables' => 0,
                 ],
-                'selected_record' => $this->statementBoatDetails($selectedBoat, $fiscalYear),
+                'selected_record' => $this->statementBoatDetails($selectedBoat, $period),
             ]);
         }
 
         if ($statementType === 'owners') {
-            return $this->statementOwnerResponse($request, $fiscalYear);
+            return $this->statementOwnerResponse($request, $period);
         }
 
         $paymentTotals = DB::table('payments')
@@ -280,6 +281,7 @@ class BillController extends Controller
                 DB::raw('COUNT(*) as payment_count')
             )
             ->groupBy('bill_id');
+        $this->applyStatementPeriod($paymentTotals, 'payments.payment_date', $period);
 
         $billSummaries = DB::table('bills as b')
             ->leftJoinSub($paymentTotals, 'payment_totals', function ($join) {
@@ -294,24 +296,24 @@ class BillController extends Controller
                 DB::raw('SUM(COALESCE(payment_totals.payment_count, 0)) as payment_count'),
                 DB::raw('MAX(b.created_at) as latest_billed_date'),
             ])
-            ->when($fiscalYear, fn ($query) => $query->whereYear('b.created_at', $fiscalYear))
             ->groupBy('b.boat_id');
+        $this->applyStatementPeriod($billSummaries, 'b.created_at', $period);
 
         $unbilledDockings = DB::table('dockings as d')
             ->leftJoin('bill_items as bi', 'bi.docking_id', '=', 'd.docking_id')
             ->whereNull('bi.docking_id')
             ->whereNull('d.voided_at')
-            ->when($fiscalYear, fn ($query) => $query->whereYear('d.docking_date', $fiscalYear))
             ->select('d.boat_id', DB::raw('SUM(d.docking_fee) as unbilled_docking_total'))
             ->groupBy('d.boat_id');
+        $this->applyStatementPeriod($unbilledDockings, 'd.docking_date', $period);
 
         $unbilledBanyera = DB::table('banyera_transactions as bt')
             ->leftJoin('bill_items as bi', 'bi.banyera_id', '=', 'bt.banyera_id')
             ->whereNull('bi.banyera_id')
             ->whereNull('bt.voided_at')
-            ->when($fiscalYear, fn ($query) => $query->whereYear('bt.transaction_date', $fiscalYear))
             ->select('bt.boat_id', DB::raw('SUM(bt.total_fee) as unbilled_banyera_total'))
             ->groupBy('bt.boat_id');
+        $this->applyStatementPeriod($unbilledBanyera, 'bt.transaction_date', $period);
 
         $query = DB::table('boats as boat')
             ->leftJoin('boat_owners as owner', 'owner.owner_id', '=', 'boat.owner_id')
@@ -394,7 +396,7 @@ class BillController extends Controller
             ],
             'stats' => $stats,
             'overview_stats' => $masterStats,
-            'selected_record' => $selectedBoat !== '' ? $this->statementBoatDetails($selectedBoat, $fiscalYear) : null,
+            'selected_record' => $selectedBoat !== '' ? $this->statementBoatDetails($selectedBoat, $period) : null,
         ]);
     }
 
@@ -668,15 +670,60 @@ class BillController extends Controller
         END";
     }
 
-    private function statementOwnerResponse(Request $request, ?int $fiscalYear = null)
+    private function statementPeriod(Request $request, ?int $fiscalYear = null): ?array
+    {
+        $filterType = (string) $request->query('filter_type', '');
+
+        if ($filterType === '' && $fiscalYear) {
+            return ['filter_type' => 'yearly', 'year' => $fiscalYear];
+        }
+
+        if (!in_array($filterType, ['daily', 'monthly', 'yearly'], true)) {
+            return null;
+        }
+
+        return [
+            'filter_type' => $filterType,
+            'date' => (string) $request->query('selected_date', ''),
+            'month' => (string) $request->query('selected_month', ''),
+            'year' => (string) $request->query('selected_year', ''),
+        ];
+    }
+
+    private function applyStatementPeriod($query, string $column, ?array $period): void
+    {
+        if (!$period) {
+            return;
+        }
+
+        if (($period['filter_type'] ?? '') === 'daily' && !empty($period['date'])) {
+            $query->whereDate($column, $period['date']);
+            return;
+        }
+
+        if (($period['filter_type'] ?? '') === 'monthly' && !empty($period['month'])) {
+            $query->whereYear($column, (int) substr($period['month'], 0, 4))
+                ->whereMonth($column, (int) substr($period['month'], 5, 2));
+            return;
+        }
+
+        if (($period['filter_type'] ?? '') === 'yearly' && !empty($period['year'])) {
+            $query->whereYear($column, (int) $period['year']);
+        }
+    }
+
+    private function statementOwnerResponse(Request $request, ?array $period = null)
     {
         $perPage = min(max((int) $request->query('per_page', 10), 1), 100);
         $page = max((int) $request->query('page', 1), 1);
         $search = trim((string) $request->query('search', ''));
         $status = (string) $request->query('status', 'all');
         $highlightOwnerId = $request->query('highlight_owner_id', '');
+        $ownerId = $request->query('owner_id', '');
 
-        [$boatTotals, $paymentTotals] = $this->statementBoatTotalsSubqueries($fiscalYear);
+        $period ??= $this->statementPeriod($request);
+
+        [$boatTotals, $paymentTotals] = $this->statementBoatTotalsSubqueries($period);
 
         $ownerNameSql = "TRIM(CONCAT(COALESCE(owner.owner_firstname, ''), ' ', COALESCE(owner.owner_lastname, '')))";
         $billedSumSql = 'COALESCE(SUM(COALESCE(boat_summary.total_billed, 0)), 0)';
@@ -732,6 +779,10 @@ class BillController extends Controller
             });
         }
 
+        if ($ownerId !== '' && ctype_digit((string) $ownerId)) {
+            $query->where('owner.owner_id', (int) $ownerId);
+        }
+
         if ($status !== 'all') {
             $query->havingRaw("{$statusSql} = ?", [$status]);
         }
@@ -759,7 +810,7 @@ class BillController extends Controller
             ->unique()
             ->values()
             ->all();
-        $boatsByOwner = $this->statementBoatRowsForOwners($ownerIds, $fiscalYear);
+        $boatsByOwner = $this->statementBoatRowsForOwners($ownerIds, $period);
 
         $items = $items->map(function (array $owner) use ($boatsByOwner) {
             $owner['boats'] = collect($owner['owner_ids'] ?? [])
@@ -784,7 +835,7 @@ class BillController extends Controller
         ]);
     }
 
-    private function statementBoatTotalsSubqueries(?int $fiscalYear = null): array
+    private function statementBoatTotalsSubqueries(?array $period = null): array
     {
         $paymentTotals = DB::table('payments')
             ->select(
@@ -793,6 +844,7 @@ class BillController extends Controller
                 DB::raw('COUNT(*) as payment_count')
             )
             ->groupBy('bill_id');
+        $this->applyStatementPeriod($paymentTotals, 'payments.payment_date', $period);
 
         $billSummaries = DB::table('bills as b')
             ->leftJoinSub($paymentTotals, 'payment_totals', function ($join) {
@@ -807,24 +859,24 @@ class BillController extends Controller
                 DB::raw('SUM(COALESCE(payment_totals.payment_count, 0)) as payment_count'),
                 DB::raw('MAX(b.created_at) as latest_billed_date'),
             ])
-            ->when($fiscalYear, fn ($query) => $query->whereYear('b.created_at', $fiscalYear))
             ->groupBy('b.boat_id');
+        $this->applyStatementPeriod($billSummaries, 'b.created_at', $period);
 
         $unbilledDockings = DB::table('dockings as d')
             ->leftJoin('bill_items as bi', 'bi.docking_id', '=', 'd.docking_id')
             ->whereNull('bi.docking_id')
             ->whereNull('d.voided_at')
-            ->when($fiscalYear, fn ($query) => $query->whereYear('d.docking_date', $fiscalYear))
             ->select('d.boat_id', DB::raw('SUM(d.docking_fee) as unbilled_docking_total'))
             ->groupBy('d.boat_id');
+        $this->applyStatementPeriod($unbilledDockings, 'd.docking_date', $period);
 
         $unbilledBanyera = DB::table('banyera_transactions as bt')
             ->leftJoin('bill_items as bi', 'bi.banyera_id', '=', 'bt.banyera_id')
             ->whereNull('bi.banyera_id')
             ->whereNull('bt.voided_at')
-            ->when($fiscalYear, fn ($query) => $query->whereYear('bt.transaction_date', $fiscalYear))
             ->select('bt.boat_id', DB::raw('SUM(bt.total_fee) as unbilled_banyera_total'))
             ->groupBy('bt.boat_id');
+        $this->applyStatementPeriod($unbilledBanyera, 'bt.transaction_date', $period);
 
         $boatTotals = DB::table('boats as boat')
             ->leftJoin('boat_owners as owner', 'owner.owner_id', '=', 'boat.owner_id')
@@ -897,13 +949,13 @@ class BillController extends Controller
         ];
     }
 
-    private function statementBoatRowsForOwners(array $ownerIds, ?int $fiscalYear = null)
+    private function statementBoatRowsForOwners(array $ownerIds, ?array $period = null)
     {
         if (empty($ownerIds)) {
             return collect();
         }
 
-        [$boatTotals] = $this->statementBoatTotalsSubqueries($fiscalYear);
+        [$boatTotals] = $this->statementBoatTotalsSubqueries($period);
 
         return DB::query()
             ->fromSub($boatTotals, 'boat_statement_rows')
@@ -947,19 +999,21 @@ class BillController extends Controller
         ];
     }
 
-    private function statementBoatDetails(string $boatKey, ?int $fiscalYear = null): ?array
+    private function statementBoatDetails(string $boatKey, ?array $period = null): ?array
     {
         $boatId = (int) $boatKey;
         if ($boatId <= 0) {
             return null;
         }
 
-        $bills = Bill::with([...$this->billRelations(), 'payments'])
+        $billsQuery = Bill::with([...$this->billRelations(), 'payments'])
             ->withCount('payments')
             ->withSum('payments as total_paid', 'amount_paid')
             ->where('boat_id', $boatId)
-            ->when($fiscalYear, fn ($query) => $query->whereYear('created_at', $fiscalYear))
-            ->latest('created_at')
+            ->latest('created_at');
+        $this->applyStatementPeriod($billsQuery, 'created_at', $period);
+
+        $bills = $billsQuery
             ->get()
             ->map(function (Bill $bill) {
                 $this->transformBill($bill);
@@ -977,13 +1031,13 @@ class BillController extends Controller
         $billedDockingIds = BillItem::query()->whereNotNull('docking_id')->pluck('docking_id')->all();
         $billedBanyeraIds = BillItem::query()->whereNotNull('banyera_id')->pluck('banyera_id')->all();
 
-        Docking::query()
+        $unbilledDockingsQuery = Docking::query()
             ->where('boat_id', $boatId)
             ->whereNull('voided_at')
-            ->when($fiscalYear, fn ($query) => $query->whereYear('docking_date', $fiscalYear))
             ->when(!empty($billedDockingIds), fn ($query) => $query->whereNotIn('docking_id', $billedDockingIds))
-            ->orderBy('docking_date')
-            ->get()
+            ->orderBy('docking_date');
+        $this->applyStatementPeriod($unbilledDockingsQuery, 'docking_date', $period);
+        $unbilledDockingsQuery->get()
             ->each(function (Docking $docking) use ($unbilledCharges) {
                 $unbilledCharges->push([
                     'transaction_key' => 'unbilled-docking-' . $docking->docking_id,
@@ -997,13 +1051,13 @@ class BillController extends Controller
                 ]);
             });
 
-        BanyeraTransaction::query()
+        $unbilledBanyeraQuery = BanyeraTransaction::query()
             ->where('boat_id', $boatId)
             ->whereNull('voided_at')
-            ->when($fiscalYear, fn ($query) => $query->whereYear('transaction_date', $fiscalYear))
             ->when(!empty($billedBanyeraIds), fn ($query) => $query->whereNotIn('banyera_id', $billedBanyeraIds))
-            ->orderBy('transaction_date')
-            ->get()
+            ->orderBy('transaction_date');
+        $this->applyStatementPeriod($unbilledBanyeraQuery, 'transaction_date', $period);
+        $unbilledBanyeraQuery->get()
             ->each(function (BanyeraTransaction $transaction) use ($unbilledCharges) {
                 $unbilledCharges->push([
                     'transaction_key' => 'unbilled-banyera-' . $transaction->banyera_id,

@@ -42,10 +42,12 @@ const ReportsInnerTopbar = ({
   onUserFilterChange,
   isUserFilterLoading = false,
   showBoatFilter = false,
-  boatFilterValue = "all",
+  boatFilterValue,
   boatFilterOptions = [],
   onBoatFilterChange,
   isBoatFilterLoading = false,
+  boatFilterPlaceholder,
+  boatFilterShowSearch = false,
 }) => {
   const isRevenueReport = activeReport === "revenue";
   const isDailyReport = activeReport === "daily";
@@ -57,6 +59,8 @@ const ReportsInnerTopbar = ({
   const isRegisteredBoatsReport = activeReport === "registered-boats";
   const isBoatTypesReport = activeReport === "boat-types";
   const isOwnerInfoReport = activeReport === "owner-info";
+  const isBoatStatementReport = activeReport === "boat-statement-report";
+  const isOwnerStatementReport = activeReport === "owner-statement-report";
   const isVehicleTypesReport = activeReport === "vehicle-types";
   const isBfarReport = activeReport === "fisheries-bfar";
 
@@ -73,6 +77,8 @@ const ReportsInnerTopbar = ({
     isBfarReport ||
     isRemittanceReport ||
     isBillingReport ||
+    isBoatStatementReport ||
+    isOwnerStatementReport ||
     isDailyVehicleTicketReport ||
     isVehicleTicketReport ||
     isVehicleTypesReport ||
@@ -95,6 +101,8 @@ const ReportsInnerTopbar = ({
       ? banyeraFilterType
       : isDailyVehicleTicketReport
       ? vehicleDailyFilterType
+      : isBoatStatementReport || isOwnerStatementReport
+      ? billingFilterType
       : isBillingReport
       ? billingFilterType
       : remittanceFilterType;
@@ -110,6 +118,8 @@ const ReportsInnerTopbar = ({
       ? onBanyeraFilterTypeChange
       : isDailyVehicleTicketReport
       ? onVehicleDailyFilterTypeChange
+      : isBoatStatementReport || isOwnerStatementReport
+      ? onBillingFilterTypeChange
       : isBillingReport
       ? onBillingFilterTypeChange
       : onRemittanceFilterTypeChange;
@@ -136,6 +146,28 @@ const ReportsInnerTopbar = ({
       {usesCustomReportFilters ? (
         <div className="mx-auto flex w-full max-w-[1100px] flex-nowrap items-center justify-center gap-2 overflow-x-auto">
 
+          {showBoatFilter && (
+            <div className={REPORT_INPUT_WIDTH_CLASS}>
+              <FilterButton
+                width="100%"
+                height={46}
+                value={boatFilterValue}
+                onChange={onBoatFilterChange}
+                options={boatFilterOptions}
+                loading={isBoatFilterLoading}
+                placeholder={boatFilterPlaceholder}
+                showSearch={boatFilterShowSearch}
+                filterOption={(input, option) =>
+                  String(option?.displayLabel ?? option?.label ?? "")
+                    .toLowerCase()
+                    .includes(String(input).toLowerCase())
+                }
+                optionLabelProp="displayLabel"
+                popupClassName="report-user-filter-dropdown"
+              />
+            </div>
+          )}
+
           {/* FILTER TYPE */}
           {!isVehicleTicketReport && !isVehicleTypesReport && !isBoatTypesReport && !isFeesReport && (
             <div className={REPORT_INPUT_WIDTH_CLASS}>
@@ -149,21 +181,6 @@ const ReportsInnerTopbar = ({
                   { value: "monthly", label: "Monthly" },
                   { value: "yearly", label: "Yearly" },
                 ]}
-              />
-            </div>
-          )}
-
-          {showBoatFilter && (
-            <div className={REPORT_INPUT_WIDTH_CLASS}>
-              <FilterButton
-                width="100%"
-                height={46}
-                value={boatFilterValue}
-                onChange={onBoatFilterChange}
-                options={boatFilterOptions}
-                loading={isBoatFilterLoading}
-                optionLabelProp="displayLabel"
-                popupClassName="report-user-filter-dropdown"
               />
             </div>
           )}
@@ -231,6 +248,12 @@ const ReportsInnerTopbar = ({
                 onChange={onUserFilterChange}
                 options={userFilterOptions}
                 loading={isUserFilterLoading}
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.displayLabel ?? option?.label ?? "")
+                    .toLowerCase()
+                    .includes(String(input).toLowerCase())
+                }
                 optionLabelProp="displayLabel"
                 popupClassName="report-user-filter-dropdown"
               />
@@ -274,6 +297,13 @@ const ReportsInnerTopbar = ({
                 onChange={onBoatFilterChange}
                 options={boatFilterOptions}
                 loading={isBoatFilterLoading}
+                placeholder={boatFilterPlaceholder}
+                showSearch={boatFilterShowSearch}
+                filterOption={(input, option) =>
+                  String(option?.displayLabel ?? option?.label ?? "")
+                    .toLowerCase()
+                    .includes(String(input).toLowerCase())
+                }
                 optionLabelProp="displayLabel"
                 popupClassName="report-user-filter-dropdown"
               />

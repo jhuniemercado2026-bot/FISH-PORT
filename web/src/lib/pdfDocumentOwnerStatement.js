@@ -364,7 +364,7 @@ const drawTransactionTable = (composer, boat, transactions, borderWidth) => {
       borderColor: COLORS.black,
       borderWidth,
     });
-    composer.drawText("No billing or payment transactions found for this boat.", MARGIN_X + 8, composer.cursorY - 15, {
+    composer.drawCenteredText("No billing or payment transactions found for this boat.", MARGIN_X + tableWidth / 2, composer.cursorY - 15, {
       fontSize: 9,
       color: COLORS.black,
     });
