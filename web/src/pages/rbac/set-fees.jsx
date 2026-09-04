@@ -395,7 +395,7 @@ const SuperSetFees = () => {
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } = useSidebar();
 
   const [activeItem, setActiveItem] = useState("Set Fees");
-  const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 1024 ? 256 : 0));
+  const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 900 ? 256 : 0));
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [requestedPage, setRequestedPage] = useState(1);
@@ -466,8 +466,8 @@ const SuperSetFees = () => {
   const [feeErrors, setFeeErrors] = useState({});
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen) setContentMargin(sidebarCollapsed ? 72 : 256);
-    else if (window.innerWidth < 1024) setContentMargin(0);
+    if (window.innerWidth >= 900 && sidebarOpen) setContentMargin(sidebarCollapsed ? 72 : 256);
+    else if (window.innerWidth < 900) setContentMargin(0);
   }, [sidebarCollapsed, sidebarOpen]);
 
   useEffect(() => {
@@ -862,7 +862,7 @@ const SuperSetFees = () => {
 
       <div className="flex h-screen overflow-hidden bg-white">
         <Sidebar activeItem={activeItem} setActiveItem={setActiveItem} open={sidebarOpen} onClose={() => setSidebarOpen(false)} collapsed={sidebarCollapsed} onWidthChange={setContentMargin} />
-        <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden" style={{ marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px", transition: "margin-left 0.3s ease" }}>
+        <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden" style={{ marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px", transition: "margin-left 0.3s ease" }}>
           <Topbar sidebarOpen={sidebarOpen} sidebarCollapsed={sidebarCollapsed} onMenuToggle={toggleSidebar} />
 
           <main className="min-w-0 flex-1 overflow-y-auto bg-white px-6 py-6 xl:px-8">

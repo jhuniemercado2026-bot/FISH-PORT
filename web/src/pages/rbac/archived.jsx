@@ -722,7 +722,7 @@ const SuperArchived = () => {
         <div
           className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden"
           style={{
-            marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px",
+            marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px",
             transition: "margin-left 0.3s ease",
           }}
         >

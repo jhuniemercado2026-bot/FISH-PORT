@@ -37,18 +37,22 @@ class ActivityLogService
             'severity' => $this->resolveSeverity($normalizedAction),
         ]);
 
-        broadcast(new ActivityLogUpdated([
-            'id' => $activityLog->id,
-            'user_id' => $activityLog->user_id,
-            'created_at' => optional($activityLog->created_at)->toIso8601String(),
-            'timestamp' => optional($activityLog->created_at)->toIso8601String(),
-            'user_name' => $activityLog->user_name ?: 'System',
-            'user_role' => $activityLog->user_role,
-            'action' => $activityLog->action,
-            'module' => $activityLog->module,
-            'details' => $activityLog->details,
-            'severity' => $activityLog->severity,
-        ]));
+        try {
+            broadcast(new ActivityLogUpdated([
+                'id' => $activityLog->id,
+                'user_id' => $activityLog->user_id,
+                'created_at' => optional($activityLog->created_at)->toIso8601String(),
+                'timestamp' => optional($activityLog->created_at)->toIso8601String(),
+                'user_name' => $activityLog->user_name ?: 'System',
+                'user_role' => $activityLog->user_role,
+                'action' => $activityLog->action,
+                'module' => $activityLog->module,
+                'details' => $activityLog->details,
+                'severity' => $activityLog->severity,
+            ]));
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
 
         return $activityLog;
     }

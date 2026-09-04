@@ -1406,7 +1406,7 @@ const SuperBanyera = () => {
   }, [activeTab, location.pathname, location.search, location.state, navigate]);
 
   const [activeItem, setActiveItem]   = useState("Banyera");
-  const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 1024 ? 256 : 0));
+  const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 900 ? 256 : 0));
   const [showAddModal, setShowAddModal]   = useState(false);
   const [showAddFishModal, setShowAddFishModal] = useState(false);
   const [detailTx, setDetailTx]           = useState(null);
@@ -1446,9 +1446,9 @@ const SuperBanyera = () => {
 
   // Sync sidebar margin
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen) {
+    if (window.innerWidth >= 900 && sidebarOpen) {
       setContentMargin(sidebarCollapsed ? 72 : 256);
-    } else if (window.innerWidth < 1024) {
+    } else if (window.innerWidth < 900) {
       setContentMargin(0);
     }
   }, [sidebarCollapsed, sidebarOpen]);
@@ -2059,7 +2059,7 @@ const SuperBanyera = () => {
         <div
           className="flex-1 flex flex-col overflow-hidden"
           style={{
-            marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px",
+            marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px",
             transition: "margin-left 0.3s ease",
           }}
         >

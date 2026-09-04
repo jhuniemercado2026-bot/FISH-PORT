@@ -13,7 +13,7 @@ const getInitialOpenState = () => {
     return true;
   }
 
-  return window.innerWidth >= 1024;
+  return window.innerWidth >= 900;
 };
 
 // Sidebar UI state lives in Zustand because it is shared client-side state.
@@ -33,7 +33,7 @@ export const useSidebarStore = create((set) => ({
 
   toggleSidebar: () =>
     set((state) => {
-      if (typeof window !== "undefined" && window.innerWidth >= 1024) {
+      if (typeof window !== "undefined" && window.innerWidth >= 900) {
         const nextCollapsed = !state.sidebarCollapsed;
 
         try {
@@ -51,7 +51,7 @@ export const useSidebarStore = create((set) => ({
       return;
     }
 
-    set({ sidebarOpen: window.innerWidth >= 1024 });
+    set({ sidebarOpen: window.innerWidth >= 900 });
   },
 }));
 

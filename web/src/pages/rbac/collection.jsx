@@ -205,7 +205,7 @@ const SuperCollections = ({ initialTab }) => {
   const navigate = useNavigate();
   const highlightedSearchResult = location.state?.universalSearchResult ?? null;
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } = useSidebar();
-  const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 1024 ? 256 : 0));
+  const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 900 ? 256 : 0));
   const [activeItem, setActiveItem] = useState("Collections");
   const [search, setSearch] = useState("");
   const [periodFilter, setPeriodFilter] = useState("all");
@@ -884,7 +884,7 @@ const SuperCollections = ({ initialTab }) => {
       <div
         className="flex min-w-0 flex-1 flex-col overflow-hidden"
         style={{
-          marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px",
+          marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px",
         }}
       >
         <Topbar

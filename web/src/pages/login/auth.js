@@ -15,13 +15,20 @@ export function getStoredUser() {
   }
 }
 
+export function normalizeRole(role) {
+  return String(role || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^head of meeo$/, "head");
+}
+
 export function hasAllowedWebRole(user) {
-  return user?.role === "head" || user?.role === "coordinator";
+  const roles = [normalizeRole(user?.role), normalizeRole(user?.role_label)];
+  return roles.includes("head") || roles.includes("coordinator");
 }
 
 export function getDefaultRouteForUser(user) {
-  if (user?.role === "head") return "/dashboard";
-  if (user?.role === "coordinator") return "/dashboard";
+  if (hasAllowedWebRole(user)) return "/dashboard";
   return "/login";
 }
 

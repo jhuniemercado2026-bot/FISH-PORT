@@ -34,7 +34,7 @@ const FORGOT_PASSWORD_CODE_ERROR_KEY = "forgotPasswordCodeError";
 const normalizeProfileImageUrl = (user) => {
   if (!user) return user;
 
-  const base = "http://127.0.0.1:8000";
+  const base = api.defaults.baseURL.replace(/\/api\/?$/, "");
   const rawUrl = String(user.profile_image_url || "").trim();
 
   if (user.profile_image) {
@@ -503,16 +503,26 @@ const Login = () => {
     e.preventDefault();
     clearErrors();
 
-    try {
-      const data = await loginMutation.mutateAsync({ email, password });
-      const role = data.user?.role;
+    const nextErrors = {};
+    const trimmedEmail = email.trim();
 
-      if (!hasAllowedWebRole(data.user)) {
-        setErrorMessage(
-          "Only head and coordinator accounts can sign in on the web app.",
-        );
-        return;
-      }
+    if (!trimmedEmail) {
+      nextErrors.email = "Email address is required.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      nextErrors.email = "Enter a valid email address.";
+    }
+
+    if (!password) {
+      nextErrors.password = "Password is required.";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
+      return;
+    }
+
+    try {
+      const data = await loginMutation.mutateAsync({ email: trimmedEmail, password });
 
       const normalizedUser = normalizeProfileImageUrl(data.user);
       localStorage.setItem("token", data.token);
@@ -535,7 +545,8 @@ const Login = () => {
       } else if (status === 401) {
         setFieldErrors({ password: data?.message || "Incorrect password." });
       } else if (status === 403) {
-        setErrorMessage(data?.message || "Your account has been deactivated.");
+        const roleError = data?.errors?.role?.[0];
+        setErrorMessage(roleError || data?.message || "Your account has been deactivated.");
       } else if (status === 404) {
         setFieldErrors({ email: data?.message || "Email does not exist." });
       } else {
@@ -571,10 +582,10 @@ const Login = () => {
             <img
               src="/images/opol_fish_port.png"
               alt="Opol Fish Port Logo"
-              className="h-44 w-auto object-contain xl:h-52"
+              className="login-brand-logo h-44 w-auto object-contain xl:h-52"
             />
             <p
-              className="mt-5 text-[48px] font-normal uppercase leading-none tracking-[0.04em] text-white xl:text-[72px]"
+              className="login-brand-title mt-5 text-[48px] font-normal uppercase leading-none tracking-[0.04em] text-white xl:text-[72px]"
               style={{ fontFamily: "'Anton', sans-serif" }}
             >
               Opol&nbsp;Fish&nbsp;
@@ -618,7 +629,7 @@ const Login = () => {
           </div>
         </div>
 
-        <div className="relative flex min-h-[100dvh] w-full flex-col items-stretch justify-start overflow-hidden bg-[#1A1F36] px-0 py-0 lg:w-1/2 lg:items-center lg:justify-center lg:bg-transparent lg:px-10 lg:py-10">
+        <div className="login-form-panel relative flex min-h-[100dvh] w-full flex-col items-stretch justify-start overflow-y-auto bg-[#1A1F36] px-0 py-0 lg:w-1/2 lg:items-center lg:justify-center lg:bg-transparent lg:px-10 lg:py-10">
           <div
             className="absolute inset-0 hidden bg-cover bg-center bg-no-repeat opacity-35 lg:block"
             style={{ backgroundImage: "url('/images/bg2.jpg')" }}
@@ -651,7 +662,7 @@ const Login = () => {
               </p>
             </div>
             <div
-              className={`flex-1 rounded-t-[46px] bg-[#FFFDFB] px-7 pb-10 pt-10 lg:flex-none lg:rounded-[10px] lg:border lg:border-slate-200 lg:bg-white/95 lg:p-10 lg:shadow-[0_20px_60px_rgba(15,23,42,0.08)] ${
+              className={`login-card flex-1 rounded-t-[46px] bg-[#FFFDFB] px-7 pb-10 pt-10 lg:flex-none lg:rounded-[10px] lg:border lg:border-slate-200 lg:bg-white/95 lg:p-10 lg:shadow-[0_20px_60px_rgba(15,23,42,0.08)] ${
                 showForgotOverlay ? "hidden lg:block" : ""
               }`}
             >
@@ -666,7 +677,7 @@ const Login = () => {
                 </div>
 
                 {/* Login form with fields */}
-                <form onSubmit={handleSubmit} className="mt-8 space-y-[18px] lg:space-y-6">
+                <form onSubmit={handleSubmit} noValidate className="login-form mt-8 space-y-[18px] lg:space-y-6">
                 {/* Email input field */}
                 <div>
                   <label className="text-sm font-normal text-[#0f172a]">
@@ -682,7 +693,6 @@ const Login = () => {
                         clearFieldError("email");
                       }}
                       placeholder="you@gmail.com"
-                      required
                       disabled={isLoading}
                       style={{ fontFamily: "'Montserrat', sans-serif" }}
                       className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-4 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] ${
@@ -710,7 +720,6 @@ const Login = () => {
                         clearFieldError("password");
                       }}
                       placeholder="......."
-                      required
                       disabled={isLoading}
                       style={{ fontFamily: "'Montserrat', sans-serif" }}
                       className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-12 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] ${
@@ -803,7 +812,7 @@ const Login = () => {
               </div>
             </div>
 
-            <p className="mt-8 hidden text-center text-[14px] text-slate-500 lg:block">
+            <p className="login-footer mt-8 hidden text-center text-[14px] text-slate-500 lg:block">
               © 2026 Fish Port Management System. All rights reserved.
             </p>
 

@@ -1370,7 +1370,7 @@ const SuperDocking = () => {
   const fiscalYearNumber = normalizeFiscalYear(fiscalYear);
 
   const [activeItem, setActiveItem]           = useState("Docking");
-  const [contentMargin, setContentMargin]     = useState(() => (window.innerWidth >= 1024 ? 256 : 0));
+  const [contentMargin, setContentMargin]     = useState(() => (window.innerWidth >= 900 ? 256 : 0));
   const [search, setSearch]                   = useState("");
   const [statusFilter, setStatusFilter]       = useState("all");
   const [periodFilter, setPeriodFilter]       = useState("all");
@@ -1479,9 +1479,9 @@ const SuperDocking = () => {
   });
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen) {
+    if (window.innerWidth >= 900 && sidebarOpen) {
       setContentMargin(sidebarCollapsed ? 72 : 256);
-    } else if (window.innerWidth < 1024) {
+    } else if (window.innerWidth < 900) {
       setContentMargin(0);
     }
   }, [sidebarCollapsed, sidebarOpen]);
@@ -1939,7 +1939,7 @@ const SuperDocking = () => {
         <Sidebar activeItem={activeItem} setActiveItem={setActiveItem} open={sidebarOpen} onClose={() => setSidebarOpen(false)} collapsed={sidebarCollapsed} onWidthChange={setContentMargin} />
         <div
           className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden"
-          style={{ marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px" }}
+          style={{ marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px" }}
         >
           <Topbar sidebarOpen={sidebarOpen} sidebarCollapsed={sidebarCollapsed} onMenuToggle={toggleSidebar} />
 

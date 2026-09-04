@@ -1830,7 +1830,7 @@ const SuperBilling = () => {
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } =
     useSidebar();
   const [contentMargin, setContentMargin] = useState(() =>
-    window.innerWidth >= 1024 ? 256 : 0,
+    window.innerWidth >= 900 ? 256 : 0,
   );
   const [activeItem, setActiveItem] = useState("Bills");
   const activeTab = getBillingTabFromLocation({ pathname: location.pathname, search: location.search });
@@ -2049,9 +2049,9 @@ const SuperBilling = () => {
   }, [location.pathname, location.search, location.state, navigate]);
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen) {
+    if (window.innerWidth >= 900 && sidebarOpen) {
       setContentMargin(sidebarCollapsed ? 72 : 256);
-    } else if (window.innerWidth < 1024) {
+    } else if (window.innerWidth < 900) {
       setContentMargin(0);
     }
   }, [sidebarCollapsed, sidebarOpen]);
@@ -3780,7 +3780,7 @@ const SuperBilling = () => {
           className="flex flex-1 flex-col overflow-hidden"
           style={{
             marginLeft:
-              sidebarOpen && window.innerWidth >= 1024
+              sidebarOpen && window.innerWidth >= 900
                 ? `${contentMargin}px`
                 : "0px",
           }}

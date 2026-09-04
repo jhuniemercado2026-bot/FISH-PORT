@@ -232,6 +232,7 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [isTouchViewport, setIsTouchViewport] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -267,6 +268,19 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
   const hasUnreadNotifications = unreadNotificationCount > 0;
 
   const universalSearchResults = isSearchWaitingForDebounce ? [] : universalSearchQuery.data?.results ?? [];
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const syncTouchViewport = () => setIsTouchViewport(mediaQuery.matches);
+
+    syncTouchViewport();
+    mediaQuery.addEventListener?.("change", syncTouchViewport);
+    return () => mediaQuery.removeEventListener?.("change", syncTouchViewport);
+  }, []);
 
   const formatNotificationDate = (value) => {
     const normalized = String(value || "").slice(0, 10);
@@ -752,9 +766,12 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
 
             {showNotifications && (
               <div
-                className="absolute right-0 mt-2 overflow-hidden rounded-2xl bg-white z-50"
+                className={`${isTouchViewport ? "fixed" : "absolute right-0 mt-2"} z-50 overflow-hidden rounded-2xl bg-white`}
                 style={{
-                  width: 320,
+                  top: isTouchViewport ? 74 : undefined,
+                  right: isTouchViewport ? 12 : undefined,
+                  width: isTouchViewport ? "min(360px, calc(100vw - 24px))" : 320,
+                  maxWidth: "calc(100vw - 24px)",
                   boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
                   border: "1px solid #eef0f4",
                   fontFamily: "'Montserrat', sans-serif",
@@ -767,7 +784,7 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
                   </div>
                 </div>
 
-                <div className="topbar-panel-scroll max-h-[320px] overflow-y-auto">
+                <div className="topbar-panel-scroll max-h-[min(320px,calc(100dvh-180px))] overflow-y-auto">
                   {isNotificationsLoading ? (
                     <div className="flex items-center justify-center px-4 py-8">
                       <Spinner size={20} className="text-slate-500" />

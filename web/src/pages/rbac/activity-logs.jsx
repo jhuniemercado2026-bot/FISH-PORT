@@ -458,7 +458,7 @@ const SuperActivityLogs = () => {
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } = useSidebar();
   const [activeItem, setActiveItem] = useState("Activity Logs");
   const [contentMargin, setContentMargin] = useState(() =>
-    window.innerWidth >= 1024 ? (sidebarCollapsed ? 72 : 256) : 0
+    window.innerWidth >= 900 ? (sidebarCollapsed ? 72 : 256) : 0
   );
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -502,9 +502,9 @@ const SuperActivityLogs = () => {
   const handleWidthChange = useCallback((width) => setContentMargin(width), []);
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen) {
+    if (window.innerWidth >= 900 && sidebarOpen) {
       setContentMargin(sidebarCollapsed ? 72 : 256);
-    } else if (window.innerWidth < 1024) {
+    } else if (window.innerWidth < 900) {
       setContentMargin(0);
     }
   }, [sidebarCollapsed, sidebarOpen]);
@@ -601,7 +601,7 @@ const SuperActivityLogs = () => {
         <div
           className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden"
           style={{
-            marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px",
+            marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px",
           }}
         >
           <Topbar sidebarOpen={sidebarOpen} sidebarCollapsed={sidebarCollapsed} onMenuToggle={toggleSidebar} />

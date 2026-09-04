@@ -22,10 +22,11 @@ class AuthController extends Controller
         $request->validate([
             'email'    => 'required|email',
             'password' => 'required|string',
+            'client_type' => 'sometimes|string|in:web,mobile',
         ]);
 
         // Find user by email
-        $user = User::where('email', $request->email)->first();
+        $user = User::where('email', strtolower(trim($request->email)))->first();
 
         // Email not found
         if (!$user) {
@@ -57,9 +58,20 @@ class AuthController extends Controller
             ], 403);
         }
 
+        $role = strtolower(trim((string) $user->role));
+
+        if ($request->input('client_type') === 'web' && ! in_array($role, ['head', 'coordinator'], true)) {
+            return response()->json([
+                'message' => 'Only head and coordinator accounts can sign in on the website.',
+                'errors' => [
+                    'role' => ['Only head and coordinator accounts can sign in on the website.'],
+                ],
+            ], 403);
+        }
+
         // Keep existing valid tokens intact so the web session and other clients
         // keep working when a user signs in from a new device.
-        $token = $user->createToken('auth_token_' . $user->role)->plainTextToken;
+        $token = $user->createToken('auth_token_' . $role)->plainTextToken;
 
         app(ActivityLogService::class)->log(
             action: 'UPDATE',
@@ -78,7 +90,7 @@ class AuthController extends Controller
             'user'    => [
                 'user_id'           => $user->user_id,
                 'email'             => $user->email,
-                'role'              => $user->role,
+                'role'              => $role,
                 'role_label'        => $user->role_label,
                 'status'            => $user->status,
                 'first_name'        => $user->first_name,
@@ -302,14 +314,15 @@ class AuthController extends Controller
             user: $user
         );
 
-        if ($user->status !== 'deactivated') {
-            $user->update(['status' => 'offline']);
-            $user->refresh();
-        }
-        $this->broadcastAccountStatus($user, 'offline');
-
         // Revoke only the current token
         $user->currentAccessToken()->delete();
+        $hasOtherActiveSessions = $user->tokens()->exists();
+
+        if ($user->status !== 'deactivated' && ! $hasOtherActiveSessions) {
+            $user->update(['status' => 'offline']);
+            $user->refresh();
+            $this->broadcastAccountStatus($user, 'offline');
+        }
 
         return response()->json([
             'message' => 'Logged out successfully.',
@@ -343,15 +356,19 @@ class AuthController extends Controller
 
     private function broadcastAccountStatus(User $user, string $presenceStatus): void
     {
-        broadcast(new AccountStatusUpdated([
-            'user_id' => $user->user_id,
-            'id' => $user->user_id,
-            'email' => $user->email,
-            'name' => $user->full_name ?: $user->email,
-            'role' => $user->role,
-            'status' => $user->status,
-            'presence_status' => $presenceStatus,
-        ]));
+        try {
+            broadcast(new AccountStatusUpdated([
+                'user_id' => $user->user_id,
+                'id' => $user->user_id,
+                'email' => $user->email,
+                'name' => $user->full_name ?: $user->email,
+                'role' => $user->role,
+                'status' => $user->status,
+                'presence_status' => $presenceStatus,
+            ]));
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
     }
 
     private function forgotPasswordCodeCacheKey(string $email): string

@@ -879,7 +879,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
   const cachedRegisteredBoatsData = queryClient.getQueriesData({ queryKey: ["registered-boats-data"] })
     .find(([, data]) => data?.boats)?.[1];
   const [activeItem,     setActiveItem]     = useState("Boat Management");
-  const [contentMargin,  setContentMargin]  = useState(() => window.innerWidth >= 1024 ? 256 : 0);
+  const [contentMargin,  setContentMargin]  = useState(() => window.innerWidth >= 900 ? 256 : 0);
   const [boats,          setBoats]          = useState(() => cachedRegisteredBoatsData?.boats ?? []);
   const [boatTypes,      setBoatTypes]      = useState(() => cachedRegisteredBoatsData?.boatTypes ?? []);
   const [owners,         setOwners]         = useState(() => cachedRegisteredBoatsData?.owners ?? []);
@@ -977,8 +977,8 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
   }, [boats.length, boatsQuery.data, boatsQuery.isLoading]);
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen) setContentMargin(sidebarCollapsed ? 72 : 256);
-    else if (window.innerWidth < 1024) setContentMargin(0);
+    if (window.innerWidth >= 900 && sidebarOpen) setContentMargin(sidebarCollapsed ? 72 : 256);
+    else if (window.innerWidth < 900) setContentMargin(0);
   }, [sidebarCollapsed, sidebarOpen]);
 
   useEffect(() => {
@@ -1167,7 +1167,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
       <div className="flex h-screen overflow-hidden" style={{ backgroundColor: "#ffffff" }}>
         <Sidebar activeItem={activeItem} setActiveItem={setActiveItem} open={sidebarOpen} onClose={() => setSidebarOpen(false)} collapsed={sidebarCollapsed} onWidthChange={handleWidthChange} />
 
-        <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden" style={{ marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px" }}>
+        <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden" style={{ marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px" }}>
           <Topbar sidebarOpen={sidebarOpen} sidebarCollapsed={sidebarCollapsed} onMenuToggle={toggleSidebar} />
 
           <main className="min-w-0 flex-1 overflow-y-auto px-6 py-6 xl:px-8" style={{ backgroundColor: "#ffffff" }}>
@@ -1794,7 +1794,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
   const cachedRegisteredBoatsData = queryClient.getQueriesData({ queryKey: ["registered-boats-data"] })
     .find(([, data]) => data?.boatTypes)?.[1];
   const [activeItem,    setActiveItem]    = useState("Boat Management");
-  const [contentMargin, setContentMargin] = useState(() => window.innerWidth >= 1024 ? 256 : 0);
+  const [contentMargin, setContentMargin] = useState(() => window.innerWidth >= 900 ? 256 : 0);
   const [boatTypes,     setBoatTypes]     = useState(() => cachedRegisteredBoatsData?.boatTypes ?? []);
   const [search,        setSearch]        = useState("");
   const [typeStatusFilter, setTypeStatusFilter] = useState("all");
@@ -1855,9 +1855,9 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
   }, [boatTypes.length, boatTypesQuery.isLoading]);
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen)
+    if (window.innerWidth >= 900 && sidebarOpen)
       setContentMargin(sidebarCollapsed ? 72 : 256);
-    else if (window.innerWidth < 1024) setContentMargin(0);
+    else if (window.innerWidth < 900) setContentMargin(0);
   }, [sidebarCollapsed, sidebarOpen]);
 
   const showToast = (type, title, message) => {
@@ -2041,7 +2041,7 @@ const BT_SuperAddBoatType = ({ activeBoatTab, onBoatTabChange }) => {
         <Sidebar activeItem={activeItem} setActiveItem={setActiveItem} open={sidebarOpen} onClose={() => setSidebarOpen(false)} collapsed={sidebarCollapsed} onWidthChange={handleWidthChange} />
 
         <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden"
-          style={{ marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px" }}>
+          style={{ marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px" }}>
           <Topbar sidebarOpen={sidebarOpen} sidebarCollapsed={sidebarCollapsed} onMenuToggle={toggleSidebar} />
 
           <main className="min-w-0 flex-1 overflow-y-auto px-6 py-6 xl:px-8" style={{ backgroundColor: "#ffffff" }}>
@@ -2670,7 +2670,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
   const cachedRegisteredBoatsData = queryClient.getQueriesData({ queryKey: ["registered-boats-data"] })
     .find(([, data]) => data?.owners)?.[1];
   const [activeItem,    setActiveItem]    = useState("Boat Management");
-  const [contentMargin, setContentMargin] = useState(() => window.innerWidth >= 1024 ? 256 : 0);
+  const [contentMargin, setContentMargin] = useState(() => window.innerWidth >= 900 ? 256 : 0);
   const [owners,        setOwners]        = useState(() => cachedRegisteredBoatsData?.owners ?? []);
   const [search,        setSearch]        = useState("");
   const [ownerStatusFilter, setOwnerStatusFilter] = useState("all");
@@ -2727,9 +2727,9 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
   }, [owners.length, boatOwnersQuery.isLoading]);
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen)
+    if (window.innerWidth >= 900 && sidebarOpen)
       setContentMargin(sidebarCollapsed ? 72 : 256);
-    else if (window.innerWidth < 1024) setContentMargin(0);
+    else if (window.innerWidth < 900) setContentMargin(0);
   }, [sidebarCollapsed, sidebarOpen]);
 
   const showToast = (type, title, message) => {
@@ -2912,7 +2912,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
         <Sidebar activeItem={activeItem} setActiveItem={setActiveItem} open={sidebarOpen} onClose={() => setSidebarOpen(false)} collapsed={sidebarCollapsed} onWidthChange={handleWidthChange} />
 
         <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden"
-          style={{ marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px" }}>
+          style={{ marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px" }}>
           <Topbar sidebarOpen={sidebarOpen} sidebarCollapsed={sidebarCollapsed} onMenuToggle={toggleSidebar} />
 
           <main className="min-w-0 flex-1 overflow-y-auto px-6 py-6 xl:px-8" style={{ backgroundColor: "#ffffff" }}>

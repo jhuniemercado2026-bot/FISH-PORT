@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import "typeface-montserrat";
 import {
   IoArrowDownOutline,
@@ -152,16 +152,16 @@ const StatCard = ({
   loading = false,
   showGrowthChart = false,
 }) => (
-  <div className="rounded-[10px] border border-slate-200 bg-white px-5 py-4">
-    <div className="flex items-center gap-4">
+  <div className="min-w-0 rounded-[10px] border border-slate-200 bg-white px-4 py-4 sm:px-5">
+    <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-4">
       {loading ? (
-        <div className="h-12 w-12 flex-shrink-0 animate-pulse rounded-2xl bg-slate-200" />
+        <div className="h-11 w-11 flex-shrink-0 animate-pulse rounded-2xl bg-slate-200 sm:h-12 sm:w-12" />
       ) : (
-        <div className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl ${iconBg}`}>
-          <Icon className={iconColor} style={{ fontSize: 24 }} />
+        <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl sm:h-12 sm:w-12 ${iconBg}`}>
+          <Icon className={iconColor} style={{ fontSize: 22 }} />
         </div>
       )}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[150px] flex-1">
         {loading ? (
           <>
             <div className="h-[16px] w-32 animate-pulse rounded bg-slate-200" />
@@ -172,14 +172,14 @@ const StatCard = ({
             <p className="m-0 text-[13px] font-medium text-slate-500" style={{ fontFamily: FONT }}>
               {label}
             </p>
-            <p className="m-0 mt-1 whitespace-nowrap text-[28px] font-bold leading-none text-slate-900">
+            <p className="m-0 mt-1 break-words text-[clamp(20px,2.2vw,28px)] font-bold leading-tight text-slate-900">
               {valuePrefix}{fmtN(value, valuePrefix === PESO)}
             </p>
           </>
         )}
       </div>
       {showGrowthChart && !loading && (
-        <div className="ml-2 h-12 w-20 flex-shrink-0">
+        <div className="dashboard-stat-sparkline ml-auto hidden h-10 w-16 flex-shrink-0 2xl:block 2xl:h-12 2xl:w-20">
           <ReactApexChart
             type="area"
             series={[{
@@ -222,7 +222,7 @@ const StatCard = ({
         </div>
       )}
       {showGrowthChart && loading && (
-        <div className="ml-2 h-12 w-20 flex-shrink-0 animate-pulse rounded-lg bg-slate-200" />
+        <div className="dashboard-stat-sparkline ml-auto hidden h-10 w-16 flex-shrink-0 animate-pulse rounded-lg bg-slate-200 2xl:block 2xl:h-12 2xl:w-20" />
       )}
     </div>
     {loading && trend ? (
@@ -330,7 +330,7 @@ const Dashboard = () => {
   const [activeItem, setActiveItem] = useState("Dashboard");
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } = useSidebar();
   const [contentMargin, setContentMargin] = useState(() =>
-    window.innerWidth >= 1024 ? 256 : 0
+    window.innerWidth >= 900 ? 256 : 0
   );
   const fiscalYear = useFiscalYearStore((state) => state.fiscalYear);
   const [selectedYear, setSelectedYear] = useState(fiscalYear);
@@ -357,9 +357,9 @@ const Dashboard = () => {
   const handleWidthChange = useCallback((width) => setContentMargin(width), []);
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen)
+    if (window.innerWidth >= 900 && sidebarOpen)
       setContentMargin(sidebarCollapsed ? 72 : 256);
-    else if (window.innerWidth < 1024) setContentMargin(0);
+    else if (window.innerWidth < 900) setContentMargin(0);
   }, [sidebarCollapsed, sidebarOpen]);
 
   useEffect(() => {
@@ -1767,7 +1767,7 @@ const Dashboard = () => {
         className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden"
         style={{
           marginLeft:
-            sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px",
+            sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px",
           transition: "margin-left 0.3s ease",
         }}
       >
@@ -1833,7 +1833,7 @@ const Dashboard = () => {
             </div>
 
             {/* Stat cards */}
-            <div className="mb-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mb-6 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
               {STATS.map((card) => (
                 <StatCard
                   key={card.key}
@@ -1858,15 +1858,15 @@ const Dashboard = () => {
                                 : card.value
                   }
                   loading={showInitialSkeleton}
-                  showGrowthChart={true}
+                  showGrowthChart={false}
                 />
               ))}
             </div>
 
             {/* Revenue + Bill Status + Monthly Target */}
-            <div className="mb-6 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.5fr)_390px]">
+            <div className="mb-6 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.5fr)_390px]">
               <div className="order-2">
-                <section className="ml-auto w-full max-w-[390px] rounded-[10px] border border-slate-200 bg-white px-4 pb-3 pt-3">
+                <section className="dashboard-card-monthly-target h-[276px] w-full overflow-hidden rounded-[10px] border border-slate-200 bg-white px-4 pb-3 pt-3 xl:ml-auto xl:max-w-[390px]">
                   {showInitialSkeleton ? (
                     <div>
                       <div className="flex items-start justify-between gap-3">
@@ -1994,7 +1994,7 @@ const Dashboard = () => {
                           ].map(({ label, value }) => (
                             <div
                               key={label}
-                              className="flex items-center justify-between gap-4 px-4 py-2.5"
+                              className="flex items-center justify-between gap-4 px-4 py-2"
                             >
                               <p
                                 className="text-[13px] font-medium text-slate-500"
@@ -2003,7 +2003,7 @@ const Dashboard = () => {
                                 {label}
                               </p>
                               <p
-                                className="text-[18px] font-bold leading-none text-slate-900"
+                                className="break-words text-right text-[clamp(15px,1.6vw,18px)] font-bold leading-tight text-slate-900"
                                 style={{ fontFamily: FONT }}
                               >
                                 {value}
@@ -2016,7 +2016,7 @@ const Dashboard = () => {
                   )}
                 </section>
 
-                <section className="mt-5 ml-auto w-full max-w-[390px] rounded-[10px] border border-slate-200 bg-white px-4 py-3">
+                <section className="dashboard-card-yearly-target mt-5 h-[276px] w-full overflow-hidden rounded-[10px] border border-slate-200 bg-white px-4 py-3 xl:ml-auto xl:max-w-[390px]">
                   {showInitialSkeleton ? (
                     <div>
                       <div className="flex items-start justify-between gap-3">
@@ -2144,7 +2144,7 @@ const Dashboard = () => {
                           ].map(({ label, value }) => (
                             <div
                               key={`yearly-${label}`}
-                              className="flex items-center justify-between gap-4 px-4 py-2.5"
+                              className="flex items-center justify-between gap-4 px-4 py-2"
                             >
                               <p
                                 className="text-[13px] font-medium text-slate-500"
@@ -2153,7 +2153,7 @@ const Dashboard = () => {
                                 {label}
                               </p>
                               <p
-                                className="text-[18px] font-bold leading-none text-slate-900"
+                                className="break-words text-right text-[clamp(15px,1.6vw,18px)] font-bold leading-tight text-slate-900"
                                 style={{ fontFamily: FONT }}
                               >
                                 {value}
@@ -2167,10 +2167,10 @@ const Dashboard = () => {
                 </section>
               </div>
 
-              <div className="order-1 space-y-5">
-                <div className="flex flex-col gap-5 xl:flex-row xl:items-stretch">
-                  <div className="xl:w-[300px] xl:flex-shrink-0">
-                    <section className="h-full rounded-[10px] border border-slate-200 bg-white px-5 py-4">
+              <div className="dashboard-overview-grid order-1 space-y-5">
+                <div className="dashboard-overview-row flex flex-col gap-5 xl:flex-row xl:items-stretch">
+                  <div className="dashboard-card-bill-status xl:w-[300px] xl:flex-shrink-0">
+                    <section className="min-h-[276px] rounded-[10px] border border-slate-200 bg-white px-5 py-4 xl:h-full">
                       {showInitialSkeleton ? (
                         <DonutCardSkeleton labelWidth="w-24" />
                       ) : (
@@ -2248,7 +2248,7 @@ const Dashboard = () => {
                     </section>
                   </div>
 
-                  <div className="min-w-0 xl:flex-1">
+                  <div className="dashboard-card-cash-received min-w-0 xl:flex-1">
                     <section className="h-[276px] rounded-[10px] border border-slate-200 bg-white px-4 py-4">
                       {showInitialSkeleton ? (
                         <MetricChartSkeleton />
@@ -2263,7 +2263,7 @@ const Dashboard = () => {
                             Total Cash Received
                           </p>
                           <p
-                            className="m-0 mt-1 text-[28px] font-bold leading-none text-slate-900"
+                            className="m-0 mt-1 break-words text-[clamp(20px,2.2vw,28px)] font-bold leading-tight text-slate-900"
                             style={{ fontFamily: FONT }}
                           >
                             {`\u20B1${fmt(cashflowData.totalRevenue)}`}
@@ -2310,9 +2310,9 @@ const Dashboard = () => {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-5 xl:flex-row xl:items-stretch">
-                  <div className="xl:w-[300px] xl:flex-shrink-0">
-                    <section className="h-full rounded-[10px] border border-slate-200 bg-white px-5 py-4">
+                <div className="dashboard-overview-row flex flex-col gap-5 xl:flex-row xl:items-stretch">
+                  <div className="dashboard-card-revenue-quarter xl:w-[300px] xl:flex-shrink-0">
+                    <section className="min-h-[276px] rounded-[10px] border border-slate-200 bg-white px-5 py-4 xl:h-full">
                       {showInitialSkeleton ? (
                         <DonutCardSkeleton labelWidth="w-36" />
                       ) : (
@@ -2388,7 +2388,7 @@ const Dashboard = () => {
                     </section>
                   </div>
 
-                  <div className="min-w-0 xl:flex-1">
+                  <div className="dashboard-card-receivables min-w-0 xl:flex-1">
                     <section className="h-[276px] overflow-hidden rounded-[10px] border border-slate-200 bg-white px-4 py-4">
                       {showInitialSkeleton ? (
                         <MetricChartSkeleton />
@@ -2403,7 +2403,7 @@ const Dashboard = () => {
                             Total Receivables
                           </p>
                           <p
-                            className="m-0 mt-1 text-[28px] font-bold leading-none text-slate-900"
+                            className="m-0 mt-1 break-words text-[clamp(20px,2.2vw,28px)] font-bold leading-tight text-slate-900"
                             style={{ fontFamily: FONT }}
                           >
                             {`\u20B1${fmt(cashflowData.totalOutstanding)}`}

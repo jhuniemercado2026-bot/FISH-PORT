@@ -1851,7 +1851,7 @@ const SuperReports = () => {
   );
   const [activeReport, setActiveReport] = useState(initialReportTab);
   const [contentMargin, setContentMargin] = useState(() =>
-    window.innerWidth >= 1024 ? 256 : 0,
+    window.innerWidth >= 900 ? 256 : 0,
   );
   const [reportPdfUrl, setReportPdfUrl] = useState("");
   const [reportPdfFileName, setReportPdfFileName] = useState("");
@@ -1925,9 +1925,9 @@ const SuperReports = () => {
   }, [availableReportTabKeys, defaultReportTab, requestedDate, requestedReportTab, requestedTab]);
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen) {
+    if (window.innerWidth >= 900 && sidebarOpen) {
       setContentMargin(sidebarCollapsed ? 72 : 256);
-    } else if (window.innerWidth < 1024) {
+    } else if (window.innerWidth < 900) {
       setContentMargin(0);
     }
   }, [sidebarCollapsed, sidebarOpen]);
@@ -1942,7 +1942,7 @@ const SuperReports = () => {
   const shellStyle = useMemo(
     () => ({
       marginLeft:
-        sidebarOpen && window.innerWidth >= 1024
+        sidebarOpen && window.innerWidth >= 900
           ? `${contentMargin}px`
           : "0px",
       transition: "margin-left 0.3s ease",

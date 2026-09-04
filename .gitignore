@@ -1,1 +1,11 @@
 .tmp/
+.env
+.env.*
+!.env.example
+backend/.env
+web/.env
+web/.env.*
+!web/.env.example
+mobile/.env
+mobile/.env.*
+!mobile/.env.example

@@ -238,7 +238,7 @@ const SuperStatementOfAccount = () => {
   const highlightedSearchResult = location.state?.universalSearchResult ?? null;
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } = useSidebar();
   const [activeItem, setActiveItem] = useState("SOA");
-  const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 1024 ? 256 : 0));
+  const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 900 ? 256 : 0));
   const [activeSoaTab, setActiveSoaTab] = useState(() => getStatementTabFromPathname(location.pathname));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -370,9 +370,9 @@ const SuperStatementOfAccount = () => {
   };
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen) {
+    if (window.innerWidth >= 900 && sidebarOpen) {
       setContentMargin(sidebarCollapsed ? 72 : 256);
-    } else if (window.innerWidth < 1024) {
+    } else if (window.innerWidth < 900) {
       setContentMargin(0);
     }
   }, [sidebarCollapsed, sidebarOpen]);
@@ -769,7 +769,7 @@ const SuperStatementOfAccount = () => {
       <div
         className="flex min-w-0 flex-1 flex-col overflow-hidden"
         style={{
-          marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px",
+          marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px",
           transition: "margin-left 0.3s ease",
         }}
       >

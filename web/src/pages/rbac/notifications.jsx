@@ -152,7 +152,7 @@ const NotificationsPage = () => {
   const navigate = useNavigate();
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } = useSidebar();
   const [activeItem, setActiveItem] = useState("Notification");
-  const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 1024 ? 256 : 0));
+  const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 900 ? 256 : 0));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [requestedPage, setRequestedPage] = useState(1);
@@ -180,15 +180,15 @@ const NotificationsPage = () => {
   };
 
   useEffect(() => {
-    if (window.innerWidth >= 1024 && sidebarOpen) {
+    if (window.innerWidth >= 900 && sidebarOpen) {
       setContentMargin(sidebarCollapsed ? 72 : 256);
-    } else if (window.innerWidth < 1024) {
+    } else if (window.innerWidth < 900) {
       setContentMargin(0);
     }
   }, [sidebarCollapsed, sidebarOpen]);
 
   const handleWidthChange = (nextWidth) => {
-    if (window.innerWidth >= 1024) setContentMargin(nextWidth);
+    if (window.innerWidth >= 900) setContentMargin(nextWidth);
   };
 
   const filteredRows = notifications;
@@ -376,7 +376,7 @@ const NotificationsPage = () => {
         <div
           className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden"
           style={{
-            marginLeft: sidebarOpen && window.innerWidth >= 1024 ? `${contentMargin}px` : "0px",
+            marginLeft: sidebarOpen && window.innerWidth >= 900 ? `${contentMargin}px` : "0px",
             transition: "margin-left 0.3s ease",
           }}
         >

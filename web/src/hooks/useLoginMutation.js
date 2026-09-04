@@ -5,7 +5,7 @@ import api from "../api/axios";
 export const useLoginMutation = () =>
   useMutation({
     mutationFn: async (payload) => {
-      const { data } = await api.post("/login", payload);
+      const { data } = await api.post("/login", { ...payload, client_type: "web" });
       return data;
     },
   });

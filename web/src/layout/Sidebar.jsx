@@ -34,10 +34,11 @@ import Spinner from "../components/Spinner";
 
 const LOGO_SRC = "/images/opol_fish_port.png";
 const SIDEBAR_SCROLL_KEY = "superadmin-sidebar-scroll-top";
+const MOBILE_BREAKPOINT = 900;
 
 // ── Logout Modal ──────────────────────────────────────────────────────────────
 const LogoutModal = ({ onConfirm, onCancel, isLoading }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+  <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm">
     <div className="rounded-2xl p-8 flex flex-col items-center gap-5 mx-4 w-full max-w-sm bg-white shadow-2xl">
       <div className="w-16 h-16 rounded-full flex items-center justify-center bg-[#1a1f36]">
         <IoLogOutOutline className="text-3xl text-white" />
@@ -167,6 +168,9 @@ const Sidebar = ({
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => (
+    typeof window !== "undefined" ? window.innerWidth < MOBILE_BREAKPOINT : false
+  ));
   const navRef = useRef(null);
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
@@ -176,11 +180,23 @@ const Sidebar = ({
     if (!collapsed) setHovered(false);
   }, [collapsed]);
 
-  const isExpanded = !collapsed || hovered;
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const isExpanded = isMobile || !collapsed || hovered;
   const sidebarWidth = isExpanded ? 256 : 72;
 
   useLayoutEffect(() => {
-    if (onWidthChange && open && typeof window !== "undefined" && window.innerWidth >= 1024) {
+    if (onWidthChange && open && typeof window !== "undefined" && window.innerWidth >= MOBILE_BREAKPOINT) {
       onWidthChange(sidebarWidth);
     }
   }, [sidebarWidth, open, onWidthChange]);
@@ -296,6 +312,8 @@ const Sidebar = ({
     else if (subLabel === "Docking Reports")      navigateIfNeeded("/super_dockingreports");
     else if (subLabel === "Banyera Reports")      navigateIfNeeded("/super_banyerareports");
     else if (subLabel === "Vehicle Reports")      navigateIfNeeded("/super_vehiclereports");
+
+    if (isMobile) onClose?.();
   };
 
   const sections = [
@@ -356,11 +374,11 @@ const Sidebar = ({
 
       {/* Mobile overlay */}
       {open && (
-        <div className="fixed inset-0 z-20 lg:hidden bg-black/40" onClick={onClose} />
+        <div className="fixed inset-0 z-[55] lg:hidden bg-[#1a1f36]/55 backdrop-blur-[2px]" onClick={onClose} />
       )}
 
       <aside
-        className="flex flex-col fixed top-0 left-0 h-full z-30 overflow-hidden"
+        className="fixed left-0 top-0 z-[60] flex h-full flex-col overflow-hidden"
         style={{
           backgroundColor: "#1a1f36",
           fontFamily: "'Montserrat', sans-serif",
@@ -415,6 +433,7 @@ const Sidebar = ({
               Management System
             </span>
           </div>
+
         </div>
 
         {/* Menu */}
@@ -472,6 +491,7 @@ const Sidebar = ({
                         return;
                       }
                       navigateIfNeeded(item.path);
+                      if (isMobile) onClose?.();
                     }}
                   />
                 );
@@ -504,6 +524,7 @@ const Sidebar = ({
               isExpanded={isExpanded}
               onClick={() => {
                 navigateIfNeeded("/settings");
+                if (isMobile) onClose?.();
               }}
             />
 
