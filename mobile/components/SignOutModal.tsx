@@ -5,10 +5,10 @@ import {
   ActivityIndicator,
   Modal as NativeModal,
   Pressable,
-  SafeAreaView,
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { buildApiHeaders, getApiBaseUrl } from "../api/axios";
 import { getAuthToken, setAuthSession } from "../api/auth";
 import { clearOfflineResources } from "../utils/offlineMasterData";

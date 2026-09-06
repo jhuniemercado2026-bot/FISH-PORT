@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Modal as NativeModal, Pressable, SafeAreaView, Text, View } from "react-native";
+import { Modal as NativeModal, Pressable, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export type HistoryStatusFilter = "all" | "active" | "voided" | "pending" | "remitted";
 

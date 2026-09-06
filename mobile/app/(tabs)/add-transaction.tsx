@@ -303,6 +303,7 @@ type BanyeraPreviewLine = {
 
 type SaveOptions = {
   skipBanyeraPreview?: boolean;
+  printed?: boolean;
 };
 
 function getFeeName(fee?: FeeOption | null) {
@@ -2112,7 +2113,7 @@ export default function AddTransactionScreen() {
     try {
       await printThermalText(banyeraReceiptText);
       showToast("success", "Banyera preview sent to PT-210 printer.");
-      await handleSave({ skipBanyeraPreview: true });
+      await handleSave({ skipBanyeraPreview: true, printed: true });
     } catch (error) {
       showToast(
         "error",
@@ -2123,6 +2124,14 @@ export default function AddTransactionScreen() {
     } finally {
       setIsPrintingBanyeraPreview(false);
     }
+  }
+
+  async function handleSaveBanyeraPreview() {
+    if (isSubmitting || isPrintingBanyeraPreview) {
+      return;
+    }
+
+    await handleSave({ skipBanyeraPreview: true });
   }
 
   async function handleSave(options: SaveOptions = {}) {
@@ -2321,6 +2330,7 @@ export default function AddTransactionScreen() {
           owner_signature_data_url: banyeraOwnerSignature || selectedBanyeraBoatOwnerSignature,
           owner_signature_signed_at: new Date().toISOString(),
           owner_signature_save_for_future: banyeraOwnerSignatureSaveForFuture,
+          print_count: options.printed ? 1 : 0,
           items: banyeraItems.map((item) => ({
             classification_id: Number(item.classification_id),
             quantity: Number(item.quantity),
@@ -3146,14 +3156,16 @@ export default function AddTransactionScreen() {
                           </Text>
                           {banyeraItems.length > 1 ? (
                             <Pressable
+                              className="flex-row items-center"
                               onPress={() =>
                                 setBanyeraItems((current) =>
                                   current.filter((_, currentIndex) => currentIndex !== index)
                                 )
                               }
                             >
+                              <Ionicons name="trash-outline" size={14} color="#DC2626" />
                               <Text
-                                className="text-[12px] text-[#DC2626]"
+                                className="ml-1 text-[12px] text-[#DC2626]"
                                 style={{ fontFamily: "Montserrat_600SemiBold" }}
                               >
                                 Remove
@@ -3303,7 +3315,7 @@ export default function AddTransactionScreen() {
                       }}
                     >
                       <Ionicons
-                        name="add-outline"
+                        name={hasBanyeraOwnerSignature ? "create-outline" : "add-outline"}
                         size={16}
                         color={selectedBanyeraBoat ? "#2563EB" : "#9AA3AF"}
                       />
@@ -3731,7 +3743,7 @@ export default function AddTransactionScreen() {
             ) : null}
 
             <Pressable
-              className={`mt-6 h-14 items-center justify-center rounded-[10px] ${
+              className={`mt-6 h-14 flex-row items-center justify-center rounded-[10px] ${
                 isSaveDisabled ? "bg-[#46506E]" : "bg-[#1A1F36]"
               }`}
               disabled={isSaveDisabled}
@@ -3740,12 +3752,15 @@ export default function AddTransactionScreen() {
               {isSubmitting ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
-                <Text
-                  className="text-[15px] text-white"
-                  style={{ fontFamily: "Montserrat_600SemiBold" }}
-                >
-                  Save
-                </Text>
+                <>
+                  <Ionicons name="save-outline" size={18} color="#FFFFFF" />
+                  <Text
+                    className="ml-2 text-[15px] text-white"
+                    style={{ fontFamily: "Montserrat_600SemiBold" }}
+                  >
+                    Save
+                  </Text>
+                </>
               )}
             </Pressable>
           </View>
@@ -3766,6 +3781,7 @@ export default function AddTransactionScreen() {
           }
         }}
         onPrint={handlePrintBanyeraPreview}
+        onSave={handleSaveBanyeraPreview}
       />
       <SignatureModal
         ownerName={selectedBanyeraBoatOwner}

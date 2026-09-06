@@ -402,16 +402,20 @@ const formatOfflineUpdatedAt = (value?: string | null) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not yet updated";
 
-  return new Intl.DateTimeFormat("en-PH", {
+  const dateText = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Manila",
     month: "short",
     day: "numeric",
     year: "numeric",
+  }).format(date);
+
+  const timeText = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
     hour: "numeric",
     minute: "2-digit",
-  })
-    .format(date)
-    .replace(",", " |");
+  }).format(date);
+
+  return `${dateText} | ${timeText}`;
 };
 
 function SkeletonBlock({
@@ -1105,7 +1109,7 @@ export default function HomeScreen() {
                   className="text-[11px] text-[#6F6F82]"
                   style={{ fontFamily: "Montserrat_400Regular" }}
                 >
-                  Updated {formatOfflineUpdatedAt(offlineLastUpdated)}
+                  Updated in {formatOfflineUpdatedAt(offlineLastUpdated)}
                 </Text>
               </View>
               <Pressable

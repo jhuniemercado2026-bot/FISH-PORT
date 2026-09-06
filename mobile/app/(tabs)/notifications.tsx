@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router/react-navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
   Modal as NativeModal,

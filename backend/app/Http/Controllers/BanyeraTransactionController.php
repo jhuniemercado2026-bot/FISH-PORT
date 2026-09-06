@@ -11,6 +11,8 @@ use App\Models\Boat;
 use App\Models\BoatOwnerSignatureAudit;
 use App\Models\Fee;
 use App\Models\FishClassification;
+use App\Models\Notification;
+use App\Models\User;
 use App\Services\ActivityLogService;
 use App\Services\VoidRequestNotificationService;
 use Carbon\Carbon;
@@ -740,6 +742,7 @@ class BanyeraTransactionController extends Controller
             'owner_signature_data_url' => 'nullable|string|max:2000000',
             'owner_signature_signed_at' => 'nullable|date',
             'owner_signature_save_for_future' => 'nullable|boolean',
+            'print_count' => 'nullable|integer|min:0',
         ]);
 
         $transactionDate = $validated['transaction_date'] ?? $this->manilaNow()->format('Y-m-d H:i:s');
@@ -809,6 +812,7 @@ class BanyeraTransactionController extends Controller
                 'owner_id' => $boat->owner_id,
                 'transaction_date' => $transactionDate,
                 'total_fee' => $totalFee,
+                'print_count' => (int) ($validated['print_count'] ?? 0),
                 'owner_signature_data_url' => $transactionSignatureDataUrl,
                 'owner_signature_signed_at' => !empty($transactionSignatureDataUrl)
                     ? ($signatureSignedAt ?? Carbon::now('Asia/Manila')->format('Y-m-d H:i:s'))
@@ -836,6 +840,16 @@ class BanyeraTransactionController extends Controller
             user: Auth::user()
         );
 
+        if ((int) ($payload['print_count'] ?? 0) > 0) {
+            $this->notifyCoordinatorsOfBanyeraPrint($transaction, (int) $payload['print_count']);
+            app(ActivityLogService::class)->log(
+                action: 'PRINT',
+                module: 'Banyera',
+                details: $this->banyeraPrintMessage($transaction, (int) $payload['print_count']),
+                user: Auth::user()
+            );
+        }
+
         broadcast(new TransactionUpdated('banyera', 'created', $this->withoutSignatureDataUrls($payload)));
 
         return response()->json($payload, 201);
@@ -850,6 +864,93 @@ class BanyeraTransactionController extends Controller
         $this->appendTransactionState($transaction);
 
         return response()->json($this->transformTransaction($transaction));
+    }
+
+    public function recordPrint($id)
+    {
+        $transaction = BanyeraTransaction::query()
+            ->forTableIndex(true)
+            ->findOrFail($id);
+
+        if (!is_null($transaction->voided_at)) {
+            return response()->json([
+                'message' => 'This banyera transaction has already been voided and can no longer be printed.',
+            ], 422);
+        }
+
+        $transaction->increment('print_count');
+        $transaction = BanyeraTransaction::query()
+            ->forTableIndex(true)
+            ->findOrFail($id);
+
+        $this->appendTransactionState($transaction);
+        $payload = $this->transformTransaction($transaction);
+        $printCount = (int) ($payload['print_count'] ?? 0);
+
+        $this->notifyCoordinatorsOfBanyeraPrint($transaction, $printCount);
+        app(ActivityLogService::class)->log(
+            action: 'PRINT',
+            module: 'Banyera',
+            details: $this->banyeraPrintMessage($transaction, $printCount),
+            user: Auth::user()
+        );
+
+        broadcast(new TransactionUpdated('banyera', 'updated', $this->withoutSignatureDataUrls($payload)));
+
+        return response()->json([
+            'message' => 'Banyera print count updated.',
+            'transaction' => $payload,
+        ]);
+    }
+
+    private function notifyCoordinatorsOfBanyeraPrint(BanyeraTransaction $transaction, int $printCount): int
+    {
+        $coordinators = User::query()
+            ->where('role', 'coordinator')
+            ->where('status', 'active')
+            ->get(['user_id']);
+
+        if ($coordinators->isEmpty()) {
+            return 0;
+        }
+
+        $sender = Auth::user();
+        $message = $this->banyeraPrintMessage($transaction, $printCount);
+        $title = $printCount > 1 ? 'Banyera Reprinted' : 'Banyera Printed';
+
+        $coordinators->each(function (User $coordinator) use ($title, $message, $sender, $transaction) {
+            Notification::create([
+                'title' => $title,
+                'message' => $message,
+                'recipient_user_id' => $coordinator->user_id,
+                'sender_user_id' => $sender?->user_id,
+                'related_type' => 'banyera_print',
+                'related_id' => $transaction->banyera_id,
+                'is_read' => false,
+            ]);
+        });
+
+        return $coordinators->count();
+    }
+
+    private function banyeraPrintMessage(BanyeraTransaction $transaction, int $printCount): string
+    {
+        $transaction->loadMissing('boat');
+
+        $inspector = Auth::user();
+        $inspectorName = trim((string) ($inspector?->full_name ?? ''));
+        if ($inspectorName === '') {
+            $inspectorName = $inspector?->email ?: 'An inspector';
+        }
+
+        $boatName = trim((string) ($transaction->boat?->boat_name ?? 'Unknown boat'));
+        $totalFee = 'PHP ' . number_format((float) ($transaction->total_fee ?? 0), 2);
+
+        if ($printCount > 1) {
+            return $inspectorName . ' reprinted the banyera transaction for boat "' . $boatName . '" with a total fee of ' . $totalFee . '. Print count: ' . $printCount . '.';
+        }
+
+        return $inspectorName . ' printed the banyera details for boat "' . $boatName . '" with a total fee of ' . $totalFee . '.';
     }
 
     public function update(Request $request, $id)
@@ -1211,6 +1312,7 @@ class BanyeraTransactionController extends Controller
             'owner_id' => $transaction->owner_id ?? $transaction->boat?->owner_id ?? null,
             'transaction_date' => $transaction->transaction_date,
             'total_fee' => number_format((float) ($transaction->total_fee ?? 0), 2),
+            'print_count' => (int) ($transaction->print_count ?? 0),
             'owner_signature_data_url' => $transaction->owner_signature_data_url ?? $transaction->boat?->owner?->owner_signature_data_url ?? null,
             'owner_signature_signed_at' => $transaction->owner_signature_signed_at ?? $transaction->boat?->owner?->owner_signature_signed_at ?? null,
             'createdBy' => $createdBy,

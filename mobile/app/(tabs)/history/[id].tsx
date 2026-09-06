@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import type { BluetoothPrinter } from "@netinove/thermal-printer";
 import NetInfo from "@react-native-community/netinfo";
-import { ScrollView, StatusBar, Text, View, Pressable } from "react-native";
+import { ActivityIndicator, ScrollView, StatusBar, Text, View, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useEffect, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -9,6 +10,9 @@ import { buildApiHeaders, getApiBaseUrl } from "../../../api/axios";
 import { useToastStore } from "../../../store/toastStore";
 import { useHistoryStore } from "../../../store/historyStore";
 import EditModal from "../../../components/EditModal";
+import PrintPreviewModal, {
+  PrintPreviewLine,
+} from "../../../components/PrintPreviewModal";
 import { VoidTransactionModal, getVoidReasonOptions } from "../../../components/VoidModal";
 import {
   getOfflineTransactionDrafts,
@@ -150,6 +154,107 @@ const formatPhilippineTime = (value?: string | null) => {
   return `${hour}:${minute} ${meridiem}`;
 };
 
+function formatPrinterPeso(amount: number) {
+  return `PHP ${amount.toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function centerPrinterText(text: string, width = 32) {
+  const trimmed = text.trim();
+  const padding = Math.max(0, Math.floor((width - trimmed.length) / 2));
+  return `${" ".repeat(padding)}${trimmed}`;
+}
+
+function splitPrinterText(text: string, width = 32) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = "";
+
+  words.forEach((word) => {
+    const nextLine = line ? `${line} ${word}` : word;
+
+    if (nextLine.length <= width) {
+      line = nextLine;
+      return;
+    }
+
+    if (line) {
+      lines.push(line);
+    }
+
+    line = word.length <= width ? word : word.slice(0, width);
+  });
+
+  if (line) {
+    lines.push(line);
+  }
+
+  return lines.length ? lines : [""];
+}
+
+function padPrinterColumns(left: string, right: string, width = 32) {
+  const rightText = right.trim();
+  const maxLeftWidth = Math.max(1, width - rightText.length - 1);
+  const leftText = left.length > maxLeftWidth ? left.slice(0, maxLeftWidth) : left;
+  const gap = Math.max(1, width - leftText.length - rightText.length);
+
+  return `${leftText}${" ".repeat(gap)}${rightText}`;
+}
+
+function findPreferredThermalPrinter(printers: BluetoothPrinter[]) {
+  const bondedPrinters = printers.filter((printer) => printer.bonded);
+  const pt210Printer = bondedPrinters.find((printer) => {
+    const name = printer.name.trim().toLowerCase();
+    return name.includes("pt-210") || name.includes("pt210");
+  });
+
+  if (pt210Printer) {
+    return pt210Printer;
+  }
+
+  return (
+    bondedPrinters.find((printer) => {
+      const name = printer.name.trim().toLowerCase();
+      return name.includes("printer") || name.includes("thermal");
+    }) ??
+    bondedPrinters[0] ??
+    null
+  );
+}
+
+async function printThermalText(text: string) {
+  const {
+    connect: connectThermalPrinter,
+    getBondedPrinters,
+    getConnectionState,
+    requestBluetoothPermissions,
+    writeText: writeThermalText,
+  } = await import("@netinove/thermal-printer");
+
+  const granted = await requestBluetoothPermissions();
+
+  if (!granted) {
+    throw new Error("Bluetooth permission was not granted.");
+  }
+
+  const printers = await getBondedPrinters();
+  const printer = findPreferredThermalPrinter(printers);
+
+  if (!printer) {
+    throw new Error("No paired Bluetooth thermal printer found.");
+  }
+
+  const connection = getConnectionState();
+
+  if (!connection.connected || connection.address !== printer.address) {
+    await connectThermalPrinter(printer.address);
+  }
+
+  await writeThermalText(text, { trailingLines: 3 });
+}
+
 const getPhilippineToday = () => {
   const parts = new Intl.DateTimeFormat("en-PH", {
     timeZone: "Asia/Manila",
@@ -191,6 +296,71 @@ const getTransactionDateForStatus = (record: TransactionRecord | null | undefine
 
 const isRecordBilled = (record: TransactionRecord | null | undefined) =>
   Boolean(record?.is_billed || record?.billed_at || record?.billing_id || record?.bill_id);
+
+function buildBanyeraReceiptTextFromDetail(record: TransactionRecord) {
+  const boatName = record.boat?.boat_name || record.boat_name || "-";
+  const boatType =
+    record.boat?.boat_type?.type_name ||
+    record.boat?.boatType?.type_name ||
+    record.boat?.boat_type_name ||
+    record.boat_type_name ||
+    "-";
+  const ownerName =
+    record.boat?.owner?.full_name ||
+    record.boat?.owner_name ||
+    record.boat?.boat_owner ||
+    record.owner_name ||
+    "Unknown Owner";
+  const transactionDate = record.transaction_date || record.created_at;
+  const receiptLines = [
+    centerPrinterText("OPOL FISH PORT"),
+    centerPrinterText("BANYERA TRANSACTION"),
+    "-".repeat(32),
+    `Date: ${formatPhilippineDate(transactionDate)} - ${formatPhilippineTime(transactionDate)}`,
+    ...splitPrinterText(`Boat: ${boatName}`),
+    ...splitPrinterText(`Type: ${boatType}`),
+    ...splitPrinterText(`Owner: ${ownerName}`),
+    "-".repeat(32),
+  ];
+
+  const items = Array.isArray(record.items) ? record.items : [];
+
+  items.forEach((item, index) => {
+    const name =
+      item.classification_name ||
+      item.classification?.classification_name ||
+      item.classification?.name ||
+      "Fish";
+    const quantity = Number(item.quantity || 0);
+    const subtotal = parseMoneyValue(item.subtotal);
+    const fee = quantity > 0 ? subtotal / quantity : subtotal;
+    const daug = item.daug !== undefined && item.daug !== null ? parseMoneyValue(item.daug) : 0;
+
+    receiptLines.push(`${index + 1}. ${name}`);
+    receiptLines.push(
+      padPrinterColumns(
+        `${quantity} x ${formatPrinterPeso(fee)}`,
+        formatPrinterPeso(subtotal)
+      )
+    );
+
+    if (daug > 0) {
+      receiptLines.push(padPrinterColumns("Daug", formatPrinterPeso(daug)));
+    }
+  });
+
+  receiptLines.push(
+    "-".repeat(32),
+    padPrinterColumns("TOTAL", formatPrinterPeso(parseMoneyValue(record.total_fee))),
+    "",
+    "Signature: ________________",
+    "",
+    "",
+    ""
+  );
+
+  return receiptLines.join("\n");
+}
 
 const createDraftDetail = (draft: OfflineTransactionDraft): TransactionRecord => {
   const payload = draft.payload ?? {};
@@ -435,6 +605,8 @@ export default function HistoryDetailScreen() {
   const [isSavingVoidAction, setIsSavingVoidAction] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isPrintingBanyera, setIsPrintingBanyera] = useState(false);
+  const [isBanyeraPrintPreviewOpen, setIsBanyeraPrintPreviewOpen] = useState(false);
   const [transactionLock, setTransactionLock] = useState<TransactionLockState | null>(null);
   const [isOfflineDetailUnavailable, setIsOfflineDetailUnavailable] = useState(false);
   const isDraftDetail = Boolean(detail?.__isDraft) || params.draft === "true";
@@ -725,6 +897,53 @@ export default function HistoryDetailScreen() {
     }
   };
 
+  const handlePrintBanyera = async () => {
+    if (!detail || type !== "banyera" || isPrintingBanyera) return;
+
+    const transactionId = detail.banyera_id ?? detail.banyeraId ?? detail.id;
+    if (!transactionId) return;
+
+    setIsPrintingBanyera(true);
+
+    try {
+      await printThermalText(buildBanyeraReceiptTextFromDetail(detail));
+
+      const response = await fetch(
+        `${getApiBaseUrl()}${endpointForType("banyera")}/${transactionId}/print`,
+        {
+          method: "PATCH",
+          headers: buildApiHeaders(authToken),
+        }
+      );
+      const json = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        showToast("error", json?.message || "Printed, but the print count was not updated.");
+        return;
+      }
+
+      const updatedDetail = json?.transaction ?? json?.data ?? json ?? {
+        ...detail,
+        print_count: Number(detail.print_count || 0) + 1,
+      };
+
+      setDetail(updatedDetail);
+      cacheTransactionDetail("banyera", transactionId, updatedDetail);
+      triggerHistoryRefresh();
+      setIsBanyeraPrintPreviewOpen(false);
+      showToast("success", "Banyera receipt printed.");
+    } catch (error) {
+      showToast(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Unable to print Banyera receipt."
+      );
+    } finally {
+      setIsPrintingBanyera(false);
+    }
+  };
+
   const resolveDetailFromResponse = (payload: TransactionRecord | null | undefined, fallback: TransactionRecord | null) => {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return fallback;
@@ -806,6 +1025,77 @@ export default function HistoryDetailScreen() {
     setEditModalVisible(true);
   };
 
+  const banyeraDetailPrintCount =
+    type === "banyera" ? Math.max(0, Number(detail?.print_count || 0)) : 0;
+  const banyeraDetailPrintLabel =
+    banyeraDetailPrintCount > 0 ? `Reprint (${banyeraDetailPrintCount})` : "Print";
+  const banyeraDetailPreviewDate = detail?.transaction_date || detail?.created_at || null;
+  const banyeraDetailPreviewDetails =
+    type === "banyera" && detail
+      ? [
+          {
+            label: "Date",
+            value: `${formatPhilippineDate(banyeraDetailPreviewDate)} - ${formatPhilippineTime(banyeraDetailPreviewDate)}`,
+          },
+          { label: "Boat", value: detail.boat?.boat_name || detail.boat_name || "-" },
+          {
+            label: "Type",
+            value:
+              detail.boat?.boat_type?.type_name ||
+              detail.boat?.boatType?.type_name ||
+              detail.boat?.boat_type_name ||
+              detail.boat_type_name ||
+              "-",
+          },
+          {
+            label: "Owner",
+            value:
+              detail.boat?.owner?.full_name ||
+              detail.boat?.owner_name ||
+              detail.boat?.boat_owner ||
+              detail.owner_name ||
+              "Unknown Owner",
+          },
+        ]
+      : [];
+  const banyeraDetailPreviewLines: PrintPreviewLine[] =
+    type === "banyera" && detail && Array.isArray(detail.items)
+      ? detail.items.map((item) => {
+          const quantity = Number(item.quantity || 0);
+          const subtotal = parseMoneyValue(item.subtotal);
+          const fee = quantity > 0 ? subtotal / quantity : subtotal;
+          const daug = item.daug !== undefined && item.daug !== null ? parseMoneyValue(item.daug) : 0;
+
+          return {
+            name:
+              item.classification_name ||
+              item.classification?.classification_name ||
+              item.classification?.name ||
+              "Fish",
+            quantity,
+            feeText: `₱${fee.toLocaleString("en-PH", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`,
+            subtotalText: `₱${subtotal.toLocaleString("en-PH", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`,
+            daugText:
+              daug > 0
+                ? `₱${daug.toLocaleString("en-PH", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}`
+                : null,
+          };
+        })
+      : [];
+  const banyeraDetailTotalText = `₱${parseMoneyValue(detail?.total_fee).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
   const renderContent = () => {
     if (isLoading) {
       return <TransactionDetailSkeleton type={type} />;
@@ -847,6 +1137,9 @@ export default function HistoryDetailScreen() {
     const statusIcon = isDraft ? "time-outline" : isVoided ? "close-circle" : "checkmark-circle";
     const statusBg = isDraft || isVoided ? "bg-[#FEF3C7]" : "bg-[#DCFCE7]";
     const statusColor = isDraft ? "#D97706" : isVoided ? "#F59E0B" : "#22C55E";
+    const banyeraPrintCount = Math.max(0, Number(detail.print_count || 0));
+    const banyeraPrintButtonLabel =
+      banyeraPrintCount > 0 ? `Reprint (${banyeraPrintCount})` : "Print";
     const totalBanyeraQuantity = Array.isArray(detail.items)
       ? detail.items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
       : 0;
@@ -1584,37 +1877,59 @@ export default function HistoryDetailScreen() {
               </View>
             </Pressable>
           ) : !isDraft && !isVoided && type === "banyera" ? (
-            <View className="mt-0 mb-4 -mx-5 flex-row items-center gap-3">
-              <Pressable
-                onPress={handleEditBanyera}
-                disabled={isTransactionLocked || isBilled}
-                className={`flex-1 flex-row items-center justify-center rounded-[10px] border border-[#E8E1E6] px-5 py-3 ${isTransactionLocked || isBilled ? "bg-[#F8F8FA] opacity-60" : "bg-white"}`}
-              >
-                <Ionicons name="create-outline" size={16} color="#1A1F36" />
-                <Text
-                  className="ml-2 text-[13px] font-semibold text-[#1A1F36]"
-                  style={{ fontFamily: "Montserrat_600SemiBold" }}
+            <View className="mt-0 mb-4 -mx-5">
+              <View className="flex-row items-center gap-3">
+                <Pressable
+                  onPress={handleEditBanyera}
+                  disabled={isTransactionLocked || isBilled}
+                  className={`flex-1 flex-row items-center justify-center rounded-[10px] border border-[#E8E1E6] px-5 py-3 ${isTransactionLocked || isBilled ? "bg-[#F8F8FA] opacity-60" : "bg-white"}`}
                 >
-                  Edit
-                </Text>
-              </Pressable>
+                  <Ionicons name="create-outline" size={16} color="#1A1F36" />
+                  <Text
+                    className="ml-2 text-[13px] font-semibold text-[#1A1F36]"
+                    style={{ fontFamily: "Montserrat_600SemiBold" }}
+                  >
+                    Edit
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={openVoidModal}
+                  disabled={isStatusActionDisabled}
+                  className={`flex-1 flex-row items-center justify-center rounded-[10px] px-4 py-3 ${statusButtonClass} ${isStatusActionDisabled ? "opacity-40" : ""}`}
+                >
+                  <Ionicons
+                    name="close-circle"
+                    size={16}
+                    color={statusButtonIconColor}
+                  />
+                  <Text
+                    className={`ml-2 text-[13px] font-semibold leading-[18px] ${statusButtonTextClass}`}
+                    style={{ fontFamily: "Montserrat_600SemiBold" }}
+                  >
+                    {statusButtonLabel}
+                  </Text>
+                </Pressable>
+              </View>
 
               <Pressable
-                onPress={openVoidModal}
-                disabled={isStatusActionDisabled}
-                className={`flex-1 flex-row items-center justify-center rounded-[10px] px-4 py-3 ${statusButtonClass} ${isStatusActionDisabled ? "opacity-40" : ""}`}
+                onPress={() => setIsBanyeraPrintPreviewOpen(true)}
+                disabled={isPrintingBanyera}
+                className={`mt-3 h-12 flex-row items-center justify-center rounded-[10px] ${isPrintingBanyera ? "bg-[#46506E]" : "bg-[#1A1F36]"}`}
               >
-                <Ionicons
-                  name="close-circle"
-                  size={16}
-                  color={statusButtonIconColor}
-                />
-                <Text
-                  className={`ml-2 text-[13px] font-semibold leading-[18px] ${statusButtonTextClass}`}
-                  style={{ fontFamily: "Montserrat_600SemiBold" }}
-                >
-                  {statusButtonLabel}
-                </Text>
+                {isPrintingBanyera ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="print-outline" size={17} color="#FFFFFF" />
+                    <Text
+                      className="ml-2 text-[14px] font-semibold text-white"
+                      style={{ fontFamily: "Montserrat_600SemiBold" }}
+                    >
+                      {banyeraPrintButtonLabel}
+                    </Text>
+                  </>
+                )}
               </Pressable>
             </View>
           ) : null}
@@ -1668,6 +1983,23 @@ export default function HistoryDetailScreen() {
       >
         {renderContent()}
       </ScrollView>
+
+      <PrintPreviewModal
+        visible={isBanyeraPrintPreviewOpen}
+        title="OPOL FISH PORT"
+        subtitle="BANYERA TRANSACTION"
+        details={banyeraDetailPreviewDetails}
+        lines={banyeraDetailPreviewLines}
+        totalText={banyeraDetailTotalText}
+        printLabel={banyeraDetailPrintLabel}
+        printing={isPrintingBanyera}
+        onClose={() => {
+          if (!isPrintingBanyera) {
+            setIsBanyeraPrintPreviewOpen(false);
+          }
+        }}
+        onPrint={handlePrintBanyera}
+      />
 
       <EditModal
         visible={editModalVisible}

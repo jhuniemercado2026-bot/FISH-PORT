@@ -286,6 +286,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('banyera-transactions', [BanyeraTransactionController::class, 'index']);
     Route::post('banyera-transactions', [BanyeraTransactionController::class, 'store'])->middleware('transactions.unlocked');
     Route::get('banyera-transactions/{id}', [BanyeraTransactionController::class, 'show']);
+    Route::patch('banyera-transactions/{id}/print', [BanyeraTransactionController::class, 'recordPrint']);
     Route::put('banyera-transactions/{id}', [BanyeraTransactionController::class, 'update'])->middleware('transactions.unlocked');
     Route::patch('banyera-transactions/{id}/void', [BanyeraTransactionController::class, 'void'])->middleware('transactions.unlocked');
     Route::patch('banyera-transactions/{id}/restore', [BanyeraTransactionController::class, 'unvoid'])->middleware('transactions.unlocked');

@@ -37,6 +37,15 @@ export default function ProfileScreen() {
   const router = useRouter();
   const [signOutModalVisible, setSignOutModalVisible] = useState(false);
   const profile = useProfileStore((state) => state);
+  const openProfileDetails = (mode?: "change-password") => {
+    router.push({
+      pathname: "/(tabs)/profile/[id]",
+      params: {
+        id: "1",
+        ...(mode ? { mode } : {}),
+      },
+    });
+  };
 
   const fullName = typeof profile.full_name === "string" ? profile.full_name.trim() : "";
   const firstName = typeof profile.first_name === "string" ? profile.first_name.trim() : "";
@@ -79,7 +88,7 @@ export default function ProfileScreen() {
             <Pressable
               className="h-11 w-11 items-center justify-center"
               hitSlop={10}
-              onPress={() => router.push("/(tabs)/profile/[id]?id=1")}
+              onPress={() => openProfileDetails()}
             >
               <Ionicons name="create-outline" size={22} color="#FFFFFF" />
             </Pressable>
@@ -135,11 +144,11 @@ export default function ProfileScreen() {
                 className="flex-row items-center justify-between py-5"
                 onPress={() => {
                   if (action.key === "edit-profile") {
-                    router.push("/(tabs)/profile/[id]?id=1");
+                    openProfileDetails();
                   }
 
                   if (action.key === "change-password") {
-                    router.push("/(tabs)/profile/[id]?id=1&mode=change-password");
+                    openProfileDetails("change-password");
                   }
 
                   if (action.key === "sign-out") {

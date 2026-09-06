@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import { useEffect } from "react";
-import { AppState, View } from "react-native";
+import { AppState, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNotificationStore } from "../../store/notificationStore";
 import { startNotificationsRealtime } from "../../utils/realtimeNotifications";
@@ -12,7 +12,7 @@ function NotificationTabIcon({
   hasUnread,
   size,
 }: {
-  color: string;
+  color: any;
   focused: boolean;
   hasUnread: boolean;
   size: number;
@@ -28,6 +28,15 @@ function NotificationTabIcon({
         <View className="absolute -right-1 top-0 h-2 w-2 rounded-full border border-white bg-[#F97316]" />
       ) : null}
     </View>
+  );
+}
+
+function NoRippleTabButton({ href, ...props }: any) {
+  return (
+    <Pressable
+      {...props}
+      android_ripple={{ color: "transparent" }}
+    />
   );
 }
 
@@ -69,6 +78,7 @@ export default function TabsLayout() {
         tabBarLabelStyle: {
           fontSize: 10,
         },
+        tabBarButton: (props) => <NoRippleTabButton {...props} />,
       }}
     >
       <Tabs.Screen

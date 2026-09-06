@@ -16,10 +16,12 @@ type PrintPreviewModalProps = {
   details: { label: string; value: string }[];
   lines: PrintPreviewLine[];
   totalText: string;
+  printLabel?: string;
   printing?: boolean;
   saving?: boolean;
   onClose: () => void;
   onPrint: () => void;
+  onSave?: () => void;
 };
 
 export default function PrintPreviewModal({
@@ -29,10 +31,12 @@ export default function PrintPreviewModal({
   details,
   lines,
   totalText,
+  printLabel = "Print",
   printing = false,
   saving = false,
   onClose,
   onPrint,
+  onSave,
 }: PrintPreviewModalProps) {
   const isBusy = printing || saving;
 
@@ -182,11 +186,34 @@ export default function PrintPreviewModal({
                     className="ml-2 text-[14px] text-white"
                     style={{ fontFamily: "Montserrat_600SemiBold" }}
                   >
-                    Print
+                    {printLabel}
                   </Text>
                 </>
               )}
             </Pressable>
+            {onSave ? (
+              <Pressable
+                className={`mt-3 h-12 flex-row items-center justify-center rounded-[10px] ${
+                  saving ? "bg-[#46506E]" : "bg-[#1A1F36]"
+                }`}
+                disabled={isBusy}
+                onPress={onSave}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="save-outline" size={17} color="#FFFFFF" />
+                    <Text
+                      className="ml-2 text-[14px] text-white"
+                      style={{ fontFamily: "Montserrat_600SemiBold" }}
+                    >
+                      Save
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </View>

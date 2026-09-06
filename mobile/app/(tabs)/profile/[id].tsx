@@ -992,12 +992,15 @@ export default function PersonalDetailsScreen() {
                 {isSaving ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text
-                    className="text-[15px] text-white"
-                    style={{ fontFamily: "Montserrat_600SemiBold" }}
-                  >
-                    Save
-                  </Text>
+                  <>
+                    <Ionicons name="save-outline" size={18} color="#FFFFFF" />
+                    <Text
+                      className="ml-2 text-[15px] text-white"
+                      style={{ fontFamily: "Montserrat_600SemiBold" }}
+                    >
+                      Save
+                    </Text>
+                  </>
                 )}
               </Pressable>
               {renderErrorCard(saveError)}

@@ -15,6 +15,7 @@ class BanyeraTransaction extends Model
         'owner_id',
         'transaction_date',
         'total_fee',
+        'print_count',
         'owner_signature_data_url',
         'owner_signature_signed_at',
         'created_by',
@@ -26,6 +27,7 @@ class BanyeraTransaction extends Model
     protected $casts = [
         'transaction_date' => 'datetime',
         'total_fee' => 'decimal:2',
+        'print_count' => 'integer',
         'owner_signature_signed_at' => 'datetime',
         'voided_at' => 'datetime',
         'created_at' => 'datetime',
@@ -102,6 +104,7 @@ class BanyeraTransaction extends Model
                 'banyera_transactions.owner_id',
                 'banyera_transactions.transaction_date',
                 'banyera_transactions.total_fee',
+                'banyera_transactions.print_count',
                 'banyera_transactions.owner_signature_data_url',
                 'banyera_transactions.owner_signature_signed_at',
                 'banyera_transactions.created_by',

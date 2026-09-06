@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StatusBar, Text, TextInput, View } from "react-n
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router/react-navigation";
 import { getAuthSession, getAuthToken } from "../../../api/auth";
 import { buildApiHeaders, getApiBaseUrl } from "../../../api/axios";
 import { useToastStore } from "../../../store/toastStore";
