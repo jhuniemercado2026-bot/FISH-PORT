@@ -1156,8 +1156,9 @@ const getExportColumnsForReport = ({
   }
 
   if (activeReport === "daily-vehicle-ticket") {
-    // Match the PDF daily layout: omit Date column, start with Vehicle Type
     return [
+      { key: "date", label: "Ticket Date" },
+      { key: "time", label: "Ticket Time" },
       { key: "vehicleType", label: "Vehicle Type" },
       { key: "dailyFee", label: "Daily Fee (PHP)" },
       { key: "banyeraFee", label: "Banyera Fee (PHP)" },
@@ -1252,6 +1253,21 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
     const normalized = String(value).replace(" ", "T");
     const date = new Date(normalized);
     if (Number.isNaN(date.getTime())) return String(value).slice(11, 16) || value;
+    return date.toLocaleTimeString("en-PH", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const formatTicketTime = (value) => {
+    const raw = String(value || "").trim();
+    const match = raw.match(/[T\s](\d{2}):(\d{2})/);
+    if (!match) return "";
+
+    const date = new Date(`2000-01-01T${match[1]}:${match[2]}:00`);
+    if (Number.isNaN(date.getTime())) return `${match[1]}:${match[2]}`;
+
     return date.toLocaleTimeString("en-PH", {
       hour: "numeric",
       minute: "2-digit",
@@ -1368,7 +1384,9 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
       } else if (column.key === "dockingDate") {
         val = formatExportDate(row?.docking_date ?? row?.created_at ?? row?.dockingDate);
       } else if (column.key === "time") {
-        val = formatDockingTime(row?.docking_date ?? row?.created_at ?? row?.time);
+        val = activeReport === "daily-vehicle-ticket"
+          ? formatTicketTime(row?.ticket_date ?? row?.issued_at ?? row?.created_at ?? row?.time)
+          : formatDockingTime(row?.docking_date ?? row?.created_at ?? row?.time);
       } else if (column.key === "transactionDate") {
         val = formatBanyeraDate(row?.transaction_date ?? row?.created_at ?? row?.transactionDate);
       } else if (column.key === "transactionTime") {
@@ -1382,7 +1400,7 @@ const getExportRowsForColumns = (rows, columns, activeReport) => {
       } else if (column.key === "total") {
         val = Number(row?.total_fee ?? row?.total ?? 0);
       } else if (column.key === "date") {
-        val = formatExportDate(row?.date ?? row?.billing_date ?? row?.bill_date ?? row?.date_billed ?? row?.transaction_date ?? row?.created_at ?? row?.transactionDate);
+        val = formatExportDate(row?.date ?? row?.ticket_date ?? row?.issued_at ?? row?.billing_date ?? row?.bill_date ?? row?.date_billed ?? row?.transaction_date ?? row?.created_at ?? row?.transactionDate);
       } else if ((activeReport === "boat-statement-report" || activeReport === "owner-statement-report") && column.key === "amount") {
         const charge = Number(row?.charge ?? 0);
         const payment = Number(row?.payment ?? 0);
@@ -2430,6 +2448,22 @@ const SuperReports = () => {
   const reportViewerUrl = (isRevenueReport || isRemittanceReport || isRegisteredBoatsReport || isOwnerInfoReport || isBoatTypesReport || isBoatStatementReport || isOwnerStatementReport || isDockingReport || isBanyeraReport || isBfarReport || isDailyVehicleTicketReport || isVehicleTicketReport || isBillingReport || isFeesReport) && reportPdfUrl
     ? `${reportPdfUrl}#view=FitH`
     : "about:blank";
+
+  const handleOpenReportPdf = () => {
+    if (!reportPdfUrl) return;
+    window.open(reportViewerUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const handleDownloadReportPdf = () => {
+    if (!reportPdfUrl) return;
+
+    const link = document.createElement("a");
+    link.href = reportPdfUrl;
+    link.download = reportPdfFileName || getPdfFileName(activeReport, generatedFilters);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
 
   const restoreCachedReportPreview = (reportKey) => {
     const cachedPreview = reportPreviewCacheRef.current[reportKey];
@@ -3572,13 +3606,36 @@ const SuperReports = () => {
                       Generating PDF preview...
                     </div>
                   ) : reportPdfUrl ? (
-                    <iframe
-                      title={`${REPORT_CONTENT[activeReport]?.title ?? "Reports"} Viewer`}
-                      src={reportViewerUrl}
-                      className="block h-full min-h-[calc(100vh-150px)] w-full border-0"
-                      scrolling="no"
-                      style={{ backgroundColor: "#f8fafc" }}
-                    />
+                    <div className="flex h-full min-h-0 flex-col">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
+                        <p className="truncate text-[12px] font-medium text-slate-600">
+                          {reportPdfFileName || "Report PDF"}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleOpenReportPdf}
+                            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-[#1A1F36] transition hover:bg-slate-50"
+                          >
+                            Open PDF
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleDownloadReportPdf}
+                            className="h-9 rounded-lg bg-[#1A1F36] px-3 text-[12px] font-semibold text-white transition hover:bg-[#0f1729]"
+                          >
+                            Download
+                          </button>
+                        </div>
+                      </div>
+                      <iframe
+                        title={`${REPORT_CONTENT[activeReport]?.title ?? "Reports"} Viewer`}
+                        src={reportViewerUrl}
+                        className="block min-h-[calc(100vh-198px)] flex-1 w-full border-0"
+                        scrolling="no"
+                        style={{ backgroundColor: "#f8fafc" }}
+                      />
+                    </div>
                   ) : reportGenerated ? (
                     <div className="flex h-full min-h-[calc(100vh-150px)] items-center justify-center bg-white text-[13px] text-slate-500">
                       Generating PDF preview...

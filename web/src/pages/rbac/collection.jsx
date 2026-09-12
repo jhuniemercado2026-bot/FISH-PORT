@@ -40,6 +40,7 @@ import { getNormalizedRole } from "../../utils/transactionLock";
 import { invalidateTodayCollection } from "../../utils/remittanceCollectionCache";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
 import { cacheTab, getCachedTab } from "../../utils/tabSession";
+import { parseMoneyValue } from "../../utils/money";
 
 const FONT = "'Montserrat', sans-serif";
 const PAGE_SIZE = 10;
@@ -90,7 +91,7 @@ const TH = ({ children, className = "" }) => (
 );
 
 const formatMoney = (value) =>
-  Number(value || 0).toLocaleString("en-PH", {
+  parseMoneyValue(value).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -113,7 +114,7 @@ const getRemittanceReportFilename = (row) => {
 };
 
 const getRemittanceTodayCashReceived = (row) =>
-  Number(row?.amount || 0) - Number(row?.surplus || 0) + Number(row?.deficit || 0);
+  parseMoneyValue(row?.amount) - parseMoneyValue(row?.surplus) + parseMoneyValue(row?.deficit);
 
 const getRemittanceHighlightId = ({ highlightedSearchResult, search }) => {
   const stateId = highlightedSearchResult?.group === "Remittance" ? String(highlightedSearchResult?.id || "") : "";
@@ -374,7 +375,7 @@ const SuperCollections = ({ initialTab }) => {
   );
   const previewRemittanceAmount = useMemo(() => {
     if (hasTodayDailyRemittance) return 0;
-    return Number(todayCollectionData?.amount ?? 0);
+    return parseMoneyValue(todayCollectionData?.amount);
   }, [hasTodayDailyRemittance, todayCollectionData?.amount]);
   const todayCollectionBreakdown = todayCollectionData?.breakdown ?? [];
   const remittanceProgress = todayCollectionData?.remittance_progress ?? {};

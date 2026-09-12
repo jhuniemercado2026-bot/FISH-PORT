@@ -43,12 +43,12 @@ class VoidRequestController extends Controller
 
         $coordinators = User::query()
             ->where('role', 'coordinator')
-            ->where('status', 'active')
+            ->where('status', '!=', 'deactivated')
             ->get(['user_id']);
 
         if ($coordinators->isEmpty()) {
             return response()->json([
-                'message' => 'No active coordinators are available to receive this request.',
+                'message' => 'No coordinators are available to receive this request.',
             ], 422);
         }
 
@@ -145,20 +145,22 @@ class VoidRequestController extends Controller
         if ($transactionType === 'docking') {
             $boatName = $record->getRelation('boat')?->boat_name ?: 'Unknown boat';
             $fee = $this->formatMoney($record->getAttribute('docking_fee'));
+            $dateTime = $this->formatDateTime($record->getAttribute('docking_date'));
 
-            return 'Requested to void docking record, boat "' . $boatName . '" with fee "' . $fee . '". Reason: ' . $reason;
+            return 'Requested to void docking record, boat "' . $boatName . '" in ' . $dateTime . ' with fee "' . $fee . '". Reason: ' . $reason;
         }
 
         if ($transactionType === 'banyera') {
             $boatName = $record->getRelation('boat')?->boat_name ?: 'Unknown boat';
             $fee = $this->formatMoney($record->getAttribute('total_fee'));
+            $dateTime = $this->formatDateTime($record->getAttribute('transaction_date'));
 
-            return 'Requested to void banyera transaction, boat "' . $boatName . '" with fee "' . $fee . '". Reason: ' . $reason;
+            return 'Requested to void banyera transaction, boat "' . $boatName . '" in ' . $dateTime . ' with fee "' . $fee . '". Reason: ' . $reason;
         }
 
         if ($transactionType === 'tickets') {
             $vehicleType = $record->getRelation('vehicleType')?->type_name ?: 'Vehicle';
-            $ticketDate = $this->formatDate($record->getAttribute('ticket_date'));
+            $ticketDate = $this->formatDateTime($record->getAttribute('ticket_date'));
             $ticketFee = $this->formatMoney($record->getAttribute('ticket_fee'));
 
             return 'Requested to void vehicle ticket, ' . $vehicleType . ' in ' . $ticketDate . ' with ' . $ticketFee . '. Reason: ' . $reason;
@@ -178,14 +180,14 @@ class VoidRequestController extends Controller
         return 'void_request_' . $transactionType;
     }
 
-    private function formatDate(mixed $value): string
+    private function formatDateTime(mixed $value): string
     {
         if (!$value) {
             return 'N/A';
         }
 
         try {
-            return Carbon::parse($value, 'Asia/Manila')->format('F j, Y');
+            return Carbon::parse($value, 'Asia/Manila')->format('F j, Y \i\n g:i A');
         } catch (\Throwable) {
             return 'N/A';
         }

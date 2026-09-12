@@ -568,15 +568,22 @@ function TransactionCard({
   }
 
   if (type === "tickets") {
-    const plateNumber = data.plate_number || "N/A";
+    const plateNumber = String(data.plate_number || "").trim();
     const vehicleType =
       data.vehicle_type?.type_name ||
       data.vehicleType?.type_name ||
       data.vehicle_type_name ||
       data.vehicleType?.vehicle_type_name ||
       "Vehicle";
+    const ticketType = String(data.ticket_type || "").toLowerCase();
+    const isAnnualTicket = ticketType === "annual";
+    const ticketTitle = isAnnualTicket && plateNumber ? plateNumber : vehicleType;
     const transactionDate = data.transaction_date || data.ticket_date || data.created_at || data.docking_date;
     const date = formatPhilippineDate(transactionDate);
+    const time = formatPhilippineTime(transactionDate);
+    const ticketSubtitle = isAnnualTicket
+      ? `${vehicleType} • ${date} • ${time}`
+      : `${date} • ${time}`;
     const ticketFee = parseMoneyValue(data.total_fee) > 0
       ? parseMoneyValue(data.total_fee)
       : parseMoneyValue(data.ticket_fee);
@@ -598,7 +605,7 @@ function TransactionCard({
               className="text-[14px] font-semibold text-[#1A1F36]"
               style={{ fontFamily: "Montserrat_600SemiBold" }}
             >
-              {plateNumber}
+              {ticketTitle}
             </Text>
           </View>
           <View className="items-end">
@@ -616,7 +623,7 @@ function TransactionCard({
             style={{ fontFamily: "Montserrat_400Regular" }}
             numberOfLines={1}
           >
-            {vehicleType} • {date}
+            {ticketSubtitle}
           </Text>
           <StatusPill data={data} />
         </View>
@@ -684,6 +691,7 @@ export default function HistoryScreen() {
   const cacheTransactionDetail = useHistoryStore((state) => state.cacheTransactionDetail);
   const handledSyncedIdsRef = useRef<Set<string>>(new Set());
   const handledQueuedDraftIdsRef = useRef<Set<string>>(new Set());
+  const hasLoadedTransactionsRef = useRef(false);
   const [selectedTab, setSelectedTab] = useState<TransactionType>(
     (params.tab === "docking" || params.tab === "banyera" || params.tab === "tickets" || params.tab === "remittance" ? params.tab : "all") as TransactionType
   );
@@ -867,7 +875,7 @@ export default function HistoryScreen() {
         cachedHistory.remittance.length > 0;
 
       if (options.showLoading) {
-        setIsLoading(!hasLoadedTransactions && !hasCachedHistory);
+        setIsLoading(!hasLoadedTransactionsRef.current && !hasCachedHistory);
       }
 
       const networkState = await NetInfo.fetch().catch(() => null);
@@ -876,6 +884,7 @@ export default function HistoryScreen() {
         setBanyeraTransactions(cachedHistory.banyera);
         setTicketTransactions(cachedHistory.tickets);
         setRemittanceTransactions(cachedHistory.remittance);
+        hasLoadedTransactionsRef.current = true;
         setHasLoadedTransactions(true);
         setIsLoading(false);
         return;
@@ -886,6 +895,7 @@ export default function HistoryScreen() {
         setBanyeraTransactions(cachedHistory.banyera);
         setTicketTransactions(cachedHistory.tickets);
         setRemittanceTransactions(cachedHistory.remittance);
+        hasLoadedTransactionsRef.current = true;
         setHasLoadedTransactions(true);
         setIsLoading(false);
         return;
@@ -958,6 +968,7 @@ export default function HistoryScreen() {
           tickets: nextHistory.tickets,
           remittance: nextHistory.remittance,
         });
+        hasLoadedTransactionsRef.current = true;
         setHasLoadedTransactions(true);
         setIsLoading(false);
       } catch {
@@ -969,6 +980,7 @@ export default function HistoryScreen() {
         if (!hasCachedHistory && !isOfflineNetworkState(latestNetworkState)) {
           showToast("error", "Failed to load transactions");
         }
+        hasLoadedTransactionsRef.current = true;
         setHasLoadedTransactions(true);
         setIsLoading(false);
       }
@@ -1123,15 +1135,11 @@ export default function HistoryScreen() {
       <StatusBar barStyle="light-content" backgroundColor="#1A1F36" />
 
       <SafeAreaView
-        className="absolute left-0 right-0 top-0 z-50 bg-transparent"
+        className="overflow-hidden rounded-b-[20px] bg-[#1A1F36]"
         edges={["top"]}
       >
         <View
-          className="h-[66px] flex-row items-center justify-between overflow-hidden rounded-b-[20px] bg-[#1A1F36] px-5"
-          style={{
-            boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.18)",
-            elevation: 18,
-          }}
+          className="h-[66px] flex-row items-center justify-between overflow-hidden bg-[#1A1F36] px-5"
         >
           <Text
             className="text-[18px] text-white"
@@ -1154,7 +1162,7 @@ export default function HistoryScreen() {
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: 28, paddingTop: 105 }}
+        contentContainerStyle={{ paddingBottom: 28, paddingTop: 20 }}
         showsVerticalScrollIndicator={false}
       >
         <View className="px-5 pt-0">

@@ -41,6 +41,7 @@ import NoDataFound from "../../components/NoDataFound";
 import { showAddedToast, showBottomToast } from "../../store/bottomToastStore";
 import api from "../../api/axios";
 import { USERS_QUERY_KEY, useUsersPageQuery } from "../../hooks/useUsersQuery";
+import { getStoredUser, normalizeRole } from "../login/auth";
 import { useAccountPresenceStore } from "../../store/accountPresenceStore";
 import { useSidebar } from "../../store/sidebarStore";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
@@ -66,7 +67,7 @@ const ROLE_OPTIONS = [
 ];
 
 const getManageableRoleOptions = (role) => {
-  const normalizedRole = String(role || "").trim().toLowerCase();
+  const normalizedRole = normalizeRole(role);
 
   if (normalizedRole === "head") {
     return ROLE_OPTIONS.filter((option) => option.value === "coordinator");
@@ -737,13 +738,9 @@ const SuperManageAccounts = () => {
   const debouncedSearch = useDebounce(search, SEARCH_DEBOUNCE_MS);
   const onlineUserIds = useAccountsPresence();
   const storedUser = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem("user") || "null");
-    } catch {
-      return null;
-    }
+    return getStoredUser();
   }, []);
-  const currentUserRole = String(storedUser?.role || "").trim().toLowerCase();
+  const currentUserRole = normalizeRole(storedUser?.role || storedUser?.role_label);
   const manageableRoleOptions = useMemo(() => getManageableRoleOptions(currentUserRole), [currentUserRole]);
   const roleFilterOptions = useMemo(() => getRoleFilterOptions(currentUserRole), [currentUserRole]);
   const managedRoleLabel = manageableRoleOptions[0]?.label ?? "Accounts";

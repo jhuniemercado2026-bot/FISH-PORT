@@ -42,6 +42,7 @@ import {
 } from "../../utils/offlineMasterData";
 import { startTransactionsRealtime } from "../../utils/realtimeTransactions";
 import { submitOrQueueOfflineTransaction } from "../../utils/offlineTransactionQueue";
+import { printThermalReceiptWithSignature } from "../../utils/thermalReceiptPrinter";
 
 
 type TransactionType = "banyera" | "docking" | "tickets" | "remittance";
@@ -274,8 +275,14 @@ type AnnualVehicleTicketOption = {
   ticket_type?: string | null;
   ticket_date?: string | null;
   end_date?: string | null;
+  status?: string | null;
+  ticketType?: string | null;
+  rawTicketDate?: string | null;
+  rawEndDate?: string | null;
   is_voided?: boolean | number | null;
+  isVoided?: boolean | number | null;
   voided_at?: string | null;
+  voidedAt?: string | null;
 };
 
 type TicketFeeItem = {
@@ -398,6 +405,16 @@ function formatPreviewDateTime(value: string) {
   return `${dateText} - ${timeText}`;
 }
 
+function formatPreviewDate(value: string) {
+  const dateTimeText = formatPreviewDateTime(value);
+  return dateTimeText.split(" - ")[0] || "-";
+}
+
+function formatPreviewTime(value: string) {
+  const dateTimeText = formatPreviewDateTime(value);
+  return dateTimeText.includes(" - ") ? dateTimeText.split(" - ")[1] : "-";
+}
+
 function centerPrinterText(text: string, width = 32) {
   const trimmed = text.trim();
   const padding = Math.max(0, Math.floor((width - trimmed.length) / 2));
@@ -442,14 +459,12 @@ function padPrinterColumns(left: string, right: string, width = 32) {
 
 function buildBanyeraReceiptText({
   boatName,
-  boatType,
   ownerName,
   transactionDateTime,
   lines,
   totalFee,
 }: {
   boatName: string;
-  boatType: string;
   ownerName: string;
   transactionDateTime: string;
   lines: BanyeraPreviewLine[];
@@ -459,10 +474,9 @@ function buildBanyeraReceiptText({
     centerPrinterText("OPOL FISH PORT"),
     centerPrinterText("BANYERA TRANSACTION"),
     "-".repeat(32),
-    `Date: ${transactionDateTime || "-"}`,
+    `Date: ${formatPreviewDate(transactionDateTime)}`,
+    `Time: ${formatPreviewTime(transactionDateTime)}`,
     ...splitPrinterText(`Boat: ${boatName || "-"}`),
-    ...splitPrinterText(`Type: ${boatType || "-"}`),
-    ...splitPrinterText(`Owner: ${ownerName || "-"}`),
     "-".repeat(32),
   ];
 
@@ -483,10 +497,6 @@ function buildBanyeraReceiptText({
   receiptLines.push(
     "-".repeat(32),
     padPrinterColumns("TOTAL", formatPrinterPeso(totalFee)),
-    "",
-    "Signature: ________________",
-    "",
-    "",
     ""
   );
 
@@ -787,17 +797,30 @@ function buildVehicleTypesFromFees(feeOptions: FeeOption[]): VehicleTypeOption[]
 }
 
 function isValidAnnualVehicleTicket(ticket?: AnnualVehicleTicketOption | null) {
-  if (String(ticket?.ticket_type ?? "").toLowerCase() !== "annual") {
+  const ticketType = String(ticket?.ticket_type ?? ticket?.ticketType ?? "").toLowerCase();
+  const status = String(ticket?.status ?? "").toLowerCase();
+
+  if (ticketType !== "annual") {
     return false;
   }
 
-  if (ticket?.is_voided || ticket?.voided_at) {
+  if (ticket?.is_voided || ticket?.isVoided || ticket?.voided_at || ticket?.voidedAt) {
+    return false;
+  }
+
+  if (status === "expired" || status === "voided") {
     return false;
   }
 
   const today = getManilaDateString();
-  const startDate = String(ticket?.ticket_date ?? "").slice(0, 10);
-  const endDate = String(ticket?.end_date ?? ticket?.ticket_date ?? "").slice(0, 10);
+  const startDate = String(ticket?.ticket_date ?? ticket?.rawTicketDate ?? "").slice(0, 10);
+  const endDate = String(
+    ticket?.end_date ??
+      ticket?.rawEndDate ??
+      ticket?.ticket_date ??
+      ticket?.rawTicketDate ??
+      ""
+  ).slice(0, 10);
 
   if (startDate && startDate > today) {
     return false;
@@ -917,6 +940,12 @@ export default function AddTransactionScreen() {
   const [ticketDay, setTicketDay] = useState(manilaNow.day);
   const [ticketYear, setTicketYear] = useState(manilaNow.year);
   const [isTicketDateAuto, setIsTicketDateAuto] = useState(true);
+  const [ticketHour, setTicketHour] = useState(manilaNow.hour);
+  const [ticketMinute, setTicketMinute] = useState(manilaNow.minute);
+  const [ticketMeridiem, setTicketMeridiem] = useState<"AM" | "PM">(
+    manilaNow.meridiem === "PM" ? "PM" : "AM"
+  );
+  const [isTicketTimeAuto, setIsTicketTimeAuto] = useState(true);
   const [ticketFieldErrors, setTicketFieldErrors] = useState<
     Record<string, string>
   >({});
@@ -1108,6 +1137,12 @@ export default function AddTransactionScreen() {
         setTicketYear(nextNow.year);
       }
 
+      if (isTicketTimeAuto) {
+        setTicketHour(nextNow.hour);
+        setTicketMinute(nextNow.minute);
+        setTicketMeridiem(nextNow.meridiem === "PM" ? "PM" : "AM");
+      }
+
       if (isRemittanceDateAuto) {
         setRemittanceMonth(nextNow.month);
         setRemittanceDay(nextNow.day);
@@ -1126,6 +1161,7 @@ export default function AddTransactionScreen() {
     isDockingTimeAuto,
     isRemittanceDateAuto,
     isTicketDateAuto,
+    isTicketTimeAuto,
   ]);
 
   useEffect(() => {
@@ -1692,17 +1728,15 @@ export default function AddTransactionScreen() {
   });
   const banyeraReceiptText = buildBanyeraReceiptText({
     boatName: selectedBanyeraBoat?.boat_name ?? "",
-    boatType: selectedBanyeraBoatType,
     ownerName: selectedBanyeraBoatOwner,
     transactionDateTime: banyeraPreviewDateTime,
     lines: banyeraPreviewLines,
     totalFee: banyeraTotalFee,
   });
   const banyeraPrintPreviewDetails = [
-    { label: "Date", value: formatPreviewDateTime(banyeraPreviewDateTime) },
+    { label: "Date", value: formatPreviewDate(banyeraPreviewDateTime) },
+    { label: "Time", value: formatPreviewTime(banyeraPreviewDateTime) },
     { label: "Boat", value: selectedBanyeraBoat?.boat_name || "-" },
-    { label: "Type", value: selectedBanyeraBoatType || "-" },
-    { label: "Owner", value: selectedBanyeraBoatOwner || "-" },
   ];
   const banyeraPrintPreviewLines: PrintPreviewLine[] = banyeraPreviewLines.map((line) => ({
     name: line.name,
@@ -2087,7 +2121,11 @@ export default function AddTransactionScreen() {
     setTicketMonth(resetNow.month);
     setTicketDay(resetNow.day);
     setTicketYear(resetNow.year);
+    setTicketHour(resetNow.hour);
+    setTicketMinute(resetNow.minute);
+    setTicketMeridiem(resetNow.meridiem === "PM" ? "PM" : "AM");
     setIsTicketDateAuto(true);
+    setIsTicketTimeAuto(true);
     setTicketFieldErrors({});
   }
 
@@ -2111,7 +2149,10 @@ export default function AddTransactionScreen() {
     setIsPrintingBanyeraPreview(true);
 
     try {
-      await printThermalText(banyeraReceiptText);
+      await printThermalReceiptWithSignature(
+        banyeraReceiptText,
+        banyeraOwnerSignatureImage
+      );
       showToast("success", "Banyera preview sent to PT-210 printer.");
       await handleSave({ skipBanyeraPreview: true, printed: true });
     } catch (error) {
@@ -2403,20 +2444,21 @@ export default function AddTransactionScreen() {
           nextDockingErrors.fee_id = "Fee is required.";
         }
 
+        if (!dockingMonth.trim() || !dockingDay.trim() || !dockingYear.trim()) {
+          nextDockingErrors.docking_date = "Docking date is required.";
+        }
+
+        if (!dockingHour.trim() || !dockingMinute.trim() || !dockingMeridiem) {
+          nextDockingErrors.docking_time = "Docking time is required.";
+        }
+
         if (Object.keys(nextDockingErrors).length) {
           setDockingFieldErrors(nextDockingErrors);
           setFormError("Please complete the daily docking form.");
           return;
         }
 
-        if (
-          !dockingMonth.trim() ||
-          !dockingDay.trim() ||
-          !dockingYear.trim() ||
-          !dockingHour.trim() ||
-          !dockingMinute.trim() ||
-          !dockingFee.trim()
-        ) {
+        if (!dockingFee.trim()) {
           setFormError("Please complete the daily docking form.");
           return;
         }
@@ -2436,8 +2478,13 @@ export default function AddTransactionScreen() {
         );
 
         if (!dockingDate || !dockingDateTime) {
-          setFormError("Enter a valid docking date.");
-          showToast("error", "Enter a valid docking date.");
+          setDockingFieldErrors((current) => ({
+            ...current,
+            docking_date: !dockingDate ? "Enter a valid docking date." : "",
+            docking_time: !dockingDateTime ? "Enter a valid docking time." : "",
+          }));
+          setFormError("Enter a valid docking date and time.");
+          showToast("error", "Enter a valid docking date and time.");
           return;
         }
 
@@ -2526,6 +2573,14 @@ export default function AddTransactionScreen() {
           ticketMonth,
           ticketDay
         );
+        const builtTicketDateTime = buildTransactionDateTime(
+          ticketYear,
+          ticketMonth,
+          ticketDay,
+          ticketHour,
+          ticketMinute,
+          ticketMeridiem
+        );
         const visibleTicketRows = [ticketDailyRow, ticketBanyeraRow];
         const hasFeeSelection = visibleTicketRows.some(
           (item) => item.fee_id
@@ -2543,6 +2598,12 @@ export default function AddTransactionScreen() {
           nextErrors.ticket_date = "Ticket date is required.";
         } else if (builtTicketDate > getManilaDateString()) {
           nextErrors.ticket_date = "Ticket date cannot be in the future.";
+        }
+
+        if (!ticketHour.trim() || !ticketMinute.trim() || !ticketMeridiem) {
+          nextErrors.ticket_time = "Ticket time is required.";
+        } else if (!builtTicketDateTime) {
+          nextErrors.ticket_time = "Enter a valid ticket time.";
         }
 
         visibleTicketRows.forEach((item, index) => {
@@ -2601,7 +2662,7 @@ export default function AddTransactionScreen() {
           daily_fee: ticketFeeParts.dailyFee,
           banyera_fee: ticketFeeParts.banyeraFee,
           ticket_fee: Number(ticketTotalFee),
-          ticket_date: builtTicketDate,
+          ticket_date: builtTicketDateTime,
           end_date: null,
         };
 
@@ -2637,6 +2698,7 @@ export default function AddTransactionScreen() {
               backendErrors.ticket_fee?.[0] ??
               "",
             ticket_date: backendErrors.ticket_date?.[0] ?? "",
+            ticket_time: backendErrors.ticket_time?.[0] ?? "",
           });
           setFormError(data?.message ?? "Unable to save vehicle ticket.");
           showToast("error", data?.message ?? "Unable to save vehicle ticket.");
@@ -2671,15 +2733,11 @@ export default function AddTransactionScreen() {
       <StatusBar barStyle="light-content" backgroundColor="#1A1F36" />
 
       <SafeAreaView
-        className="absolute left-0 right-0 top-0 z-50 bg-transparent"
+        className="overflow-hidden rounded-b-[20px] bg-[#1A1F36]"
         edges={["top"]}
       >
         <View
-          className="h-[66px] flex-row items-center justify-between overflow-hidden rounded-b-[20px] bg-[#1A1F36] px-5"
-          style={{
-            boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.18)",
-            elevation: 18,
-          }}
+          className="h-[66px] flex-row items-center justify-between overflow-hidden bg-[#1A1F36] px-5"
         >
           <Text
             className="text-[18px] text-white"
@@ -2711,7 +2769,8 @@ export default function AddTransactionScreen() {
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: 28, paddingTop: 105 }}
+        contentContainerStyle={{ paddingBottom: 28, paddingTop: 20 }}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <View className="px-5 pt-0">
@@ -2899,8 +2958,14 @@ export default function AddTransactionScreen() {
                 </View>
 
                 <View className="mt-4">
-                  <FormSectionLabel label="Docking Date" />
                   <DatePicker
+                    label="Docking Date"
+                    required
+                    error={dockingFieldErrors.docking_date}
+                    errorVariant="card"
+                    placeholder="Select docking date"
+                    precision="day"
+                    maxDate={new Date()}
                     value={
                       dockingYear && dockingMonth && dockingDay
                         ? new Date(
@@ -2919,16 +2984,20 @@ export default function AddTransactionScreen() {
                       setDockingYear(String(nextDate.getFullYear()));
                       setDockingMonth(String(nextDate.getMonth() + 1));
                       setDockingDay(String(nextDate.getDate()));
+                      setDockingFieldErrors((current) => ({
+                        ...current,
+                        docking_date: "",
+                      }));
                     }}
-                    placeholder="Select docking date"
-                    maxDate={new Date()}
-                    containerStyle={{ marginTop: 0 }}
                   />
                 </View>
 
                 <TimePicker
                   containerStyle={{ marginTop: 16 }}
                   label="Docking Time"
+                  required
+                  error={dockingFieldErrors.docking_time}
+                  errorVariant="card"
                   placeholder="Select time"
                   value={{
                     hour: dockingHour || "12",
@@ -2940,6 +3009,10 @@ export default function AddTransactionScreen() {
                     setDockingHour(nextValue.hour);
                     setDockingMinute(nextValue.minute);
                     setDockingMeridiem(nextValue.meridiem);
+                    setDockingFieldErrors((current) => ({
+                      ...current,
+                      docking_time: "",
+                    }));
                   }}
                 />
 
@@ -3612,6 +3685,30 @@ export default function AddTransactionScreen() {
                     }}
                   />
                 </View>
+
+                <TimePicker
+                  containerStyle={{ marginTop: 16 }}
+                  label="Ticket Time"
+                  required
+                  error={ticketFieldErrors.ticket_time}
+                  errorVariant="card"
+                  placeholder="Select time"
+                  value={{
+                    hour: ticketHour || "12",
+                    minute: ticketMinute || "00",
+                    meridiem: ticketMeridiem,
+                  }}
+                  onChange={(nextValue) => {
+                    setIsTicketTimeAuto(false);
+                    setTicketHour(nextValue.hour);
+                    setTicketMinute(nextValue.minute);
+                    setTicketMeridiem(nextValue.meridiem);
+                    setTicketFieldErrors((current) => ({
+                      ...current,
+                      ticket_time: "",
+                    }));
+                  }}
+                />
 
                 <View className="mt-4">
                   <Text

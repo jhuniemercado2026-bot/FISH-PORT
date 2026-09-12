@@ -4,7 +4,10 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleProp,
@@ -14,6 +17,8 @@ import {
   ViewStyle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
 
 export type SearchFilterOption = {
   value: string;
@@ -69,7 +74,10 @@ export default function SearchFilter({
   const [visible, setVisible] = useState(false);
   const [internalSearchText, setInternalSearchText] = useState("");
   const [backdropOpacity] = useState(() => new Animated.Value(0));
-  const [sheetTranslateY] = useState(() => new Animated.Value(56));
+  const [sheetOpacity] = useState(() => new Animated.Value(0));
+  const [sheetTranslateY] = useState(() => new Animated.Value(28));
+  const [listHeight] = useState(() => new Animated.Value(maxDropdownHeight));
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   const selectedOption =
     options.find((option) => String(option.value) === String(value)) ?? null;
@@ -95,6 +103,12 @@ export default function SearchFilter({
 
   useEffect(() => {
     if (open) {
+      backdropOpacity.stopAnimation();
+      sheetOpacity.stopAnimation();
+      sheetTranslateY.stopAnimation();
+      backdropOpacity.setValue(0);
+      sheetOpacity.setValue(0);
+      sheetTranslateY.setValue(28);
       setVisible(true);
       onOpenChange?.(true);
       Animated.parallel([
@@ -104,9 +118,15 @@ export default function SearchFilter({
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
+        Animated.timing(sheetOpacity, {
+          toValue: 1,
+          duration: 190,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
         Animated.timing(sheetTranslateY, {
           toValue: 0,
-          duration: 220,
+          duration: 210,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
@@ -121,9 +141,15 @@ export default function SearchFilter({
         easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
       }),
+      Animated.timing(sheetOpacity, {
+        toValue: 0,
+        duration: 140,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
       Animated.timing(sheetTranslateY, {
-        toValue: 56,
-        duration: 170,
+        toValue: 18,
+        duration: 150,
         easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
       }),
@@ -131,9 +157,43 @@ export default function SearchFilter({
       if (finished) {
         setVisible(false);
         onOpenChange?.(false);
+        Keyboard.dismiss();
       }
     });
-  }, [backdropOpacity, onOpenChange, open, sheetTranslateY]);
+  }, [backdropOpacity, onOpenChange, open, sheetOpacity, sheetTranslateY]);
+
+  useEffect(() => {
+    if (!visible) {
+      setIsKeyboardVisible(false);
+      return undefined;
+    }
+
+    const showSubscription = Keyboard.addListener("keyboardDidShow", () => {
+      setIsKeyboardVisible(true);
+    });
+
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [visible]);
+
+  useEffect(() => {
+    const nextHeight = isKeyboardVisible
+      ? Math.min(maxDropdownHeight, 144)
+      : maxDropdownHeight;
+
+    Animated.timing(listHeight, {
+      toValue: nextHeight,
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [isKeyboardVisible, listHeight, maxDropdownHeight]);
 
   const setSearchText = (nextValue: string) => {
     if (onSearchTextChange) {
@@ -243,120 +303,132 @@ export default function SearchFilter({
             className="absolute inset-0 bg-[rgba(10,15,28,0.66)]"
             style={{ opacity: backdropOpacity }}
           />
-          <Pressable className="flex-1" onPress={closePicker} />
-
-          <Animated.View
-            className="absolute bottom-0 left-0 right-0 overflow-hidden rounded-t-[28px] bg-white"
-            style={{ transform: [{ translateY: sheetTranslateY }] }}
+          <KeyboardAvoidingView
+            className="flex-1 justify-end"
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={0}
           >
-            <SafeAreaView edges={["bottom"]} className="rounded-t-[28px] bg-white">
-              <View className="px-5 pb-4 pt-5">
-                <View className="mb-4 items-center">
-                  <View className="h-1.5 w-14 rounded-full bg-[#D7DCE3]" />
-                </View>
+            <Pressable className="absolute inset-0" onPress={closePicker} />
 
-                <View className="mb-4 flex-row items-center justify-between">
-                  <Pressable onPress={closePicker}>
-                    <Text
-                      className="text-[14px] text-[#8A94A3]"
-                      style={{ fontFamily: "Montserrat_600SemiBold" }}
-                    >
-                      Cancel
-                    </Text>
-                  </Pressable>
-
-                  <Text
-                    className="text-[15px] text-[#1A1F36]"
-                    style={{ fontFamily: "Montserrat_600SemiBold" }}
-                  >
-                    {sheetTitle || `Select ${label ?? "Option"}`}
-                  </Text>
-
-                  <Pressable onPress={handleDone}>
-                    <Text
-                      className="text-[14px] text-[#2563EB]"
-                      style={{ fontFamily: "Montserrat_600SemiBold" }}
-                    >
-                      Done
-                    </Text>
-                  </Pressable>
-                </View>
-
-                <View className="mb-4 flex-row items-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
-                  <Ionicons name="search-outline" size={18} color="#8A94A3" />
-                  <TextInput
-                    className="h-12 flex-1 px-3 text-[14px] text-[#1A1F36]"
-                    placeholder={placeholder}
-                    placeholderTextColor="#9AA3AF"
-                    value={resolvedSearchText}
-                    onChangeText={handleSearchChange}
-                    autoCorrect={false}
-                    style={{ fontFamily: "Montserrat_400Regular" }}
-                  />
-                </View>
-
-                {loading ? (
-                  <View className="h-40 items-center justify-center rounded-[10px] border border-[#E8E1E6] bg-white">
-                    <ActivityIndicator color="#1A1F36" size="small" />
+            <Animated.View
+              className="overflow-hidden rounded-t-[28px] bg-white"
+              onStartShouldSetResponder={() => true}
+              style={{
+                maxHeight: "82%",
+                opacity: sheetOpacity,
+                transform: [{ translateY: sheetTranslateY }],
+              }}
+            >
+              <SafeAreaView edges={["bottom"]} className="rounded-t-[28px] bg-white">
+                <View className="px-5 pb-4 pt-5">
+                  <View className="mb-4 items-center">
+                    <View className="h-1.5 w-14 rounded-full bg-[#D7DCE3]" />
                   </View>
-                ) : filteredOptions.length ? (
-                  <ScrollView
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
-                    style={{ height: maxDropdownHeight }}
-                  >
-                    <View className="flex-row flex-wrap justify-between">
-                      {filteredOptions.map((option) => {
-                        const isActive = String(value) === String(option.value);
 
-                        return (
-                          <Pressable
-                            key={option.value}
-                            className={`mb-3 min-h-[112px] w-[48%] items-center justify-center rounded-[10px] border p-3 ${
-                              isActive
-                                ? "border-[#1A1F36] bg-[#1A1F36]"
-                                : "border-[#E8E1E6] bg-white"
-                            }`}
-                            onPress={() => handleSelect(option.value)}
-                          >
-                            <View
-                              className={`mb-3 h-10 w-10 items-center justify-center rounded-[10px] ${
-                                isActive ? "bg-white/15" : "bg-[#F8F8FA]"
-                              }`}
-                            >
-                              <Ionicons
-                                name={option.icon ?? optionIcon}
-                                size={18}
-                                color={isActive ? "#FFFFFF" : "#1A1F36"}
-                              />
-                            </View>
-                            <Text
-                              className={`text-center text-[13px] leading-5 ${
-                                isActive ? "text-white" : "text-[#1A1F36]"
-                              }`}
-                              numberOfLines={2}
-                              style={{ fontFamily: "Montserrat_600SemiBold" }}
-                            >
-                              {option.label}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </ScrollView>
-                ) : (
-                  <View className="rounded-[10px] border border-dashed border-[#E8E1E6] bg-white px-4 py-5">
+                  <View className="mb-4 flex-row items-center justify-between">
+                    <Pressable onPress={closePicker}>
+                      <Text
+                        className="text-[14px] text-[#8A94A3]"
+                        style={{ fontFamily: "Montserrat_600SemiBold" }}
+                      >
+                        Cancel
+                      </Text>
+                    </Pressable>
+
                     <Text
-                      className="text-center text-[12px] leading-5 text-[#8A94A3]"
+                      className="text-[15px] text-[#1A1F36]"
+                      style={{ fontFamily: "Montserrat_600SemiBold" }}
+                    >
+                      {sheetTitle || `Select ${label ?? "Option"}`}
+                    </Text>
+
+                    <Pressable onPress={handleDone}>
+                      <Text
+                        className="text-[14px] text-[#2563EB]"
+                        style={{ fontFamily: "Montserrat_600SemiBold" }}
+                      >
+                        Done
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  <View className="mb-4 flex-row items-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
+                    <Ionicons name="search-outline" size={18} color="#8A94A3" />
+                    <TextInput
+                      className="h-12 flex-1 px-3 text-[14px] text-[#1A1F36]"
+                      placeholder={placeholder}
+                      placeholderTextColor="#9AA3AF"
+                      value={resolvedSearchText}
+                      onChangeText={handleSearchChange}
+                      autoCorrect={false}
+                      blurOnSubmit={false}
                       style={{ fontFamily: "Montserrat_400Regular" }}
-                    >
-                      {emptyText}
-                    </Text>
+                    />
                   </View>
-                )}
-              </View>
-            </SafeAreaView>
-          </Animated.View>
+
+                  {loading ? (
+                    <View className="h-40 items-center justify-center rounded-[10px] border border-[#E8E1E6] bg-white">
+                      <ActivityIndicator color="#1A1F36" size="small" />
+                    </View>
+                  ) : filteredOptions.length ? (
+                    <AnimatedScrollView
+                      keyboardShouldPersistTaps="always"
+                      showsVerticalScrollIndicator={false}
+                      style={{ height: listHeight }}
+                    >
+                      <View className="flex-row flex-wrap justify-between">
+                        {filteredOptions.map((option) => {
+                          const isActive = String(value) === String(option.value);
+
+                          return (
+                            <Pressable
+                              key={option.value}
+                              className={`mb-3 min-h-[112px] w-[48%] items-center justify-center rounded-[10px] border p-3 ${
+                                isActive
+                                  ? "border-[#1A1F36] bg-[#1A1F36]"
+                                  : "border-[#E8E1E6] bg-white"
+                              }`}
+                              onPress={() => handleSelect(option.value)}
+                            >
+                              <View
+                                className={`mb-3 h-10 w-10 items-center justify-center rounded-[10px] ${
+                                  isActive ? "bg-white/15" : "bg-[#F8F8FA]"
+                                }`}
+                              >
+                                <Ionicons
+                                  name={option.icon ?? optionIcon}
+                                  size={18}
+                                  color={isActive ? "#FFFFFF" : "#1A1F36"}
+                                />
+                              </View>
+                              <Text
+                                className={`text-center text-[13px] leading-5 ${
+                                  isActive ? "text-white" : "text-[#1A1F36]"
+                                }`}
+                                numberOfLines={2}
+                                style={{ fontFamily: "Montserrat_600SemiBold" }}
+                              >
+                                {option.label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </AnimatedScrollView>
+                  ) : (
+                    <View className="rounded-[10px] border border-dashed border-[#E8E1E6] bg-white px-4 py-5">
+                      <Text
+                        className="text-center text-[12px] leading-5 text-[#8A94A3]"
+                        style={{ fontFamily: "Montserrat_400Regular" }}
+                      >
+                        {emptyText}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </SafeAreaView>
+            </Animated.View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>

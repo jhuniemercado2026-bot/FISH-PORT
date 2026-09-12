@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import Modal from "./Modal";
+import { formatMoneyValue, parseMoneyValue } from "../utils/money";
 
 const FONT = "'Montserrat', sans-serif";
 
@@ -132,7 +133,7 @@ const BreakdownBillModal = ({ open, bill, onClose }) => {
           key: item?.bill_item_id ?? `${transactionType}-${index}`,
           type: getBillItemDisplayType(transactionType),
           date: getBillItemDisplayDate(item, bill?.created_at),
-          amount: Number(item?.amount || 0),
+          amount: parseMoneyValue(item?.amount),
         };
       })
       .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
@@ -141,7 +142,7 @@ const BreakdownBillModal = ({ open, bill, onClose }) => {
   if (!open || !bill) return null;
 
   const reference = formatReferenceNumber(bill.bill_reference_no) || "-";
-  const totalAmount = Number(bill.total_amount || 0);
+  const totalAmount = parseMoneyValue(bill.total_amount);
 
   return (
     <Modal
@@ -220,10 +221,7 @@ const BreakdownBillModal = ({ open, bill, onClose }) => {
                   <BreakdownField>{charge.type}</BreakdownField>
                   <BreakdownField>{formatDisplayDate(charge.date)}</BreakdownField>
                   <BreakdownField align="right">
-                    {Number(charge.amount || 0).toLocaleString("en-PH", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatMoneyValue(charge.amount)}
                   </BreakdownField>
                 </div>
               ))}

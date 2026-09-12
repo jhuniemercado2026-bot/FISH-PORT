@@ -10,6 +10,22 @@ use Illuminate\Validation\Rule;
 
 class VehicleTicketReportController extends Controller
 {
+    private function formatTicketDateTimeValue($value): ?string
+    {
+        if (!$value) {
+            return null;
+        }
+
+        $normalized = str_replace('T', ' ', (string) $value);
+        $normalized = substr($normalized, 0, 19);
+        if (strlen($normalized) === 10) {
+            $normalized .= ' 00:00:00';
+        }
+
+        return Carbon::createFromFormat('Y-m-d H:i:s', $normalized, 'Asia/Manila')
+            ->format('Y-m-d H:i:s');
+    }
+
     private function applyUserFilter($query, Request $request)
     {
         $userId = $request->query('user_id');
@@ -50,6 +66,15 @@ class VehicleTicketReportController extends Controller
 
     private function buildResponse($tickets, ?string $ticketType = null, bool $includeFees = false)
     {
+        $tickets->transform(function (VehicleTicket $ticket) {
+            $ticket->setAttribute(
+                'ticket_date',
+                $this->formatTicketDateTimeValue($ticket->getRawOriginal('ticket_date'))
+            );
+
+            return $ticket;
+        });
+
         $payload = [
             'tickets' => $tickets->toArray(),
             'ticket_type' => $ticketType,

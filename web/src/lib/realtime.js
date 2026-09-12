@@ -16,7 +16,8 @@ export const REALTIME_AUTH_CHANGED_EVENT = "opol:realtime-auth-changed";
 
 const getStoredRealtimeToken = () => {
   try {
-    return localStorage.getItem("token") || "";
+    localStorage.removeItem("token");
+    return sessionStorage.getItem("token") || "";
   } catch {
     return "";
   }

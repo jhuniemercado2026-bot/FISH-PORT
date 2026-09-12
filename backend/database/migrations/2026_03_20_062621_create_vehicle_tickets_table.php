@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('vehicle_tickets', function (Blueprint $table) {
             $table->increments('ticket_id');
             $table->string('control_number', 6)->nullable()->unique();
-            $table->string('official_receipt_no', 6)->nullable();
+            $table->string('official_receipt_no', 7)->nullable();
             $table->unsignedInteger('vehicle_type_id');
             $table->string('plate_number', 50);
             $table->string('driver_name', 50)->nullable();
@@ -20,7 +20,7 @@ return new class extends Migration
             $table->decimal('daily_fee', 12, 2)->default(0);
             $table->decimal('banyera_fee', 12, 2)->default(0);
             $table->decimal('ticket_fee', 12, 2);
-            $table->date('ticket_date');
+            $table->dateTime('ticket_date');
             $table->date('end_date')->nullable();
             $table->foreignId('created_by')->nullable()->constrained('users', 'user_id');
             $table->text('void_reason')->nullable();

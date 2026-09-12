@@ -1,9 +1,8 @@
 // Prefer an Expo public env override so the mobile app can point to the
-// machine currently hosting the Laravel API. Fallback stays on the current
-// workstation LAN IP for local development.
+// currently deployed Laravel API.
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL?.trim() ||
-  "http://192.168.1.58:8000/api";
+  "https://teal-viper-542499.hostingersite.com/api";
 
 export function getApiBaseUrl() {
   return API_BASE_URL.replace(/\/+$/, "");

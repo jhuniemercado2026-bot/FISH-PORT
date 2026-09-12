@@ -5,7 +5,17 @@ import { buildApiHeaders, getApiBaseUrl } from "../../../api/axios";
 import { useProfileStore } from "../../../store/profileStore";
 import { useToastStore } from "../../../store/toastStore";
 import BirthdayPicker from "../../../components/BirthdayPicker";
-import { ActivityIndicator, Pressable, ScrollView, StatusBar, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useEffect, useRef, useState } from "react";
 
@@ -34,6 +44,7 @@ export default function PersonalDetailsScreen() {
   const isChangePasswordMode = params.mode === "change-password";
   const userId = profile.user_id;
   const codeInputRefs = useRef<(TextInput | null)[]>([]);
+  const personalDetailsScrollRef = useRef<ScrollView | null>(null);
 
   const nameParts =
     typeof profile.full_name === "string" && profile.full_name.trim()
@@ -242,7 +253,7 @@ export default function PersonalDetailsScreen() {
 
   const handleSave = async () => {
     if (isSettingsLocked) {
-      setSaveError(transactionLock.message || "Transactions are view-only at the moment.");
+      setSaveError(transactionLock?.message || "Transactions are view-only at the moment.");
       return;
     }
 
@@ -273,6 +284,7 @@ export default function PersonalDetailsScreen() {
       return;
     }
 
+    showToast("success", "Personal details updated successfully.");
     router.back();
   };
 
@@ -309,7 +321,7 @@ export default function PersonalDetailsScreen() {
 
   const sendPasswordCode = async (options: { resend?: boolean } = {}) => {
     if (isSettingsLocked) {
-      setPasswordError(transactionLock.message || "Transactions are view-only at the moment.");
+      setPasswordError(transactionLock?.message || "Transactions are view-only at the moment.");
       return;
     }
 
@@ -420,7 +432,7 @@ export default function PersonalDetailsScreen() {
 
   const verifyPasswordChange = async () => {
     if (isSettingsLocked) {
-      setVerificationError(transactionLock.message || "Transactions are view-only at the moment.");
+      setVerificationError(transactionLock?.message || "Transactions are view-only at the moment.");
       return;
     }
 
@@ -533,15 +545,11 @@ export default function PersonalDetailsScreen() {
         <StatusBar barStyle="light-content" backgroundColor="#1A1F36" />
 
         <SafeAreaView
-          className="absolute left-0 right-0 top-0 z-50 bg-transparent"
+          className="overflow-hidden rounded-b-[20px] bg-[#1A1F36]"
           edges={["top"]}
         >
           <View
-            className="h-[66px] flex-row items-center justify-between overflow-hidden rounded-b-[20px] bg-[#1A1F36] px-5"
-            style={{
-              boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.18)",
-              elevation: 18,
-            }}
+            className="h-[66px] flex-row items-center justify-between overflow-hidden bg-[#1A1F36] px-5"
           >
             <Pressable onPress={() => router.back()} hitSlop={10}>
               <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
@@ -558,7 +566,7 @@ export default function PersonalDetailsScreen() {
 
         <ScrollView
           className="flex-1"
-          contentContainerStyle={{ paddingBottom: 28, paddingTop: 105 }}
+          contentContainerStyle={{ paddingBottom: 28, paddingTop: 20 }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -628,7 +636,7 @@ export default function PersonalDetailsScreen() {
                           className="ml-2 flex-1 text-[12px] leading-4 text-[#991B1B]"
                           style={{ fontFamily: "Montserrat_400Regular" }}
                         >
-                          {transactionLock.message || "Transactions are view-only at the moment."}
+                          {transactionLock?.message || "Transactions are view-only at the moment."}
                         </Text>
                       </View>
                     </View>
@@ -645,12 +653,15 @@ export default function PersonalDetailsScreen() {
                       {isSaving ? (
                         <ActivityIndicator size="small" color="#FFFFFF" />
                       ) : (
-                        <Text
-                          className="text-[15px] text-white"
-                          style={{ fontFamily: "Montserrat_600SemiBold" }}
-                        >
-                          Continue
-                        </Text>
+                        <>
+                          <Ionicons name="save-outline" size={17} color="#FFFFFF" />
+                          <Text
+                            className="ml-2 text-[15px] text-white"
+                            style={{ fontFamily: "Montserrat_600SemiBold" }}
+                          >
+                            Save
+                          </Text>
+                        </>
                       )}
                     </Pressable>
                     {renderErrorCard(passwordError)}
@@ -747,15 +758,11 @@ export default function PersonalDetailsScreen() {
       <StatusBar barStyle="light-content" backgroundColor="#1A1F36" />
 
       <SafeAreaView
-        className="absolute left-0 right-0 top-0 z-50 bg-transparent"
+        className="overflow-hidden rounded-b-[20px] bg-[#1A1F36]"
         edges={["top"]}
       >
         <View
-          className="h-[66px] flex-row items-center justify-between overflow-hidden rounded-b-[20px] bg-[#1A1F36] px-5"
-          style={{
-            boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.18)",
-            elevation: 18,
-          }}
+          className="h-[66px] flex-row items-center justify-between overflow-hidden bg-[#1A1F36] px-5"
         >
           <Pressable onPress={() => router.back()} hitSlop={10}>
             <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
@@ -770,20 +777,27 @@ export default function PersonalDetailsScreen() {
         </View>
       </SafeAreaView>
 
-      <ScrollView
+      <KeyboardAvoidingView
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: 28, paddingTop: 105 }}
-        showsVerticalScrollIndicator={false}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={0}
       >
-        <View className="px-5 pt-0">
-          <View
-            className="mt-2 rounded-[18px] border border-[#E8E1E6] bg-white p-4"
-            style={{
-              boxShadow: "0px 4px 8px rgba(0, 0, 0, 0.06)",
-              elevation: 3,
-            }}
-          >
-            <View className="space-y-4">
+        <ScrollView
+          ref={personalDetailsScrollRef}
+          className="flex-1"
+          contentContainerStyle={{ paddingBottom: 180, paddingTop: 20 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View className="px-5 pt-0">
+            <View
+              className="mt-2 rounded-[18px] border border-[#E8E1E6] bg-white p-4"
+              style={{
+                boxShadow: "0px 4px 8px rgba(0, 0, 0, 0.06)",
+                elevation: 3,
+              }}
+            >
+              <View className="space-y-4">
             <View className="mt-1">
               <Text
                 className="mb-2 text-[11px] uppercase text-[#6F6F82]"
@@ -961,6 +975,11 @@ export default function PersonalDetailsScreen() {
                 placeholderTextColor="#9AA3AF"
                 multiline
                 numberOfLines={3}
+                onFocus={() => {
+                  setTimeout(() => {
+                    personalDetailsScrollRef.current?.scrollToEnd({ animated: true });
+                  }, 180);
+                }}
                 textAlignVertical="top"
                 className={`min-h-[110px] rounded-[10px] bg-white px-4 py-4 text-[14px] text-[#1A1F36] ${
                   addressError ? "border-[#DC2626]" : "border-[#E8E1E6]"
@@ -975,7 +994,7 @@ export default function PersonalDetailsScreen() {
                 <View className="flex-row items-center">
                   <Ionicons name="lock-closed-outline" size={16} color="#DC2626" />
                   <Text className="ml-2 flex-1 text-[12px] leading-4 text-[#991B1B]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                    {transactionLock.message || "Transactions are view-only at the moment."}
+                    {transactionLock?.message || "Transactions are view-only at the moment."}
                   </Text>
                 </View>
               </View>
@@ -1005,10 +1024,11 @@ export default function PersonalDetailsScreen() {
               </Pressable>
               {renderErrorCard(saveError)}
             </View>
+              </View>
+            </View>
           </View>
-          </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }

@@ -12,7 +12,9 @@ import {
   IoPersonCircleOutline,
 } from "react-icons/io5";
 import { logoutUser } from "../pages/login/logout";
+import { getStoredUser } from "../pages/login/auth";
 import { useNotificationsDataQuery } from "../hooks/useNotificationsDataQuery";
+import { useSettingsQuery } from "../hooks/useSettingsQuery";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { useUniversalSearchQuery } from "../hooks/useUniversalSearchQuery";
 import Spinner from "../components/Spinner";
@@ -242,7 +244,12 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
   const notificationsRef = useRef(null);
   const searchRef = useRef(null);
   const queryClient = useQueryClient();
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const storedUser = getStoredUser();
+  const settingsQuery = useSettingsQuery({
+    enabled: Boolean(storedUser),
+    staleTime: 60 * 1000,
+  });
+  const user = settingsQuery.data?.user || storedUser || {};
   const normalizedSearchValue = searchValue.trim();
   const debouncedSearchValue = useDebouncedValue(normalizedSearchValue, 300);
   const searchDataEnabled = debouncedSearchValue.length >= UNIVERSAL_SEARCH_MIN_LENGTH;
@@ -256,8 +263,9 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
 
   const rawFirstName = String(user?.first_name || user?.full_name?.split(" ")[0] || "").trim();
   const rawLastName = String(user?.last_name || user?.full_name?.split(" ").slice(1).join(" ") || "").trim();
-  const firstName = rawFirstName || "Coordinator";
-  const fullName = user?.full_name || [user?.first_name, user?.last_name].filter(Boolean).join(" ") || "Coordinator";
+  const fallbackName = String(user?.email || "").trim() || "Account";
+  const firstName = rawFirstName || fallbackName;
+  const fullName = user?.full_name || [user?.first_name, user?.last_name].filter(Boolean).join(" ") || fallbackName;
   const initials = `${rawFirstName.charAt(0)}${rawLastName.charAt(0)}`.toUpperCase();
   const displayName = firstName;
   const notifications = notificationsQuery.data?.notifications ?? [];
@@ -881,7 +889,7 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
               >
                 <div className="px-4 py-3" style={{ borderBottom: "1px solid #f3f4f6" }}>
                   <p className="m-0 text-[13px] font-bold" style={{ color: "#1a1f36" }}>{fullName}</p>
-                  <p className="m-0 text-[11px] mt-0.5 text-slate-400">{user?.email || "admin@fishport.gov.ph"}</p>
+                  <p className="m-0 text-[11px] mt-0.5 text-slate-400">{user?.email || "No email available"}</p>
                 </div>
 
                 <button

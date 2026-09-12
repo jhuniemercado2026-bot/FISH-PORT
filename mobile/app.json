@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "frontend-mobile",
+    "name": "Opol Fish Port",
     "slug": "frontend-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "frontendmobile",
+    "icon": "./assets/images/opol_fish_port_app_icon.png",
+    "scheme": "opolfishport",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -13,14 +13,13 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#ffffff",
+        "foregroundImage": "./assets/images/opol_fish_port_adaptive_foreground.png",
+        "monochromeImage": "./assets/images/opol_fish_port_adaptive_foreground.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.frontendmobile"
+      "package": "com.opolfishport.mobile"
     },
     "web": {
       "output": "static",
@@ -31,7 +30,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/opol_fish_port.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
@@ -46,6 +45,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c555bb11-13c2-48af-9134-dc1d737df101"
+      }
     }
   }
 }

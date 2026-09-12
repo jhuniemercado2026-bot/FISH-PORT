@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Carbon\Carbon;
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 
 class VehicleTicket extends Model
@@ -32,10 +33,17 @@ class VehicleTicket extends Model
         'daily_fee' => 'decimal:2',
         'banyera_fee' => 'decimal:2',
         'ticket_fee' => 'decimal:2',
-        'ticket_date' => 'date',
+        'ticket_date' => 'datetime:Y-m-d H:i:s',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
         'end_date' => 'date',
         'voided_at' => 'datetime',
     ];
+
+    protected function serializeDate(DateTimeInterface $date): string
+    {
+        return Carbon::instance($date)->timezone('Asia/Manila')->format('Y-m-d H:i:s');
+    }
 
     public function vehicleType()
     {

@@ -49,6 +49,21 @@ nav::-webkit-scrollbar {
   scrollbar-width: none;
 }
 
+.login-help-contact {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.login-help-contact-text,
+.login-help-contact-admin {
+  display: flex !important;
+  width: 100% !important;
+  justify-content: center !important;
+  text-align: center !important;
+}
+
 body.login-scroll-hide {
   overflow-y: auto;
   -ms-overflow-style: none;

@@ -32,6 +32,7 @@ import FilterButton from "../../components/FilterButton";
 import IncreaseDecreaseInput from "../../components/IncreaseDecreaseInput";
 import DatePicker from "../../components/DatePicker";
 import EndDatePicker from "../../components/EndDatePicker";
+import TimePicker from "../../components/TimePicker";
 import Modal from "../../components/Modal";
 import StatusPill from "../../components/StatusPill";
 import TableCard from "../../components/TableCard";
@@ -141,9 +142,13 @@ const VEHICLE_TYPE_USAGE_FILTER_OPTIONS = [
 ];
 const VEHICLE_TICKET_TYPE_LEGEND = [
   { key: "active", label: "Active", color: "#16a34a" },
-  { key: "expired", label: "Expired", color: "#ef4444" },
   { key: "voided", label: "Voided", color: "#f59e0b" },
+  { key: "expired", label: "Expired", color: "#ef4444" },
 ];
+
+const DAILY_VEHICLE_TICKET_TYPE_LEGEND = VEHICLE_TICKET_TYPE_LEGEND.filter(
+  (item) => item.key !== "expired"
+);
 const PERIOD_FILTER_OPTIONS = [
   { value: "all", label: "All Time" },
   { value: "today", label: "Today" },
@@ -184,6 +189,42 @@ const YEAR_OPTIONS = Array.from({ length: 6 }, (_, idx) => {
 const getTodayDateString = () =>
   new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
 
+const getManilaTimeString = () =>
+  new Date().toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Manila",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+const getTimePartsFromTwentyFourHourValue = (value) => {
+  const [hourRaw = "", minuteRaw = ""] = String(value || "").split(":");
+  let hour24 = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (!Number.isFinite(hour24) || !Number.isFinite(minute)) {
+    return { hour: "", minute: "", meridiem: "" };
+  }
+
+  const meridiem = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 || 12;
+  return {
+    hour: String(hour12).padStart(2, "0"),
+    minute: String(minute).padStart(2, "0"),
+    meridiem,
+  };
+};
+
+const buildTwentyFourHourTime = (hour, minute, meridiem) => {
+  if (!hour || !minute || !meridiem) return "";
+  let normalizedHour = Number(hour);
+  if (meridiem === "AM") {
+    if (normalizedHour === 12) normalizedHour = 0;
+  } else if (normalizedHour !== 12) {
+    normalizedHour += 12;
+  }
+  return `${String(normalizedHour).padStart(2, "0")}:${minute}:00`;
+};
+
 const normalizeDateString = (value) => {
   if (!value) return "";
   const raw = String(value).trim();
@@ -195,6 +236,37 @@ const normalizeDateString = (value) => {
   }
 
   return raw.slice(0, 10);
+};
+
+const getTimeParts = (value) => {
+  const raw = String(value || "").trim();
+  const match = raw.match(/[T\s](\d{2}):(\d{2})/);
+  if (!match) return { hour: "", minute: "", meridiem: "" };
+  return getTimePartsFromTwentyFourHourValue(`${match[1]}:${match[2]}`);
+};
+
+const getTimeValueFromParts = (hour, minute, meridiem) => {
+  const built = buildTwentyFourHourTime(hour, minute, meridiem);
+  return built ? built.slice(0, 5) : "";
+};
+
+const applyTimeValueToTicketForm = (current, timeValue) => {
+  if (!timeValue) {
+    return {
+      ...current,
+      ticket_time_hour: "",
+      ticket_time_minute: "",
+      ticket_time_meridiem: "",
+    };
+  }
+
+  const timeParts = getTimePartsFromTwentyFourHourValue(timeValue);
+  return {
+    ...current,
+    ticket_time_hour: timeParts.hour,
+    ticket_time_minute: timeParts.minute,
+    ticket_time_meridiem: timeParts.meridiem,
+  };
 };
 
 const isFutureTicketDate = (dateString) => {
@@ -241,6 +313,7 @@ const filterTicketsByPeriod = (records, period) => {
 
 const getInitialTicketForm = (ticketType = "daily") => {
   const sourceDate = getTodayDateString();
+  const sourceTimeParts = getTimePartsFromTwentyFourHourValue(getManilaTimeString());
 
   return {
     vehicle_type_id: "",
@@ -255,6 +328,9 @@ const getInitialTicketForm = (ticketType = "daily") => {
     ticket_date_month: sourceDate.slice(5, 7),
     ticket_date_day: sourceDate.slice(8, 10),
     ticket_date_year: sourceDate.slice(0, 4),
+    ticket_time_hour: sourceTimeParts.hour,
+    ticket_time_minute: sourceTimeParts.minute,
+    ticket_time_meridiem: sourceTimeParts.meridiem,
     end_date: "",
     end_date_month: "",
     end_date_day: "",
@@ -278,6 +354,7 @@ const buildTicketFormFromRecord = (ticket, ticketType = "daily") => {
   const endDate = normalizeDateString(ticket?.end_date);
   const ticketDateParts = getDateParts(ticketDate);
   const endDateParts = getDateParts(endDate);
+  const ticketTimeParts = getTimeParts(ticket?.ticket_date);
 
   return {
     vehicle_type_id: String(ticket?.vehicle_type_id ?? ""),
@@ -292,6 +369,9 @@ const buildTicketFormFromRecord = (ticket, ticketType = "daily") => {
     ticket_date_month: ticketDateParts.month,
     ticket_date_day: ticketDateParts.day,
     ticket_date_year: ticketDateParts.year,
+    ticket_time_hour: ticketTimeParts.hour,
+    ticket_time_minute: ticketTimeParts.minute,
+    ticket_time_meridiem: ticketTimeParts.meridiem,
     end_date: endDate,
     end_date_month: endDateParts.month,
     end_date_day: endDateParts.day,
@@ -1002,6 +1082,7 @@ const AddVehicleTicketDrawer = ({
     effectiveTicketType === "annual" ? getInitialFeeItems() : buildDailyFeeItems(fees, "", "1")
   );
   const [errors, setErrors] = useState({});
+  const hasManualTimeRef = useRef(false);
   const isAnnualTicket = effectiveTicketType === "annual";
   const isEditing = Boolean(editingTicket);
   const isEditingAnnualTicket = isAnnualTicket && isEditing;
@@ -1053,11 +1134,13 @@ const AddVehicleTicketDrawer = ({
 
   useEffect(() => {
     if (!open) {
+      hasManualTimeRef.current = false;
       setForm(getInitialTicketForm("daily"));
       setFeeItems(buildDailyFeeItems(fees, "", "0"));
       setErrors({});
       return;
     }
+    hasManualTimeRef.current = false;
     if (editingTicket) {
       setForm(syncAnnualEndDate(buildTicketFormFromRecord(editingTicket, effectiveTicketType), isAnnualTicket));
       setFeeItems(buildFeeItemsFromRecord(editingTicket, fees, effectiveTicketType));
@@ -1067,6 +1150,35 @@ const AddVehicleTicketDrawer = ({
     }
     setErrors({});
   }, [draftTicketType, editingTicket, effectiveTicketType, fees, isAnnualTicket, open]);
+
+  useEffect(() => {
+    if (!open || editingTicket || isAnnualTicket) return undefined;
+
+    const syncCurrentTime = () => {
+      if (hasManualTimeRef.current) return;
+      const currentTime = getTimePartsFromTwentyFourHourValue(getManilaTimeString());
+      setForm((current) => {
+        if (
+          current.ticket_time_hour === currentTime.hour &&
+          current.ticket_time_minute === currentTime.minute &&
+          current.ticket_time_meridiem === currentTime.meridiem
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          ticket_time_hour: currentTime.hour,
+          ticket_time_minute: currentTime.minute,
+          ticket_time_meridiem: currentTime.meridiem,
+        };
+      });
+    };
+
+    syncCurrentTime();
+    const intervalId = window.setInterval(syncCurrentTime, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [editingTicket, isAnnualTicket, open]);
 
   useEffect(() => {
     if (!open || isAnnualTicket) return;
@@ -1274,6 +1386,9 @@ const AddVehicleTicketDrawer = ({
   const handleSave = async () => {
     const nextErrors = {};
     const builtTicketDate = buildDateFromParts(form.ticket_date_year, form.ticket_date_month, form.ticket_date_day);
+    const builtTicketTime = buildTwentyFourHourTime(form.ticket_time_hour, form.ticket_time_minute, form.ticket_time_meridiem);
+    const builtTicketDateTime = builtTicketDate && builtTicketTime ? `${builtTicketDate} ${builtTicketTime}` : "";
+    const ticketDatePayload = isAnnualTicket ? builtTicketDate : builtTicketDateTime;
     const builtEndDate = buildDateFromParts(form.end_date_year, form.end_date_month, form.end_date_day);
     const visibleFeeItems = isAnnualTicket ? feeItems.slice(0, 1) : feeItems;
     const hasFeeSelection = visibleFeeItems.some((item) => item.fee_id);
@@ -1293,6 +1408,7 @@ const AddVehicleTicketDrawer = ({
     if (!hasFeeSelection) nextErrors.fee_id = "Fee is required.";
     if (!builtTicketDate) nextErrors.ticket_date = "Ticket date is required.";
     if (builtTicketDate && isFutureTicketDate(builtTicketDate)) nextErrors.ticket_date = "Ticket date cannot be in the future.";
+    if (!isAnnualTicket && !builtTicketTime) nextErrors.ticket_time = "Ticket time is required.";
     if (isAnnualTicket && !builtEndDate) nextErrors.end_date = "End date is required.";
     if (builtEndDate && builtEndDate < builtTicketDate) nextErrors.end_date = "End date must be after or equal to ticket date.";
     visibleFeeItems.forEach((item, index) => {
@@ -1334,7 +1450,8 @@ const AddVehicleTicketDrawer = ({
     setErrors({});
 
     if (isEditing && editingTicket) {
-      const currentTicketDate = String(editingTicket.ticket_date || "").slice(0, 10);
+      const currentTicketDateTime = String(editingTicket.ticket_date || "").replace("T", " ").slice(0, 19);
+      const currentTicketDateValue = isAnnualTicket ? currentTicketDateTime.slice(0, 10) : currentTicketDateTime;
       const currentEndDate = String(editingTicket.end_date || "").slice(0, 10);
       const nextControlNumber = isAnnualTicket ? form.control_number.trim() : "";
       const nextOfficialReceiptNo = isAnnualTicket ? form.official_receipt_no.trim() : "";
@@ -1354,7 +1471,7 @@ const AddVehicleTicketDrawer = ({
         String(editingTicket.ticket_type || "") === String(form.ticket_type || "") &&
         currentPrimaryFeeId === nextPrimaryFeeId &&
         currentTicketFee === nextTicketFee &&
-        currentTicketDate === builtTicketDate &&
+        currentTicketDateValue === ticketDatePayload &&
         currentEndDate === (builtEndDate || "");
 
       if (noChanges) {
@@ -1391,7 +1508,7 @@ const AddVehicleTicketDrawer = ({
         daily_fee: ticketFeeParts.dailyFee,
         banyera_fee: ticketFeeParts.banyeraFee,
         ticket_fee: parseMoneyValue(form.ticket_fee),
-        ticket_date: builtTicketDate,
+        ticket_date: ticketDatePayload,
         end_date: builtEndDate || null,
       });
     } catch (error) {
@@ -1406,6 +1523,7 @@ const AddVehicleTicketDrawer = ({
           ticket_type: backendErrors.ticket_type?.[0],
           fee_id: backendErrors.fee_id?.[0],
           ticket_date: backendErrors.ticket_date?.[0],
+          ticket_time: backendErrors.ticket_time?.[0],
           end_date: backendErrors.end_date?.[0],
         });
       }
@@ -1733,8 +1851,25 @@ const AddVehicleTicketDrawer = ({
           />
         </DrawerField>
 
+        {!isAnnualTicket ? (
+          <DrawerField label="Ticket Time" required error={errors.ticket_time}>
+            <TimePicker
+              value={getTimeValueFromParts(form.ticket_time_hour, form.ticket_time_minute, form.ticket_time_meridiem)}
+              onChange={(_, currentTimeString) => {
+                hasManualTimeRef.current = true;
+                setForm((current) => applyTimeValueToTicketForm(current, currentTimeString));
+                setErrors((current) => ({ ...current, ticket_time: "" }));
+              }}
+              placeholder="Select ticket time"
+              containerClassName="w-full"
+              className={errors.ticket_time ? "!border-red-300" : "!border-slate-200"}
+              popupClassName="banyera-ant-time-picker-dropdown"
+            />
+          </DrawerField>
+        ) : null}
+
         {isAnnualTicket ? (
-          <DrawerField label="End Date" error={errors.end_date}>
+          <DrawerField label="End Date" required error={errors.end_date}>
             <EndDatePicker
               value={form.end_date_year || form.end_date_month || form.end_date_day ? buildDateFromParts(form.end_date_year, form.end_date_month, form.end_date_day) : undefined}
               onChange={(_, currentDateString) => {
@@ -1744,6 +1879,7 @@ const AddVehicleTicketDrawer = ({
               placeholder="Select end date"
               containerClassName="w-full"
               inputClassName={errors.end_date ? "border-red-300" : "border-slate-200"}
+              options={{ allowClear: false }}
             />
           </DrawerField>
         ) : null}
@@ -1854,7 +1990,8 @@ const VehicleTicketDetailDrawer = ({ ticket, fees, open, onClose }) => {
     ticket.ticketType === "Daily"
       ? [
           { label: "Ticket Date", value: ticket.ticketDate || "-" },
-          { label: "Ticket Fee", value: `₱${formatMoneyValue(ticket.ticketFee)}` },
+          { label: "Ticket Time", value: formatDisplayTime(ticket.ticketDateTime) || "-" },
+          { label: "Ticket Fee", value: `₱${formatMoneyValue(ticket.ticketFee)}`, className: "col-span-2" },
           { label: "Inspector", value: ticket.encodedBy || "-", className: "col-span-2" },
         ]
       : [
@@ -2697,7 +2834,7 @@ const SuperVehicleTickets = () => {
   const vehicleTypesNotInUse = vehicleTypesSummary.unused ?? Math.max(0, vehicleTypesTotal - vehicleTypesInUse);
   const totalTypeLinks = vehicleTypes.reduce((sum, type) => sum + type.ticketsUsing, 0);
   const isAnnualTicketsTab = activeTab === "annual";
-  const ticketTableBaseColumnCount = activeTab === "daily" ? 6 : 7;
+  const ticketTableBaseColumnCount = 7;
   const ticketTableColumnCount = ticketTableBaseColumnCount + (isHeadViewOnly ? 0 : 1);
   const drawerTicketType = editingTicket
     ? String(editingTicket.ticket_type || "").toLowerCase() === "annual"
@@ -2966,7 +3103,7 @@ const SuperVehicleTickets = () => {
                 rightContent={
                   activeTab !== "types" ? (
                     <Legend
-                  items={VEHICLE_TICKET_TYPE_LEGEND}
+                  items={activeTab === "annual" ? VEHICLE_TICKET_TYPE_LEGEND : DAILY_VEHICLE_TICKET_TYPE_LEGEND}
                   className="gap-3"
                   itemClassName="gap-2"
                   loading={isOverviewLoading}
@@ -3074,7 +3211,8 @@ const SuperVehicleTickets = () => {
                               <TH>Driver Name</TH>
                             </>
                           ) : null}
-                          <TH>{isAnnualTicketsTab ? "Ticket Date" : "Date"}</TH>
+                          <TH>Ticket Date</TH>
+                          {activeTab === "daily" ? <TH>Ticket Time</TH> : null}
                           <TH><div className="text-right">{isAnnualTicketsTab ? "Ticket Fee(₱)" : "Daily Fee(₱)"}</div></TH>
                           {activeTab === "daily" ? <TH><div className="text-right">Banyera Fee(₱)</div></TH> : null}
                           {activeTab === "daily" ? <TH><div className="text-right">Ticket Fee(₱)</div></TH> : null}
@@ -3149,6 +3287,11 @@ const SuperVehicleTickets = () => {
                                 <>
                                   <td className="px-4 py-3">
                                     <span className="text-[13px] font-normal" style={{ color: "#1a1f36" }}>{ticket.ticketDate}</span>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className="text-[13px] font-normal" style={{ color: "#1a1f36" }}>
+                                      {formatDisplayTime(ticket.ticketDateTime) || "-"}
+                                    </span>
                                   </td>
                                   <td
                                     className="px-4 py-3 text-right text-[13px] font-semibold text-[#1a1f36]"

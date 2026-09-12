@@ -579,7 +579,7 @@ export default function LoginScreen() {
                     <TextInput
                       ref={passwordRef}
                       editable={!isSubmitting}
-                      placeholder="........"
+                      placeholder="•••••••••••"
                       placeholderTextColor="#A8AFB8"
                       secureTextEntry={!showPassword}
                       className="flex-1 text-base text-[#1A1F36]"

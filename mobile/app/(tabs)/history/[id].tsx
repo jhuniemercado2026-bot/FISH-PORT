@@ -18,6 +18,7 @@ import {
   getOfflineTransactionDrafts,
   OfflineTransactionDraft,
 } from "../../../utils/offlineTransactionQueue";
+import { printThermalReceiptWithSignature } from "../../../utils/thermalReceiptPrinter";
 
 type TransactionType = "docking" | "banyera" | "tickets" | "remittance";
 type VoidableTransactionType = Exclude<TransactionType, "remittance">;
@@ -299,12 +300,6 @@ const isRecordBilled = (record: TransactionRecord | null | undefined) =>
 
 function buildBanyeraReceiptTextFromDetail(record: TransactionRecord) {
   const boatName = record.boat?.boat_name || record.boat_name || "-";
-  const boatType =
-    record.boat?.boat_type?.type_name ||
-    record.boat?.boatType?.type_name ||
-    record.boat?.boat_type_name ||
-    record.boat_type_name ||
-    "-";
   const ownerName =
     record.boat?.owner?.full_name ||
     record.boat?.owner_name ||
@@ -316,10 +311,9 @@ function buildBanyeraReceiptTextFromDetail(record: TransactionRecord) {
     centerPrinterText("OPOL FISH PORT"),
     centerPrinterText("BANYERA TRANSACTION"),
     "-".repeat(32),
-    `Date: ${formatPhilippineDate(transactionDate)} - ${formatPhilippineTime(transactionDate)}`,
+    `Date: ${formatPhilippineDate(transactionDate)}`,
+    `Time: ${formatPhilippineTime(transactionDate)}`,
     ...splitPrinterText(`Boat: ${boatName}`),
-    ...splitPrinterText(`Type: ${boatType}`),
-    ...splitPrinterText(`Owner: ${ownerName}`),
     "-".repeat(32),
   ];
 
@@ -352,14 +346,20 @@ function buildBanyeraReceiptTextFromDetail(record: TransactionRecord) {
   receiptLines.push(
     "-".repeat(32),
     padPrinterColumns("TOTAL", formatPrinterPeso(parseMoneyValue(record.total_fee))),
-    "",
-    "Signature: ________________",
-    "",
-    "",
     ""
   );
 
   return receiptLines.join("\n");
+}
+
+function getBanyeraSignatureDataUrl(record: TransactionRecord) {
+  return (
+    record.owner_signature_data_url ||
+    record.ownerSignatureDataUrl ||
+    record.boat?.owner?.owner_signature_data_url ||
+    record.boat?.ownerSignatureDataUrl ||
+    ""
+  );
 }
 
 const createDraftDetail = (draft: OfflineTransactionDraft): TransactionRecord => {
@@ -906,7 +906,10 @@ export default function HistoryDetailScreen() {
     setIsPrintingBanyera(true);
 
     try {
-      await printThermalText(buildBanyeraReceiptTextFromDetail(detail));
+      await printThermalReceiptWithSignature(
+        buildBanyeraReceiptTextFromDetail(detail),
+        getBanyeraSignatureDataUrl(detail)
+      );
 
       const response = await fetch(
         `${getApiBaseUrl()}${endpointForType("banyera")}/${transactionId}/print`,
@@ -1035,27 +1038,13 @@ export default function HistoryDetailScreen() {
       ? [
           {
             label: "Date",
-            value: `${formatPhilippineDate(banyeraDetailPreviewDate)} - ${formatPhilippineTime(banyeraDetailPreviewDate)}`,
+            value: formatPhilippineDate(banyeraDetailPreviewDate),
+          },
+          {
+            label: "Time",
+            value: formatPhilippineTime(banyeraDetailPreviewDate),
           },
           { label: "Boat", value: detail.boat?.boat_name || detail.boat_name || "-" },
-          {
-            label: "Type",
-            value:
-              detail.boat?.boat_type?.type_name ||
-              detail.boat?.boatType?.type_name ||
-              detail.boat?.boat_type_name ||
-              detail.boat_type_name ||
-              "-",
-          },
-          {
-            label: "Owner",
-            value:
-              detail.boat?.owner?.full_name ||
-              detail.boat?.owner_name ||
-              detail.boat?.boat_owner ||
-              detail.owner_name ||
-              "Unknown Owner",
-          },
         ]
       : [];
   const banyeraDetailPreviewLines: PrintPreviewLine[] =
@@ -1677,7 +1666,7 @@ export default function HistoryDetailScreen() {
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                     <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      {detail.plate_number || "N/A"}
+                      {detail.plate_number || ""}
                     </Text>
                   </View>
                 </View>
@@ -1721,6 +1710,17 @@ export default function HistoryDetailScreen() {
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                     <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
                       {formatPhilippineDate(detail.transaction_date || detail.ticket_date || detail.created_at || detail.docking_date)}
+                    </Text>
+                  </View>
+                </View>
+
+                <View className="mb-4">
+                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Ticket Time
+                  </Text>
+                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      {formatPhilippineTime(detail.ticket_date || detail.transaction_date || detail.created_at || detail.docking_date)}
                     </Text>
                   </View>
                 </View>
@@ -1943,15 +1943,11 @@ export default function HistoryDetailScreen() {
       <StatusBar barStyle="light-content" backgroundColor="#1A1F36" />
 
       <SafeAreaView
-        className="absolute left-0 right-0 top-0 z-50 bg-transparent"
+        className="overflow-hidden rounded-b-[20px] bg-[#1A1F36]"
         edges={["top"]}
       >
         <View
-          className="h-[66px] flex-row items-center justify-between overflow-hidden rounded-b-[20px] bg-[#1A1F36] px-5"
-          style={{
-            boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.18)",
-            elevation: 18,
-          }}
+          className="h-[66px] flex-row items-center justify-between overflow-hidden bg-[#1A1F36] px-5"
         >
           <Pressable onPress={() => router.back()} hitSlop={10}>
             <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
@@ -1978,7 +1974,7 @@ export default function HistoryDetailScreen() {
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ flexGrow: 1, paddingBottom: 28, paddingTop: 105 }}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: 28, paddingTop: 20 }}
         showsVerticalScrollIndicator={false}
       >
         {renderContent()}

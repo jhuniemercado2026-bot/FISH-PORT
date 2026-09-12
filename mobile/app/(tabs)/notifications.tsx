@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect } from "expo-router/react-navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Modal as NativeModal,
   Pressable,
@@ -220,6 +220,7 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasLoadedNotifications, setHasLoadedNotifications] = useState(false);
+  const hasLoadedNotificationsRef = useRef(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [statusFilter, setStatusFilter] = useState<NotificationStatusFilter>("all");
   const [selectedNotification, setSelectedNotification] =
@@ -236,16 +237,18 @@ export default function NotificationsScreen() {
       }
 
       if (options.showLoading) {
-        setIsLoading(!hasCachedNotifications);
-        if (!hasCachedNotifications) {
+        const shouldShowInitialSkeleton =
+          !hasLoadedNotificationsRef.current && !hasCachedNotifications;
+        setIsLoading(shouldShowInitialSkeleton);
+        if (shouldShowInitialSkeleton) {
           await wait(800);
         }
-        setIsLoading(false);
       }
 
       const networkState = await NetInfo.fetch().catch(() => null);
       if (isOfflineNetworkState(networkState)) {
         setNotifications(cachedNotifications);
+        hasLoadedNotificationsRef.current = true;
         setHasLoadedNotifications(true);
         setIsLoading(false);
         return;
@@ -253,6 +256,7 @@ export default function NotificationsScreen() {
 
       if (!authToken) {
         setNotifications(cachedNotifications);
+        hasLoadedNotificationsRef.current = true;
         setHasLoadedNotifications(true);
         setIsLoading(false);
         return;
@@ -277,6 +281,7 @@ export default function NotificationsScreen() {
           showToast("error", "Unable to load notifications.");
         }
       } finally {
+        hasLoadedNotificationsRef.current = true;
         setHasLoadedNotifications(true);
         setIsLoading(false);
       }
@@ -363,15 +368,11 @@ export default function NotificationsScreen() {
       <StatusBar barStyle="light-content" backgroundColor="#1A1F36" />
 
       <SafeAreaView
-        className="absolute left-0 right-0 top-0 z-50 bg-transparent"
+        className="overflow-hidden rounded-b-[20px] bg-[#1A1F36]"
         edges={["top"]}
       >
         <View
-          className="h-[66px] flex-row items-center justify-between overflow-hidden rounded-b-[20px] bg-[#1A1F36] px-5"
-          style={{
-            boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.18)",
-            elevation: 18,
-          }}
+          className="h-[66px] flex-row items-center justify-between overflow-hidden bg-[#1A1F36] px-5"
         >
           <Text
             className="text-[18px] text-white"
@@ -394,7 +395,7 @@ export default function NotificationsScreen() {
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: 28, paddingTop: 105 }}
+        contentContainerStyle={{ paddingBottom: 28, paddingTop: 20 }}
         showsVerticalScrollIndicator={false}
       >
         <View className="px-5">

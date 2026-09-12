@@ -253,11 +253,11 @@ export function VoidTransactionModal({
 
   const dateValue =
     transactionType === "tickets"
-      ? transaction?.transaction_date || transaction?.ticket_date || transaction?.created_at || transaction?.docking_date || null
+      ? transaction?.ticket_date || transaction?.transaction_date || transaction?.created_at || transaction?.docking_date || null
       : transaction?.transaction_date || transaction?.docking_date || null;
   const dateText = dateValue ? formatDateOnly(dateValue) : "N/A";
   const timeText = formatTimeOnly(dateValue);
-  const displayDateText = transactionType === "tickets" || !timeText ? dateText : `${dateText} at ${timeText}`;
+  const displayDateText = timeText ? `${dateText} at ${timeText}` : dateText;
 
   const feeValue =
     transactionType === "banyera"
@@ -307,7 +307,7 @@ export function VoidTransactionModal({
                 ? "Banyera Date & Time"
                 : transactionType === "docking"
                 ? "Docking Date & Time"
-                : "Ticket Date"}
+                : "Ticket Date & Time"}
             </Text>
             <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
               {displayDateText}

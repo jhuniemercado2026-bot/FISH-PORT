@@ -1,15 +1,19 @@
 export function getStoredToken() {
-  return localStorage.getItem("token");
+  localStorage.removeItem("token");
+  return sessionStorage.getItem("token");
 }
 
 export function clearStoredAuth() {
+  sessionStorage.removeItem("token");
+  sessionStorage.removeItem("user");
   localStorage.removeItem("token");
   localStorage.removeItem("user");
 }
 
 export function getStoredUser() {
   try {
-    return JSON.parse(localStorage.getItem("user") || "null");
+    localStorage.removeItem("user");
+    return JSON.parse(sessionStorage.getItem("user") || "null");
   } catch {
     return null;
   }

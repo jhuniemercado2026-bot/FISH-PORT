@@ -283,7 +283,10 @@ const UserProfileTab = ({ showToast }) => {
   const recoveryFileInputRef = useRef(null);
 
   useEffect(() => {
-    if (profile) localStorage.setItem("user", JSON.stringify(profile));
+    if (profile) {
+      localStorage.removeItem("user");
+      sessionStorage.setItem("user", JSON.stringify(profile));
+    }
   }, [profile]);
 
   useEffect(() => {
@@ -315,7 +318,8 @@ const UserProfileTab = ({ showToast }) => {
 
   const syncProfileCache = useCallback((nextProfile) => {
     queryClient.setQueryData(SETTINGS_QUERY_KEY, { user: nextProfile });
-    localStorage.setItem("user", JSON.stringify(nextProfile));
+    localStorage.removeItem("user");
+    sessionStorage.setItem("user", JSON.stringify(nextProfile));
   }, [queryClient]);
 
   const initials = profile
@@ -476,7 +480,7 @@ const UserProfileTab = ({ showToast }) => {
     if (Object.values(nextErrors).some(Boolean)) return;
     setSaving(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       const res = await api.put(`/users/${profile.user_id}`, {
         send_password_change_code: true,
         current_password: tmpPw.current,
@@ -589,7 +593,7 @@ const UserProfileTab = ({ showToast }) => {
 
     setSaving(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       await api.put(`/users/${profile.user_id}`, {
         verify_password_change_code: true,
         current_password: tmpPw.current,
@@ -636,7 +640,7 @@ const UserProfileTab = ({ showToast }) => {
     setResendingPwCode(true);
 
     try {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       const res = await api.put(`/users/${profile.user_id}`, {
         send_password_change_code: true,
         resend_password_change_code: true,

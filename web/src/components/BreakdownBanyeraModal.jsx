@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import Modal from "./Modal";
+import { formatMoneyValue, parseMoneyValue } from "../utils/money";
 
 const FONT = "'Montserrat', sans-serif";
 
@@ -35,7 +36,7 @@ const BreakdownBanyeraModal = ({ open, transaction, onClose }) => {
         key: item?.item_id ?? index,
         classification: getClassificationName(item),
         quantity: Number(item?.quantity || 0),
-        subtotal: Number(item?.subtotal || 0),
+        subtotal: parseMoneyValue(item?.subtotal),
       };
     });
   }, [transaction]);
@@ -43,7 +44,7 @@ const BreakdownBanyeraModal = ({ open, transaction, onClose }) => {
   if (!open || !transaction) return null;
 
   const reference = `BNY-${String(transaction.banyera_id ?? "").padStart(4, "0")}`;
-  const totalAmount = Number(transaction.total_fee || 0);
+  const totalAmount = parseMoneyValue(transaction.total_fee);
 
   return (
     <Modal
@@ -124,10 +125,7 @@ const BreakdownBanyeraModal = ({ open, transaction, onClose }) => {
                     {Number(row.quantity || 0).toLocaleString("en-PH")}
                   </BreakdownField>
                   <BreakdownField align="right">
-                    {Number(row.subtotal || 0).toLocaleString("en-PH", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatMoneyValue(row.subtotal)}
                   </BreakdownField>
                 </div>
               ))}

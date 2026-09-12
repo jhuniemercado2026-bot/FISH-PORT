@@ -29,6 +29,7 @@ import {
   IoMailOutline ,
 } from "react-icons/io5";
 import { logoutUser } from "../pages/login/logout";
+import { getStoredUser, normalizeRole } from "../pages/login/auth";
 import Spinner from "../components/Spinner";
 
 
@@ -172,9 +173,9 @@ const Sidebar = ({
     typeof window !== "undefined" ? window.innerWidth < MOBILE_BREAKPOINT : false
   ));
   const navRef = useRef(null);
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const isCoordinator = normalizedRole === "coordinator";
+  const user = getStoredUser() || {};
+  const normalizedRole = normalizeRole(user?.role || user?.role_label);
+  const isHead = normalizedRole === "head";
 
   useEffect(() => {
     if (!collapsed) setHovered(false);
@@ -333,7 +334,7 @@ const Sidebar = ({
         { type: "item", icon: IoReceiptOutline, label: "Billing", path: "/billing" },
         { type: "item", icon: IoCashOutline, label: "Collections", path: "/collections" },
         { type: "item", icon: IoDocumentTextOutline, label: "Statement of Account", path: "/owner-statement" },
-        { type: "item", icon: IoPricetagOutline, label: "Set Fees", path: "/set-fees" },
+        { type: "item", icon: IoPricetagOutline, label: "Set Fees", path: "/set-fees", headOnly: true },
       ],
     },
     {
@@ -350,15 +351,14 @@ const Sidebar = ({
         },
         { type: "item", icon: IoArchiveOutline,       label: "Archives",     path: "/archives" },
         { type: "item", icon: IoNotificationsOutline, label: "Notification", path: "/notification"             },
-        { type: "item", icon: IoTimeOutline,          label: "Activity Logs", path: "/activity-logs" },
+        { type: "item", icon: IoTimeOutline,          label: "Activity Logs", path: "/activity-logs", headOnly: true },
       ],
     },
   ].map((section) => ({
     ...section,
     items: section.items.filter((item) => {
-      if (!isCoordinator) return true;
-
-      return !["Set Fees", "Activity Logs"].includes(item.label);
+      if (item.headOnly) return isHead;
+      return true;
     }),
   })).filter((section) => section.items.length > 0);
 

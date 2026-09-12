@@ -525,8 +525,10 @@ const Login = () => {
       const data = await loginMutation.mutateAsync({ email: trimmedEmail, password });
 
       const normalizedUser = normalizeProfileImageUrl(data.user);
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(normalizedUser));
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      sessionStorage.setItem("token", data.token);
+      sessionStorage.setItem("user", JSON.stringify(normalizedUser));
       notifyRealtimeAuthChanged();
 
       navigate("/dashboard", { replace: true });
@@ -719,7 +721,7 @@ const Login = () => {
                         setPassword(e.target.value);
                         clearFieldError("password");
                       }}
-                      placeholder="......."
+                      placeholder="•••••••••••"
                       disabled={isLoading}
                       style={{ fontFamily: "'Montserrat', sans-serif" }}
                       className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-12 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] ${
@@ -796,18 +798,18 @@ const Login = () => {
                   <div className="h-px w-full bg-slate-200" />
                 </div>
 
-                <p className="!mt-8 flex flex-col items-center justify-center gap-1 text-center text-sm text-slate-500 sm:flex-row sm:gap-2">
-                  <span className="inline-flex items-center justify-center gap-2">
+                <div className="login-help-contact !mt-8 flex w-full flex-col items-center justify-center gap-1 text-center text-sm text-slate-500">
+                  <span className="login-help-contact-text flex w-full items-center justify-center gap-2">
                     <IoHeadsetOutline className="text-base text-slate-400" />
                     Need Help? Contact the
                   </span>
                   <button
                     type="button"
-                    className="font-medium text-[#2563eb] hover:underline"
+                    className="login-help-contact-admin block w-full text-center font-medium text-[#2563eb] hover:underline"
                   >
                     System Administrator
                   </button>
-                </p>
+                </div>
                 </form>
               </div>
             </div>

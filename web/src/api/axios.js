@@ -13,7 +13,8 @@ const api = axios.create({
 
 // Automatically attach token to every request
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  localStorage.removeItem("token");
+  const token = sessionStorage.getItem("token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
 
   const method = String(config.method || "get").toLowerCase();

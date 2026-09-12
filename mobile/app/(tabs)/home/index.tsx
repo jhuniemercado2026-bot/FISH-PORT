@@ -985,7 +985,7 @@ export default function HomeScreen() {
   const ticketCards = ticketRecords.map((record) => {
     const title = record?.plate_number || record?.vehicle_type?.type_name || record?.vehicleType?.type_name || "Ticket";
     const transactionDate = record?.transaction_date || record?.ticket_date || record?.created_at || null;
-    const subtitle = formatBanyeraDate(transactionDate);
+    const subtitle = `${formatBanyeraDate(transactionDate)} • ${formatBanyeraTime(transactionDate)}`;
     const totalFee = parseMoneyValue(record?.total_fee || record?.ticket_fee);
 
     return {
@@ -1029,19 +1029,16 @@ export default function HomeScreen() {
   });
 
   return (
-    <View className="flex-1 bg-[#1A1F36]">
+    <View className="flex-1 bg-[#FFFDFB]">
       <StatusBar barStyle="light-content" backgroundColor="#1A1F36" />
 
       <SafeAreaView
-        className="absolute left-0 right-0 top-0 z-50 bg-transparent"
+        className="overflow-hidden rounded-b-[20px] bg-[#1A1F36]"
         edges={["top"]}
+        style={{ zIndex: 10, elevation: 10 }}
       >
         <View
-          className="flex-row items-center justify-between overflow-hidden rounded-b-[20px] bg-[#1A1F36] px-5 py-3"
-          style={{
-            boxShadow: "0px 6px 12px rgba(0, 0, 0, 0.18)",
-            elevation: 18,
-          }}
+          className="flex-row items-center justify-between overflow-hidden bg-[#1A1F36] px-5 py-3"
         >
           <View className="flex-1 flex-row items-center pr-4">
             <Image
@@ -1158,18 +1155,22 @@ export default function HomeScreen() {
         </View>
       </NativeModal>
 
-      <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
-        <SafeAreaView className="bg-[#1A1F36]" edges={["top"]}>
+      <ScrollView
+        className="flex-1"
+        showsVerticalScrollIndicator={false}
+        style={{ marginTop: -18 }}
+      >
+        <View className="bg-[#1A1F36]">
           <ImageBackground
             source={require("../../../assets/images/port1.png")}
             resizeMode="cover"
-            className="h-[240px] overflow-hidden"
+            className="h-[210px] overflow-hidden"
           >
             <View
               className="absolute inset-0"
               style={{ backgroundColor: "rgba(26, 31, 54, 0.72)" }}
             />
-            <View className="px-5 pt-[82px]">
+            <View className="px-5 pt-12">
               <Text
                 className="text-[13px] text-white/75"
                 style={{ fontFamily: "Montserrat_400Regular" }}
@@ -1185,14 +1186,14 @@ export default function HomeScreen() {
               </Text>
             </View>
           </ImageBackground>
-        </SafeAreaView>
+        </View>
 
-        <View className="-mt-5 flex-1 rounded-t-[20px] bg-[#FFFDFB]">
+        <View className="-mt-8 flex-1 rounded-t-[20px] bg-[#FFFDFB]">
           <View
-            style={{ paddingHorizontal: 20, paddingTop: 80, paddingBottom: 28 }}
+            style={{ paddingHorizontal: 20, paddingTop: 0, paddingBottom: 28 }}
           >
             <View
-              className="-mt-[155px] self-stretch overflow-hidden rounded-[18px] border border-[#E8E1E6] bg-white"
+              className="-mt-[69px] self-stretch overflow-hidden rounded-[18px] border border-[#E8E1E6] bg-white"
               style={{ elevation: 8, zIndex: 20 }}
             >
               <View className="flex-row items-center justify-between px-5 pt-5 pb-4">

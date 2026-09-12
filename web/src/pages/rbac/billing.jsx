@@ -53,6 +53,7 @@ import { getEcho } from "../../lib/realtime";
 import Spinner from "../../components/Spinner";
 import NoDataFound from "../../components/NoDataFound";
 import { adjustTodayCollection, invalidateTodayCollection } from "../../utils/remittanceCollectionCache";
+import { parseMoneyValue } from "../../utils/money";
 
 const FONT = "'Montserrat', sans-serif";
 const PAGE_SIZE = 10;
@@ -179,7 +180,7 @@ const getInitialBillingForm = () => ({
 });
 
 const formatMoney = (value) =>
-  `₱${Number(value || 0).toLocaleString("en-PH", {
+  `₱${parseMoneyValue(value).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -309,7 +310,7 @@ const formatLongDisplayDate = (value) => {
 };
 
 const formatAccountingMoney = (value) => {
-  const amount = Number(value || 0);
+  const amount = parseMoneyValue(value);
   const formatted = formatMoney(Math.abs(amount));
   return amount < 0 ? `(${formatted})` : formatted;
 };
@@ -888,9 +889,9 @@ const RecordPaymentModal = ({
 
     const current = groupedBoats.get(key);
     current.bill_count += 1;
-    current.amount_due += Number(record.amount_due ?? record.total_amount ?? 0);
-    current.total_paid += Number(record.total_paid ?? 0);
-    current.balance += Number(record.balance ?? record.total_amount ?? 0);
+    current.amount_due += parseMoneyValue(record.amount_due ?? record.total_amount);
+    current.total_paid += parseMoneyValue(record.total_paid);
+    current.balance += parseMoneyValue(record.balance ?? record.total_amount);
     current.bills.push(record);
     current.payment_transactions_history = [
       ...(current.payment_transactions_history || []),
@@ -934,9 +935,9 @@ const RecordPaymentModal = ({
             .map((part) => part.trim())
             .filter(Boolean),
         ))].join(", ") || "-",
-        amount_due: selectedBills.reduce((sum, record) => sum + Number(record.amount_due ?? record.total_amount ?? 0), 0),
-        total_paid: selectedBills.reduce((sum, record) => sum + Number(record.total_paid ?? 0), 0),
-        balance: selectedBills.reduce((sum, record) => sum + Number(record.balance ?? record.total_amount ?? 0), 0),
+        amount_due: selectedBills.reduce((sum, record) => sum + parseMoneyValue(record.amount_due ?? record.total_amount), 0),
+        total_paid: selectedBills.reduce((sum, record) => sum + parseMoneyValue(record.total_paid), 0),
+        balance: selectedBills.reduce((sum, record) => sum + parseMoneyValue(record.balance ?? record.total_amount), 0),
         bill_count: selectedBills.length,
         payment_transactions_history: selectedBills.flatMap((record) =>
           Array.isArray(record.payment_transactions_history)
@@ -971,7 +972,7 @@ const RecordPaymentModal = ({
   const allFilteredBillsSelected =
     filteredBoatBills.length > 0 &&
     filteredBoatBills.every((record) => form.bill_ids.includes(String(record.bill_id)));
-  const totalAmountToPay = Number(form.amount_paid || 0);
+  const totalAmountToPay = parseMoneyValue(form.amount_paid);
 
   return (
     <Modal
@@ -1462,7 +1463,7 @@ const PaymentDetailsDrawer = ({ payment, open, onClose }) => {
                   <p className="m-0 text-[13px] font-semibold text-[#1a1f36]">{row.reference}</p>
                   <p className="m-0 text-[13px] font-medium text-[#1a1f36]">{formatShortDisplayDate(row.date)}</p>
                   <p className="m-0 text-left text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>
-                    {Number(row.amount || 0).toLocaleString("en-PH", {
+                    {parseMoneyValue(row.amount).toLocaleString("en-PH", {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
@@ -1494,7 +1495,7 @@ const buildBillPayload = (form) => ({
     .map((item) => {
       const payload = {
         transaction_type: item.transaction_type,
-        amount: Number(item.amount || 0),
+        amount: parseMoneyValue(item.amount),
       };
 
       if (item.transaction_type === "docking")
@@ -1512,7 +1513,7 @@ const normalizeBillPayloadForComparison = (payload) =>
     items: [...(payload?.items ?? [])]
       .map((item) => ({
         transaction_type: item.transaction_type,
-        amount: Number(item.amount || 0),
+        amount: parseMoneyValue(item.amount),
         docking_id: item.docking_id ? Number(item.docking_id) : null,
         banyera_id: item.banyera_id ? Number(item.banyera_id) : null,
       }))
@@ -1597,7 +1598,7 @@ const getInitialPaymentModalForm = (bill = null) => ({
   payment_method: "cash",
   official_receipt_no: "",
   payment_date: getTodayManilaDate(),
-  amount_paid: bill ? String(Number(bill.balance ?? bill.total_amount ?? 0).toFixed(2)) : "",
+  amount_paid: bill ? String(parseMoneyValue(bill.balance ?? bill.total_amount).toFixed(2)) : "",
   remarks: "",
   date_from: "",
   date_to: "",
@@ -2011,9 +2012,9 @@ const SuperBilling = () => {
       {
         ...paymentModalBill,
         bill_reference: formatReferenceNumber(paymentModalBill.bill_reference_no),
-        amount_due: Number(paymentModalBill.total_amount || 0),
+        amount_due: parseMoneyValue(paymentModalBill.total_amount),
         total_paid: 0,
-        balance: Number(paymentModalBill.balance ?? paymentModalBill.total_amount ?? 0),
+        balance: parseMoneyValue(paymentModalBill.balance ?? paymentModalBill.total_amount),
         transaction_summary: paymentModalBill.transaction_summary || "-",
       },
       ...records,
@@ -2130,7 +2131,7 @@ const SuperBilling = () => {
     if (!bill?.bill_id) return;
     const sourceBill = {
       ...bill,
-      balance: Number(bill.balance ?? bill.total_amount ?? 0),
+      balance: parseMoneyValue(bill.balance ?? bill.total_amount),
       boat_name: bill.boat_name || boatMap[String(bill.boat_id)]?.boat_name || "",
       payer_name: bill.payer_name || boatMap[String(bill.boat_id)]?.owner?.full_name || "",
     };
@@ -2355,7 +2356,7 @@ const SuperBilling = () => {
         .map((record) => ({
           value: String(record.docking_id),
           label: `${record.boat?.boat_name ?? "Unknown boat"} - ${formatDisplayDate(record.docking_date)}`,
-          amount: Number(record.docking_fee || 0),
+          amount: parseMoneyValue(record.docking_fee),
           boatId: String(record.boat_id ?? ""),
           sortDate: String(record.docking_date || ""),
           isBilled: Boolean(record.is_billed),
@@ -2366,7 +2367,7 @@ const SuperBilling = () => {
         .map((record) => ({
           value: String(record.banyera_id),
           label: `${record.boat?.boat_name ?? "Unknown boat"} - ${formatDisplayDate(record.transaction_date)}`,
-          amount: Number(record.total_fee || 0),
+          amount: parseMoneyValue(record.total_fee),
           boatId: String(record.boat_id ?? ""),
           sortDate: String(record.transaction_date || ""),
           isBilled: Boolean(record.is_billed),
@@ -2382,7 +2383,7 @@ const SuperBilling = () => {
       .map((record) => ({
         value: String(record.docking_id),
         label: `${record.boat?.boat_name ?? "Unknown boat"} - ${formatDisplayDate(record.docking_date)}`,
-        amount: Number(record.docking_fee || 0),
+        amount: parseMoneyValue(record.docking_fee),
         boatId: String(record.boat_id ?? ""),
         sortDate: String(record.docking_date || ""),
         isBilled: Boolean(record.is_billed),
@@ -2393,7 +2394,7 @@ const SuperBilling = () => {
       .map((record) => ({
         value: String(record.banyera_id),
         label: `${record.boat?.boat_name ?? "Unknown boat"} - ${formatDisplayDate(record.transaction_date)}`,
-        amount: Number(record.total_fee || 0),
+        amount: parseMoneyValue(record.total_fee),
         boatId: String(record.boat_id ?? ""),
         sortDate: String(record.transaction_date || ""),
         isBilled: Boolean(record.is_billed),
@@ -2674,8 +2675,8 @@ const SuperBilling = () => {
     onSuccess: (response, variables) => {
       const createdPaymentCount = Array.isArray(response?.payments) ? response.payments.length : 1;
       const createdPaymentTotal = Array.isArray(response?.payments)
-        ? response.payments.reduce((sum, payment) => sum + Number(payment?.amount_paid || payment?.amount || 0), 0)
-        : Number(response?.payment?.amount_paid || response?.amount_paid || variables?.amount_paid || 0);
+        ? response.payments.reduce((sum, payment) => sum + parseMoneyValue(payment?.amount_paid ?? payment?.amount), 0)
+        : parseMoneyValue(response?.payment?.amount_paid ?? response?.amount_paid ?? variables?.amount_paid);
       bumpBillingTodayPaymentStats(queryClient, variables?.payment_date, createdPaymentCount);
       adjustTodayCollection(queryClient, variables?.payment_date, createdPaymentTotal);
       showAddedToast("Payment", "payment record");
@@ -2852,7 +2853,7 @@ const SuperBilling = () => {
         bill_id: selectedBill ? String(selectedBill.bill_id) : "",
         boat_id: selectedBill ? String(selectedBill.boat_id ?? "") : "",
         bill_ids: [],
-        amount_paid: selectedBill ? String(Number(selectedBill.balance ?? selectedBill.total_amount ?? 0).toFixed(2)) : "",
+        amount_paid: selectedBill ? String(parseMoneyValue(selectedBill.balance ?? selectedBill.total_amount).toFixed(2)) : "",
         date_from: "",
         date_to: "",
       }));
@@ -2864,7 +2865,7 @@ const SuperBilling = () => {
     const selectedBillIds = paymentModalBill?.bill_id ? [String(paymentModalBill.bill_id)] : [];
     const selectedBalance = selectedBillsForBoat
       .filter((bill) => selectedBillIds.includes(String(bill.bill_id)))
-      .reduce((sum, bill) => sum + Number(bill.balance ?? bill.total_amount ?? 0), 0);
+      .reduce((sum, bill) => sum + parseMoneyValue(bill.balance ?? bill.total_amount), 0);
 
     setPaymentModalForm((current) => ({
       ...current,
@@ -2884,7 +2885,7 @@ const SuperBilling = () => {
       bill_id: billId ?? "",
       boat_id: selectedBill ? String(selectedBill.boat_id ?? "") : "",
       bill_ids: [],
-      amount_paid: selectedBill ? String(Number(selectedBill.balance ?? selectedBill.total_amount ?? 0).toFixed(2)) : "",
+      amount_paid: selectedBill ? String(parseMoneyValue(selectedBill.balance ?? selectedBill.total_amount).toFixed(2)) : "",
     }));
     setPaymentModalFormError("");
     setPaymentModalFieldErrors((current) => ({ ...current, bill_id: undefined, amount_paid: undefined }));
@@ -2911,7 +2912,7 @@ const SuperBilling = () => {
         ? current.bill_ids.filter((id) => id !== nextBillId)
         : [...current.bill_ids, nextBillId];
       const nextSelectedBills = visibleBills.filter((bill) => nextBillIds.includes(String(bill.bill_id)));
-      const nextAmount = nextSelectedBills.reduce((sum, bill) => sum + Number(bill.balance ?? bill.total_amount ?? 0), 0);
+      const nextAmount = nextSelectedBills.reduce((sum, bill) => sum + parseMoneyValue(bill.balance ?? bill.total_amount), 0);
 
       return {
         ...current,
@@ -2927,7 +2928,7 @@ const SuperBilling = () => {
     const nextBillIds = allSelected ? [] : visibleBills.map((bill) => String(bill.bill_id));
     const nextAmount = visibleBills
       .filter((bill) => nextBillIds.includes(String(bill.bill_id)))
-      .reduce((sum, bill) => sum + Number(bill.balance ?? bill.total_amount ?? 0), 0);
+      .reduce((sum, bill) => sum + parseMoneyValue(bill.balance ?? bill.total_amount), 0);
 
     setPaymentModalForm((current) => ({
       ...current,
@@ -2967,12 +2968,12 @@ const SuperBilling = () => {
 
     const nextErrors = {};
     const officialReceiptError = validateOfficialReceiptNo(paymentModalForm.official_receipt_no);
-    const amountPaid = Number(paymentModalForm.amount_paid);
+    const amountPaid = parseMoneyValue(paymentModalForm.amount_paid);
     const selectedPaymentBill = paymentableBills.find((bill) => String(bill.bill_id) === String(paymentModalForm.bill_id));
     const selectedPaymentBills = paymentableBills.filter((bill) => paymentModalForm.bill_ids.includes(String(bill.bill_id)));
     const billBalance = paymentModalScope === "selected_bills"
-      ? selectedPaymentBills.reduce((sum, bill) => sum + Number(bill.balance ?? bill.total_amount ?? 0), 0)
-      : Number(selectedPaymentBill?.balance ?? paymentModalBill?.balance ?? paymentModalBill?.total_amount ?? 0);
+      ? selectedPaymentBills.reduce((sum, bill) => sum + parseMoneyValue(bill.balance ?? bill.total_amount), 0)
+      : parseMoneyValue(selectedPaymentBill?.balance ?? paymentModalBill?.balance ?? paymentModalBill?.total_amount);
 
     if (paymentModalScope === "single_bill") {
       if (!selectedPaymentBill) nextErrors.bill_id = ["Bill reference is required."];
@@ -3028,7 +3029,7 @@ const SuperBilling = () => {
           bill,
           referenceNumber: formatReferenceNumber(bill.bill_reference_no),
           date: formatDisplayDate(bill.billing_date || bill.created_at),
-          amount: Number(bill.total_amount || 0),
+          amount: parseMoneyValue(bill.total_amount),
           sortDate: String(bill.billing_date || bill.created_at || ""),
         }))
       .sort((a, b) =>
@@ -3081,7 +3082,7 @@ const SuperBilling = () => {
           date: getBillItemDisplayDate(item),
           type: feeLabel,
           description: `${feeLabel} Fee`,
-          amount: Number(item.amount || 0),
+          amount: parseMoneyValue(item.amount),
         };
       })
       .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
@@ -3100,7 +3101,7 @@ const SuperBilling = () => {
   const selectedBillTotalPaid = useMemo(
     () =>
       selectedBillPayments.reduce(
-        (sum, payment) => sum + Number(payment.amount_paid || 0),
+        (sum, payment) => sum + parseMoneyValue(payment.amount_paid),
         0,
       ),
     [selectedBillPayments],
@@ -3108,7 +3109,7 @@ const SuperBilling = () => {
   const selectedBillBalanceDue = useMemo(
     () =>
       Math.max(
-        Number(selectedBillRecord?.total_amount || 0) - selectedBillTotalPaid,
+        parseMoneyValue(selectedBillRecord?.total_amount) - selectedBillTotalPaid,
         0,
       ),
     [selectedBillRecord, selectedBillTotalPaid],
@@ -3117,7 +3118,7 @@ const SuperBilling = () => {
     if (!selectedBillRecord) return { value: "unpaid", label: "Unpaid" };
     if (
       selectedBillBalanceDue <= 0 &&
-      Number(selectedBillRecord.total_amount || 0) > 0
+      parseMoneyValue(selectedBillRecord.total_amount) > 0
     ) {
       return { value: "paid", label: "Paid" };
     }
@@ -3196,7 +3197,7 @@ const SuperBilling = () => {
   const previewTotal = useMemo(
     () =>
       billingForm.items.reduce(
-        (sum, item) => sum + Number(item.amount || 0),
+        (sum, item) => sum + parseMoneyValue(item.amount),
         0,
       ),
     [billingForm.items],
@@ -4248,7 +4249,7 @@ const SuperBilling = () => {
                                 <td className="px-4 py-3 text-[13px] text-slate-700">{formatDisplayDate(record.payment_date)}</td>
                                 <td className="px-4 py-3 text-right">
                                   <span className="inline-block min-w-[96px] text-right text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>
-                                    {Number(record.total_amount || 0).toLocaleString("en-PH", {
+                                    {parseMoneyValue(record.total_amount).toLocaleString("en-PH", {
                                       minimumFractionDigits: 2,
                                       maximumFractionDigits: 2,
                                     })}
@@ -4256,7 +4257,7 @@ const SuperBilling = () => {
                                 </td>
                                 <td className="px-4 py-3 text-right">
                                   <span className="inline-block min-w-[96px] text-right text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>
-                                    {Number(record.amount_paid || 0).toLocaleString("en-PH", {
+                                    {parseMoneyValue(record.amount_paid).toLocaleString("en-PH", {
                                       minimumFractionDigits: 2,
                                       maximumFractionDigits: 2,
                                     })}
@@ -4264,7 +4265,7 @@ const SuperBilling = () => {
                                 </td>
                                 <td className="px-4 py-3 text-right">
                                   <span className="inline-block min-w-[96px] text-right text-[13px] font-semibold text-[#1a1f36]" style={{ fontVariantNumeric: "tabular-nums" }}>
-                                    {Number(record.balance || 0).toLocaleString("en-PH", {
+                                    {parseMoneyValue(record.balance).toLocaleString("en-PH", {
                                       minimumFractionDigits: 2,
                                       maximumFractionDigits: 2,
                                     })}
@@ -4606,7 +4607,7 @@ const SuperBilling = () => {
                           </Tooltip>
                           <Input value={transaction.date} readOnly readOnlyPlain />
                           <Input
-                            value={Number(transaction.amount || 0).toLocaleString("en-PH", {
+                            value={parseMoneyValue(transaction.amount).toLocaleString("en-PH", {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
                             })}

@@ -14,13 +14,53 @@ use Illuminate\Validation\Rule;
 
 class VehicleTicketController extends Controller
 {
+    private function formatTicketDateTimeValue($value): ?string
+    {
+        if (!$value) {
+            return null;
+        }
+
+        $normalized = trim(str_replace('T', ' ', (string) $value));
+        $normalized = substr($normalized, 0, 19);
+        if (strlen($normalized) === 10) {
+            $normalized .= ' 00:00:00';
+        }
+
+        return Carbon::parse($normalized, 'Asia/Manila')
+            ->format('Y-m-d H:i:s');
+    }
+
+    private function normalizeTicketDateForStorage(?string $ticketType, ?string $ticketDate): ?string
+    {
+        if (!$ticketDate) {
+            return null;
+        }
+
+        if ($ticketType === 'annual') {
+            return Carbon::parse($ticketDate, 'Asia/Manila')
+                ->startOfDay()
+                ->format('Y-m-d H:i:s');
+        }
+
+        return $this->formatTicketDateTimeValue($ticketDate);
+    }
+
+    private function normalizeEndDateForStorage(?string $endDate): ?string
+    {
+        if (!$endDate) {
+            return null;
+        }
+
+        return Carbon::parse($endDate, 'Asia/Manila')->toDateString();
+    }
+
     private function hasDuplicateAnnualPlateNumber(
         ?string $plateNumber,
         ?string $ticketDate,
         ?string $endDate,
         ?int $ignoreTicketId = null
     ): bool {
-        $normalizedPlate = mb_strtolower(trim((string) $plateNumber));
+        $normalizedPlate = strtolower(trim((string) $plateNumber));
 
         if ($normalizedPlate === '' || !$ticketDate) {
             return false;
@@ -40,16 +80,18 @@ class VehicleTicketController extends Controller
             $query->where('ticket_id', '!=', $ignoreTicketId);
         }
 
-        return $query->get()->contains(function ($ticket) use ($newStart, $newEnd) {
-            $existingStart = $ticket->ticket_date ? Carbon::parse($ticket->ticket_date, 'Asia/Manila')->toDateString() : '';
-            $existingEnd = $ticket->end_date ? Carbon::parse($ticket->end_date, 'Asia/Manila')->toDateString() : ($ticket->ticket_date ? Carbon::parse($ticket->ticket_date, 'Asia/Manila')->toDateString() : '');
-
-            if ($existingStart === '') {
-                return false;
-            }
-
-            return $existingStart <= $newEnd && $existingEnd >= $newStart;
-        });
+        return $query
+            ->whereDate('ticket_date', '<=', $newEnd)
+            ->where(function ($overlapQuery) use ($newStart) {
+                $overlapQuery
+                    ->whereDate('end_date', '>=', $newStart)
+                    ->orWhere(function ($missingEndDateQuery) use ($newStart) {
+                        $missingEndDateQuery
+                            ->whereNull('end_date')
+                            ->whereDate('ticket_date', '>=', $newStart);
+                    });
+            })
+            ->exists();
     }
 
     private function ticketDateIsInFuture(?string $dateValue): bool
@@ -64,6 +106,29 @@ class VehicleTicketController extends Controller
         return $ticketDate > $today;
     }
 
+    private function endDateIsBeforeTicketDate(?string $endDateValue, ?string $ticketDateValue): bool
+    {
+        if (!$endDateValue || !$ticketDateValue) {
+            return false;
+        }
+
+        $endDate = Carbon::parse($endDateValue, 'Asia/Manila')->toDateString();
+        $ticketDate = Carbon::parse($ticketDateValue, 'Asia/Manila')->toDateString();
+
+        return $endDate < $ticketDate;
+    }
+
+    private function endDateValidationError()
+    {
+        return response()->json([
+            'message' => 'End date must be after or equal to ticket date.',
+            'errors' => [
+                'end_date' => ['End date must be after or equal to ticket date.'],
+            ],
+        ], 422);
+    }
+
+
     private function prepareTicketForResponse(VehicleTicket $ticket): VehicleTicket
     {
         $ticket->createdBy?->append('full_name');
@@ -75,6 +140,10 @@ class VehicleTicketController extends Controller
         $ticket->setAttribute('voided_by_name', $voidedByName !== '' ? $voidedByName : $ticket->voidedBy?->email);
         $ticket->setAttribute('is_voided', !is_null($ticket->voided_at));
         $ticket->setAttribute('status', $this->resolveStatus($ticket));
+        $ticket->setAttribute(
+            'ticket_date',
+            $this->formatTicketDateTimeValue($ticket->getRawOriginal('ticket_date'))
+        );
 
         return $ticket;
     }
@@ -242,7 +311,7 @@ class VehicleTicketController extends Controller
             'banyera_fee' => 'nullable|numeric|min:0',
             'ticket_fee' => 'required|numeric|min:0',
             'ticket_date' => 'required|date',
-            'end_date' => 'nullable|date|after_or_equal:ticket_date',
+            'end_date' => 'nullable|date',
         ]);
 
         if ($this->ticketDateIsInFuture($validated['ticket_date'] ?? null)) {
@@ -253,6 +322,16 @@ class VehicleTicketController extends Controller
                 ],
             ], 422);
         }
+
+        if ($this->endDateIsBeforeTicketDate($validated['end_date'] ?? null, $validated['ticket_date'] ?? null)) {
+            return $this->endDateValidationError();
+        }
+
+        $validated['ticket_date'] = $this->normalizeTicketDateForStorage(
+            $validated['ticket_type'] ?? null,
+            $validated['ticket_date'] ?? null
+        );
+        $validated['end_date'] = $this->normalizeEndDateForStorage($validated['end_date'] ?? null);
 
         if (
             ($validated['ticket_type'] ?? null) === 'annual' &&
@@ -382,7 +461,7 @@ class VehicleTicketController extends Controller
             'fee_id' => 'required|exists:fees,fee_id',
             'ticket_fee' => 'required|numeric|min:0',
             'ticket_date' => 'required|date',
-            'end_date' => 'nullable|date|after_or_equal:ticket_date',
+            'end_date' => 'nullable|date',
         ]);
 
         if (($validated['ticket_type'] ?? null) === 'daily') {
@@ -399,6 +478,16 @@ class VehicleTicketController extends Controller
                 ],
             ], 422);
         }
+
+        if ($this->endDateIsBeforeTicketDate($validated['end_date'] ?? null, $validated['ticket_date'] ?? null)) {
+            return $this->endDateValidationError();
+        }
+
+        $validated['ticket_date'] = $this->normalizeTicketDateForStorage(
+            $validated['ticket_type'] ?? null,
+            $validated['ticket_date'] ?? null
+        );
+        $validated['end_date'] = $this->normalizeEndDateForStorage($validated['end_date'] ?? null);
 
         if (
             ($validated['ticket_type'] ?? null) === 'annual' &&
@@ -441,7 +530,6 @@ class VehicleTicketController extends Controller
             'plate_number' => $validated['plate_number'] ?? '',
         ]);
         $this->loadTicketRelations($ticket);
-        $this->prepareTicketForResponse($ticket);
 
         $changeDetails = app(ActivityLogService::class)->describeChanges(
             $beforeState,
@@ -479,6 +567,8 @@ class VehicleTicketController extends Controller
                 ($changeDetails !== '' ? ' in ' . $changeDetails . '.' : '.'),
             user: Auth::user()
         );
+
+        $this->prepareTicketForResponse($ticket);
 
         broadcast(new TransactionUpdated('tickets', 'updated', $ticket->toArray()));
         broadcast(new MasterDataUpdated('annual_vehicle_tickets', 'changed', $ticket->toArray()));

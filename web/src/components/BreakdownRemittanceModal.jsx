@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import Modal from "./Modal";
+import { formatMoneyValue, parseMoneyValue } from "../utils/money";
 
 const FONT = "'Montserrat', sans-serif";
 
@@ -21,7 +22,7 @@ const BreakdownRemittanceModal = ({ open, rows = [], totalAmount = 0, onClose })
         key: `${row?.transaction || "transaction"}-${row?.type_name || "type"}-${index}`,
         transaction: row?.transaction || "-",
         typeName: row?.type_name || row?.boat_name || row?.boatName || row?.boat_type || row?.vehicle_type || "-",
-        cashReceived: Number(row?.cash_received || 0),
+        cashReceived: parseMoneyValue(row?.cash_received),
       })),
     [rows],
   );
@@ -47,7 +48,7 @@ const BreakdownRemittanceModal = ({ open, rows = [], totalAmount = 0, onClose })
             className="m-0 text-left text-[28px] font-bold leading-tight text-[#1a1f36]"
             style={{ fontFamily: FONT, fontVariantNumeric: "tabular-nums" }}
           >
-            {Number(totalAmount || 0).toLocaleString("en-PH", {
+            {parseMoneyValue(totalAmount).toLocaleString("en-PH", {
               style: "currency",
               currency: "PHP",
               minimumFractionDigits: 2,
@@ -99,10 +100,7 @@ const BreakdownRemittanceModal = ({ open, rows = [], totalAmount = 0, onClose })
                 <BreakdownField>{row.transaction}</BreakdownField>
                 <BreakdownField>{row.typeName}</BreakdownField>
                 <BreakdownField align="right">
-                  {row.cashReceived.toLocaleString("en-PH", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {formatMoneyValue(row.cashReceived)}
                 </BreakdownField>
               </div>
             ))}

@@ -1,5 +1,5 @@
 {
-  "name": "frontend-mobile",
+  "name": "opol-fish-port",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
@@ -37,7 +37,7 @@
     "expo-symbols": "~57.0.2",
     "expo-system-ui": "~57.0.3",
     "expo-web-browser": "~57.0.2",
-    "nativewind": "^4.2.3",
+    "nativewind": "^4.2.6",
     "prettier-plugin-tailwindcss": "^0.5.11",
     "react": "19.2.3",
     "react-dom": "19.2.3",

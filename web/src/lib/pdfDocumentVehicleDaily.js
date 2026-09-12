@@ -44,6 +44,21 @@ const formatDateLabel = (value) => {
   });
 };
 
+const formatTimeLabel = (value) => {
+  const raw = String(value || "").trim();
+  const match = raw.match(/[T\s](\d{2}):(\d{2})/);
+  if (!match) return "-";
+
+  const date = new Date(`2000-01-01T${match[1]}:${match[2]}:00`);
+  if (Number.isNaN(date.getTime())) return `${match[1]}:${match[2]}`;
+
+  return date.toLocaleTimeString("en-PH", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+};
+
 const formatMoneyValue = (value) =>
   Number(value || 0).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
@@ -385,10 +400,12 @@ const getVehicleDailyRows = (reportData, filterType, coverageKey) => {
     )
     .map((ticket, index) => {
       const { dailyFee, banyeraFee, ticketFee } = getDailyTicketBreakdown(ticket, fees);
+      const ticketDateValue = ticket?.ticket_date || ticket?.issued_at || ticket?.created_at || "";
 
       return {
         rowKey: String(ticket?.ticket_id ?? index),
-        date: formatDateLabel(ticket?.ticket_date || ticket?.issued_at || ticket?.created_at || ""),
+        date: formatDateLabel(ticketDateValue),
+        time: formatTimeLabel(ticketDateValue),
         vehicleType:
           ticket?.vehicle_type?.type_name ||
           ticket?.vehicleType?.type_name ||
@@ -570,50 +587,31 @@ export const buildVehicleDailyPdf = async ({
 
   composer.cursorY = boxTop - detailsContainerHeight - 18;
 
-  let columns = [
-    { key: "date", label: "Date", width: 72 },
-    { key: "vehicleType", label: "Vehicle Type", width: 154 },
-    { key: "dailyFee", label: "Daily Fee (PHP)", width: 95 },
-    { key: "banyeraFee", label: "Banyera Fee (PHP)", width: 95 },
-    { key: "ticketFee", label: "Ticket Fee (PHP)", width: 95 },
+  const columns = [
+    { key: "date", label: "Ticket Date", width: 86 },
+    { key: "time", label: "Ticket Time", width: 64 },
+    { key: "vehicleType", label: "Vehicle Type", width: 121 },
+    { key: "dailyFee", label: "Daily Fee (PHP)", width: 80 },
+    { key: "banyeraFee", label: "Banyera Fee (PHP)", width: 80 },
+    { key: "ticketFee", label: "Ticket Fee (PHP)", width: 80 },
   ];
-
-  // For Daily report type, omit the Date column and start with Vehicle Type
-  if (String(reportTypeLabel).toLowerCase() === "daily") {
-    const vehicleTypeWidth = 154 + 72; // absorb date column width
-    columns = [
-      { key: "vehicleType", label: "Vehicle Type", width: vehicleTypeWidth },
-      { key: "dailyFee", label: "Daily Fee (PHP)", width: 95 },
-      { key: "banyeraFee", label: "Banyera Fee (PHP)", width: 95 },
-      { key: "ticketFee", label: "Ticket Fee (PHP)", width: 95 },
-    ];
-  }
 
   drawTableHeader(composer, columns);
 
   const displayRows =
     rows.length > 0
       ? rows
-      : (String(reportTypeLabel).toLowerCase() === "daily"
-          ? [
-              {
-                rowKey: "empty",
-                vehicleType: "-",
-                dailyFee: 0,
-                banyeraFee: 0,
-                ticketFee: 0,
-              },
-            ]
-          : [
-              {
-                rowKey: "empty",
-                date: "-",
-                vehicleType: "-",
-                dailyFee: 0,
-                banyeraFee: 0,
-                ticketFee: 0,
-              },
-            ]);
+      : [
+          {
+            rowKey: "empty",
+            date: "-",
+            time: "-",
+            vehicleType: "-",
+            dailyFee: 0,
+            banyeraFee: 0,
+            ticketFee: 0,
+          },
+        ];
 
   const detailRowHeight = 24;
   displayRows.forEach((row) => {
