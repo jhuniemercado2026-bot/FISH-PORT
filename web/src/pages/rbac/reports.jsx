@@ -51,6 +51,7 @@ import {
 import { useFiscalYearStore, getFiscalYearOptions } from "../../store/fiscalYearStore";
 import { showBottomToast } from "../../store/bottomToastStore";
 import { cacheTab, getCachedTab } from "../../utils/tabSession";
+import { getStoredUser, normalizeRole } from "../login/auth";
 
 const FONT = "'Montserrat', sans-serif";
 const antTheme = {
@@ -86,7 +87,6 @@ const HEAD_ONLY_REPORT_KEYS = ["fees"];
 const REPORTS_TAB_STORAGE_KEY = "opol:reports:active-tab";
 const REPORTS_PREVIEW_STORAGE_KEY = "opol:reports:preview-cache";
 const REPORTS_PREVIEW_CACHE_VERSION = 2;
-const STATIC_REPORT_KEYS = new Set(["registered-boats", "owner-info", "boat-types", "fees"]);
 
 const MONTH_OPTIONS = [
   { value: "01", label: "January" },
@@ -1822,14 +1822,8 @@ const SuperReports = () => {
   const fiscalYear = useFiscalYearStore((state) => state.fiscalYear);
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } =
     useSidebar();
-  const currentUser = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem("user") || "null");
-    } catch {
-      return null;
-    }
-  }, []);
-  const normalizedRole = String(currentUser?.role || "").trim().toLowerCase();
+  const currentUser = useMemo(() => getStoredUser(), []);
+  const normalizedRole = normalizeRole(currentUser?.role || currentUser?.role_label);
   const isHead = normalizedRole === "head";
   const isCoordinator = normalizedRole === "coordinator";
   const queryClient = useQueryClient();
@@ -1872,7 +1866,6 @@ const SuperReports = () => {
     window.innerWidth >= 900 ? 256 : 0,
   );
   const [reportPdfUrl, setReportPdfUrl] = useState("");
-  const [reportPdfFileName, setReportPdfFileName] = useState("");
   const [reportPdfLoading, setReportPdfLoading] = useState(false);
   const [isGenerateActionDisabled, setIsGenerateActionDisabled] = useState(false);
   const [isExportActionDisabled, setIsExportActionDisabled] = useState(false);
@@ -1985,17 +1978,26 @@ const SuperReports = () => {
   const reportSupportsUserFilter =
     isRevenueReport ||
     isRemittanceReport ||
+    isRegisteredBoatsReport ||
+    isBoatTypesReport ||
+    isOwnerInfoReport ||
     isDockingReport ||
     isBanyeraReport ||
     isBfarReport ||
     isDailyVehicleTicketReport ||
     isVehicleTicketReport ||
     isBillingReport;
-  const showReportUserFilter = (isHead || isCoordinator) && reportSupportsUserFilter && (!isBillingReport || isHead);
-  const reportUsersQuery = useReportUsersQuery({ enabled: isHead || isCoordinator });
+  const coordinatorOnlyUserFilter =
+    isBillingReport ||
+    isRegisteredBoatsReport ||
+    isBoatTypesReport ||
+    isOwnerInfoReport;
+  const canUseReportUserFilter = isHead || (isCoordinator && !coordinatorOnlyUserFilter);
+  const showReportUserFilter = canUseReportUserFilter && reportSupportsUserFilter && (!isBillingReport || isHead);
+  const reportUsersQuery = useReportUsersQuery({ enabled: showReportUserFilter });
   const reportUserOptions = useMemo(() => {
     const users = Array.isArray(reportUsersQuery.data) ? reportUsersQuery.data : [];
-    const allowedRoles = isBillingReport ? ["coordinator"] : ["coordinator", "inspector"];
+    const allowedRoles = coordinatorOnlyUserFilter ? ["coordinator"] : ["coordinator", "inspector"];
     const roleUsers = users
       .filter((user) => allowedRoles.includes(String(user?.role || "").trim().toLowerCase()))
       .sort((leftUser, rightUser) => {
@@ -2009,8 +2011,9 @@ const SuperReports = () => {
     return [
       {
         value: ALL_REPORT_USERS_VALUE,
-        displayLabel: "All Users",
-        label: <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">All Users</span>,
+        displayLabel: coordinatorOnlyUserFilter ? "All Coordinators" : "All Users",
+        label: coordinatorOnlyUserFilter ? "All Coordinators" : "All Users",
+        roleLabel: "",
       },
       ...roleUsers.map((user) => {
         const name = formatReportUserName(user);
@@ -2018,16 +2021,12 @@ const SuperReports = () => {
         return {
           value: String(user.user_id),
           displayLabel: name,
-          label: (
-            <div className="flex flex-col leading-tight">
-              <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">{name}</span>
-              <span className="report-user-option-role mt-0.5 text-[11px] font-medium text-slate-500">{role}</span>
-            </div>
-          ),
+          label: name,
+          roleLabel: role,
         };
       }),
     ];
-  }, [isBillingReport, reportUsersQuery.data]);
+  }, [coordinatorOnlyUserFilter, reportUsersQuery.data]);
   const selectedReportUserLabel = useMemo(() => {
     const selectedOption = reportUserOptions.find((option) => option.value === String(reportUserFilter));
     return selectedOption?.displayLabel || "All Users";
@@ -2449,30 +2448,8 @@ const SuperReports = () => {
     ? `${reportPdfUrl}#view=FitH`
     : "about:blank";
 
-  const handleOpenReportPdf = () => {
-    if (!reportPdfUrl) return;
-    window.open(reportViewerUrl, "_blank", "noopener,noreferrer");
-  };
-
-  const handleDownloadReportPdf = () => {
-    if (!reportPdfUrl) return;
-
-    const link = document.createElement("a");
-    link.href = reportPdfUrl;
-    link.download = reportPdfFileName || getPdfFileName(activeReport, generatedFilters);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  };
-
   const restoreCachedReportPreview = (reportKey) => {
     const cachedPreview = reportPreviewCacheRef.current[reportKey];
-
-    if (cachedPreview?.generatedFilters?.userId && STATIC_REPORT_KEYS.has(reportKey)) {
-      if (cachedPreview.url?.startsWith("blob:")) URL.revokeObjectURL(cachedPreview.url);
-      delete reportPreviewCacheRef.current[reportKey];
-      writeStoredReportPreviewCache(reportPreviewCacheRef.current);
-    }
 
     if (reportKey === "boat-statement-report" && cachedPreview?.url && !cachedPreview.generatedFilters?.boatId) {
       if (cachedPreview.url.startsWith("blob:")) URL.revokeObjectURL(cachedPreview.url);
@@ -2491,7 +2468,6 @@ const SuperReports = () => {
     if (!nextCachedPreview?.url) {
       setReportGenerated(false);
       setReportPdfUrl("");
-      setReportPdfFileName("");
       setReportPdfLoading(false);
       setGeneratedFilters({});
       setReportUserFilter(ALL_REPORT_USERS_VALUE);
@@ -2516,7 +2492,6 @@ const SuperReports = () => {
 
     setReportGenerated(true);
     setReportPdfUrl(nextCachedPreview.url);
-    setReportPdfFileName(nextCachedPreview.fileName || getPdfFileName(reportKey, nextCachedPreview.generatedFilters ?? {}));
     setReportPdfLoading(false);
     setGeneratedFilters(nextCachedPreview.generatedFilters ?? {});
     setReportUserFilter(nextCachedPreview.generatedFilters?.userId || ALL_REPORT_USERS_VALUE);
@@ -2541,7 +2516,6 @@ const SuperReports = () => {
   const clearReportPreview = () => {
     setReportGenerated(false);
     setReportPdfUrl("");
-    setReportPdfFileName("");
     setReportPdfLoading(false);
     setGeneratedFilters({});
     setReportBuildRequest(null);
@@ -2780,6 +2754,7 @@ const SuperReports = () => {
       return {
         boatId: registeredBoatFilter !== ALL_REGISTERED_BOATS_VALUE ? registeredBoatFilter : undefined,
         boatLabel: selectedRegisteredBoatLabel,
+        ...getReportUserFilterPayload(),
       };
     }
 
@@ -2787,6 +2762,7 @@ const SuperReports = () => {
       return {
         ownerId: boatOwnerFilter !== ALL_BOAT_OWNERS_VALUE ? boatOwnerFilter : undefined,
         ownerLabel: selectedBoatOwnerLabel,
+        ...getReportUserFilterPayload(),
       };
     }
 
@@ -2796,6 +2772,7 @@ const SuperReports = () => {
         year: yearlyDate,
         boatTypeId: boatTypeFilter !== ALL_BOAT_TYPES_VALUE ? boatTypeFilter : undefined,
         boatTypeLabel: selectedBoatTypeLabel,
+        ...getReportUserFilterPayload(),
       };
     }
 
@@ -2860,7 +2837,6 @@ const SuperReports = () => {
     setReportBuildKey(nextBuildKey);
     setReportBuildRequest({ key: nextBuildKey, report: activeReport });
     setReportPdfUrl("");
-    setReportPdfFileName("");
     setReportPdfLoading(true);
   };
 
@@ -3347,7 +3323,6 @@ const SuperReports = () => {
         };
         writeStoredReportPreviewCache(reportPreviewCacheRef.current);
         setReportPdfUrl(nextUrl);
-        setReportPdfFileName(nextFileName);
       } catch (error) {
         if (isActive.current) setReportPdfUrl("");
       } finally {
@@ -3607,31 +3582,10 @@ const SuperReports = () => {
                     </div>
                   ) : reportPdfUrl ? (
                     <div className="flex h-full min-h-0 flex-col">
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
-                        <p className="truncate text-[12px] font-medium text-slate-600">
-                          {reportPdfFileName || "Report PDF"}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={handleOpenReportPdf}
-                            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-[#1A1F36] transition hover:bg-slate-50"
-                          >
-                            Open PDF
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleDownloadReportPdf}
-                            className="h-9 rounded-lg bg-[#1A1F36] px-3 text-[12px] font-semibold text-white transition hover:bg-[#0f1729]"
-                          >
-                            Download
-                          </button>
-                        </div>
-                      </div>
                       <iframe
                         title={`${REPORT_CONTENT[activeReport]?.title ?? "Reports"} Viewer`}
                         src={reportViewerUrl}
-                        className="block min-h-[calc(100vh-198px)] flex-1 w-full border-0"
+                        className="block min-h-[calc(100vh-150px)] flex-1 w-full border-0"
                         scrolling="no"
                         style={{ backgroundColor: "#f8fafc" }}
                       />

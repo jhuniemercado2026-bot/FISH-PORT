@@ -7,6 +7,20 @@ import { IoDocumentTextOutline, IoSyncOutline } from "react-icons/io5";
 
 const FONT = "'Montserrat', sans-serif";
 const REPORT_INPUT_WIDTH_CLASS = "w-full md:w-[260px]";
+const REPORT_ACTION_BUTTON_CLASS = "flex h-[46px] w-full items-center justify-center gap-2 rounded-xl text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-60 md:w-[220px]";
+
+const renderReportUserOption = (option) => {
+  const data = option?.data ?? option;
+  const name = data?.displayLabel ?? data?.label ?? "";
+  const role = data?.roleLabel ?? "";
+
+  return (
+    <div className="flex flex-col leading-tight">
+      <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">{name}</span>
+      {role ? <span className="report-user-option-role mt-0.5 text-[11px] font-medium text-slate-500">{role}</span> : null}
+    </div>
+  );
+};
 
 const ReportsInnerTopbar = ({
   activeReport,
@@ -144,59 +158,60 @@ const ReportsInnerTopbar = ({
     >
       {/* CUSTOM FILTER REPORTS */}
       {usesCustomReportFilters ? (
-        <div className="mx-auto flex w-full max-w-[1100px] flex-nowrap items-center justify-center gap-2 overflow-x-auto">
+        <div className="mx-auto flex w-full max-w-[1100px] flex-col items-center justify-center gap-3">
+          <div className="flex w-full flex-wrap items-center justify-center gap-2">
 
-          {showBoatFilter && (
-            <div className={REPORT_INPUT_WIDTH_CLASS}>
-              <FilterButton
-                width="100%"
-                height={46}
-                value={boatFilterValue}
-                onChange={onBoatFilterChange}
-                options={boatFilterOptions}
-                loading={isBoatFilterLoading}
-                placeholder={boatFilterPlaceholder}
-                showSearch={boatFilterShowSearch}
-                filterOption={(input, option) =>
-                  String(option?.displayLabel ?? option?.label ?? "")
-                    .toLowerCase()
-                    .includes(String(input).toLowerCase())
-                }
-                optionLabelProp="displayLabel"
-                popupClassName="report-user-filter-dropdown"
-              />
-            </div>
-          )}
+            {showBoatFilter && (
+              <div className={REPORT_INPUT_WIDTH_CLASS}>
+                <FilterButton
+                  width="100%"
+                  height={46}
+                  value={boatFilterValue}
+                  onChange={onBoatFilterChange}
+                  options={boatFilterOptions}
+                  loading={isBoatFilterLoading}
+                  placeholder={boatFilterPlaceholder}
+                  showSearch={boatFilterShowSearch}
+                  filterOption={(input, option) =>
+                    String(option?.displayLabel ?? option?.label ?? "")
+                      .toLowerCase()
+                      .includes(String(input).toLowerCase())
+                  }
+                  optionLabelProp="displayLabel"
+                  popupClassName="report-user-filter-dropdown"
+                />
+              </div>
+            )}
 
-          {/* FILTER TYPE */}
-          {!isVehicleTicketReport && !isVehicleTypesReport && !isBoatTypesReport && !isFeesReport && (
-            <div className={REPORT_INPUT_WIDTH_CLASS}>
-              <FilterButton
-                width="100%"
-                height={46}
-                value={activeFilterType || "daily"}
-                onChange={onFilterTypeChange}
-                options={[
-                  { value: "daily", label: "Daily" },
-                  { value: "monthly", label: "Monthly" },
-                  { value: "yearly", label: "Yearly" },
-                ]}
-              />
-            </div>
-          )}
+            {/* FILTER TYPE */}
+            {!isVehicleTicketReport && !isVehicleTypesReport && !isBoatTypesReport && !isFeesReport && (
+              <div className={REPORT_INPUT_WIDTH_CLASS}>
+                <FilterButton
+                  width="100%"
+                  height={46}
+                  value={activeFilterType || "daily"}
+                  onChange={onFilterTypeChange}
+                  options={[
+                    { value: "daily", label: "Daily" },
+                    { value: "monthly", label: "Monthly" },
+                    { value: "yearly", label: "Yearly" },
+                  ]}
+                />
+              </div>
+            )}
 
-          {/* DAILY */}
-          {showDaily && (
-            <div className={REPORT_INPUT_WIDTH_CLASS}>
-              <ReportDailyDatePicker
-                value={dailyDate || undefined}
-                onChange={onDailyDateChange}
-                placeholder="Select a Day"
-                dateFormat="YYYY-MM-DD"
-                containerClassName="w-full"
-              />
-            </div>
-          )}
+            {/* DAILY */}
+            {showDaily && (
+              <div className={REPORT_INPUT_WIDTH_CLASS}>
+                <ReportDailyDatePicker
+                  value={dailyDate || undefined}
+                  onChange={onDailyDateChange}
+                  placeholder="Select a Day"
+                  dateFormat="YYYY-MM-DD"
+                  containerClassName="w-full"
+                />
+              </div>
+            )}
 
           {/* MONTHLY */}
           {showMonthly && (
@@ -239,129 +254,141 @@ const ReportsInnerTopbar = ({
             </div>
           )}
 
-          {showUserFilter && (
-            <div className={REPORT_INPUT_WIDTH_CLASS}>
-              <FilterButton
-                width="100%"
-                height={46}
-                value={userFilterValue}
-                onChange={onUserFilterChange}
-                options={userFilterOptions}
-                loading={isUserFilterLoading}
-                showSearch
-                filterOption={(input, option) =>
-                  String(option?.displayLabel ?? option?.label ?? "")
-                    .toLowerCase()
-                    .includes(String(input).toLowerCase())
-                }
-                optionLabelProp="displayLabel"
-                popupClassName="report-user-filter-dropdown"
-              />
-            </div>
-          )}
+            {showUserFilter && (
+              <div className={REPORT_INPUT_WIDTH_CLASS}>
+                <FilterButton
+                  width="100%"
+                  height={46}
+                  value={userFilterValue}
+                  onChange={onUserFilterChange}
+                  options={userFilterOptions}
+                  loading={isUserFilterLoading}
+                  placeholder="Select User"
+                  showSearch
+                  filterOption={(input, option) =>
+                    String(option?.displayLabel ?? option?.label ?? "")
+                      .toLowerCase()
+                      .includes(String(input).toLowerCase())
+                  }
+                  optionRender={renderReportUserOption}
+                  popupClassName="report-user-filter-dropdown"
+                />
+              </div>
+            )}
 
-          {/* BUTTONS */}
-          <button
-            type="button"
-            onClick={onGenerateReport}
-            disabled={isGenerateDisabled || isGenerating}
-            className={`${REPORT_INPUT_WIDTH_CLASS} flex h-[46px] items-center justify-center gap-2 rounded-xl bg-[#1A1F36] text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60`}
-          >
-            <IoDocumentTextOutline size={18} />
-            Generate PDF
-          </button>
+          </div>
+          <div className="flex w-full flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={onGenerateReport}
+              disabled={isGenerateDisabled || isGenerating}
+              className={`${REPORT_ACTION_BUTTON_CLASS} bg-[#1A1F36] text-white`}
+            >
+              <IoDocumentTextOutline size={18} />
+              Generate PDF
+            </button>
 
-          <button
-            type="button"
-            onClick={onExportExcel}
-            disabled={isExportDisabled}
-            className={`${REPORT_INPUT_WIDTH_CLASS} flex h-[46px] items-center justify-center gap-2 rounded-xl bg-green-600 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60`}
-          >
-            <IoDocumentTextOutline size={18} />
-            Export Excel
-          </button>
-
+            <button
+              type="button"
+              onClick={onExportExcel}
+              disabled={isExportDisabled}
+              className={`${REPORT_ACTION_BUTTON_CLASS} bg-green-600 text-white`}
+            >
+              <IoDocumentTextOutline size={18} />
+              Export Excel
+            </button>
+          </div>
         </div>
 
       ) : isReadonlyInputStyleReport ? (
         /* REGISTERED BOATS / OWNER INFO / BFAR / FEES STYLE (UNIFIED) */
-        <div className="mx-auto flex w-full max-w-[1100px] flex-nowrap items-center justify-center gap-2 overflow-x-auto">
+        <div className="mx-auto flex w-full max-w-[1100px] flex-col items-center justify-center gap-3">
+          <div className="flex w-full flex-wrap items-center justify-center gap-2">
 
-          {/* READONLY INPUT LOOK */}
-          {showBoatFilter ? (
-            <div className={REPORT_INPUT_WIDTH_CLASS}>
-              <FilterButton
-                width="100%"
-                height={46}
-                value={boatFilterValue}
-                onChange={onBoatFilterChange}
-                options={boatFilterOptions}
-                loading={isBoatFilterLoading}
-                placeholder={boatFilterPlaceholder}
-                showSearch={boatFilterShowSearch}
-                filterOption={(input, option) =>
-                  String(option?.displayLabel ?? option?.label ?? "")
-                    .toLowerCase()
-                    .includes(String(input).toLowerCase())
-                }
-                optionLabelProp="displayLabel"
-                popupClassName="report-user-filter-dropdown"
-              />
-            </div>
-          ) : (
-            <div
-              className={`${REPORT_INPUT_WIDTH_CLASS} flex h-[46px] items-center rounded-xl border border-slate-200 bg-white px-4 text-[13px] font-normal text-[#1a1f36] shadow-sm`}
+            {/* READONLY INPUT LOOK */}
+            {showBoatFilter ? (
+              <div className={REPORT_INPUT_WIDTH_CLASS}>
+                <FilterButton
+                  width="100%"
+                  height={46}
+                  value={boatFilterValue}
+                  onChange={onBoatFilterChange}
+                  options={boatFilterOptions}
+                  loading={isBoatFilterLoading}
+                  placeholder={boatFilterPlaceholder}
+                  showSearch={boatFilterShowSearch}
+                  filterOption={(input, option) =>
+                    String(option?.displayLabel ?? option?.label ?? "")
+                      .toLowerCase()
+                      .includes(String(input).toLowerCase())
+                  }
+                  optionLabelProp="displayLabel"
+                  popupClassName="report-user-filter-dropdown"
+                />
+              </div>
+            ) : (
+              <div
+                className={`${REPORT_INPUT_WIDTH_CLASS} flex h-[46px] items-center rounded-xl border border-slate-200 bg-white px-4 text-[13px] font-normal text-[#1a1f36] shadow-sm`}
+              >
+                {title ||
+                  (isRegisteredBoatsReport
+                    ? "Registered Boats"
+                    : isOwnerInfoReport
+                    ? "Boat Owner"
+                    : isVehicleTypesReport
+                    ? "Vehicle Types"
+                    : isFeesReport
+                    ? "Fees"
+                    : "Fisheries (BFAR)")}
+              </div>
+            )}
+
+            {showUserFilter && (
+              <div className={REPORT_INPUT_WIDTH_CLASS}>
+                <FilterButton
+                  width="100%"
+                  height={46}
+                  value={userFilterValue}
+                  onChange={onUserFilterChange}
+                  options={userFilterOptions}
+                  loading={isUserFilterLoading}
+                  placeholder="Select User"
+                  showSearch
+                  filterOption={(input, option) =>
+                    String(option?.displayLabel ?? option?.label ?? "")
+                      .toLowerCase()
+                      .includes(String(input).toLowerCase())
+                  }
+                  optionRender={renderReportUserOption}
+                  popupClassName="report-user-filter-dropdown"
+                />
+              </div>
+            )}
+
+          </div>
+          <div className="flex w-full flex-wrap items-center justify-center gap-2">
+            {/* GENERATE */}
+            <button
+              type="button"
+              onClick={onGenerateReport}
+              disabled={isGenerateDisabled || isGenerating}
+              className={`${REPORT_ACTION_BUTTON_CLASS} bg-[#1A1F36] text-white`}
             >
-              {title ||
-                (isRegisteredBoatsReport
-                  ? "Registered Boats"
-                  : isOwnerInfoReport
-                  ? "Boat Owner"
-                  : isVehicleTypesReport
-                  ? "Vehicle Types"
-                  : isFeesReport
-                  ? "Fees"
-                  : "Fisheries (BFAR)")}
-            </div>
-          )}
+              <IoDocumentTextOutline size={18} />
+              Generate PDF
+            </button>
 
-          {showUserFilter && (
-            <div className={REPORT_INPUT_WIDTH_CLASS}>
-              <FilterButton
-                width="100%"
-                height={46}
-                value={userFilterValue}
-                onChange={onUserFilterChange}
-                options={userFilterOptions}
-                loading={isUserFilterLoading}
-                optionLabelProp="displayLabel"
-                popupClassName="report-user-filter-dropdown"
-              />
-            </div>
-          )}
-
-          {/* GENERATE */}
-          <button
-            type="button"
-            onClick={onGenerateReport}
-            disabled={isGenerateDisabled || isGenerating}
-            className={`${REPORT_INPUT_WIDTH_CLASS} flex h-[46px] items-center justify-center gap-2 rounded-xl bg-[#1A1F36] text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60`}
-          >
-            <IoDocumentTextOutline size={18} />
-            Generate PDF
-          </button>
-
-          {/* EXPORT */}
-          <button
-            type="button"
-            onClick={onExportExcel}
-            disabled={isExportDisabled}
-            className={`${REPORT_INPUT_WIDTH_CLASS} flex h-[46px] items-center justify-center gap-2 rounded-xl bg-green-600 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60`}
-          >
-            <IoDocumentTextOutline size={18} />
-            Export Excel
-          </button>
-
+            {/* EXPORT */}
+            <button
+              type="button"
+              onClick={onExportExcel}
+              disabled={isExportDisabled}
+              className={`${REPORT_ACTION_BUTTON_CLASS} bg-green-600 text-white`}
+            >
+              <IoDocumentTextOutline size={18} />
+              Export Excel
+            </button>
+          </div>
         </div>
 
       ) : (

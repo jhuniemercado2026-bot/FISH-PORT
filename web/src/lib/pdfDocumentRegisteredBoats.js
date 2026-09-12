@@ -364,9 +364,9 @@ export const buildRegisteredBoatsPdf = async ({
 
   const columns = [
     { key: "boat_name", label: "Boat Name", width: 105 },
-    { key: "type", label: "Type", width: 160 },
+    { key: "type", label: "Type", width: 120 },
     { key: "owner", label: "Owner", width: 106 },
-    { key: "date_registered", label: "Date Registered", width: 75 },
+    { key: "date_registered", label: "Date Registered", width: 115 },
     { key: "boat_status", label: "Status", width: 65 },
   ];
 
