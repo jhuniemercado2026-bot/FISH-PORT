@@ -64,12 +64,23 @@ const SOA_TABS = [
 const SOA_TAB_STORAGE_KEY = "opol:statement-of-account:active-tab";
 const SOA_TAB_KEYS = SOA_TABS.map((tab) => tab.key);
 
-const getStatementTabFromPathname = (pathname) =>
-  pathname === "/boat-statement"
-    ? "boat-statement"
-    : pathname === "/owner-statement"
-      ? getCachedTab(SOA_TAB_STORAGE_KEY, SOA_TAB_KEYS, "owner-statement")
-      : "owner-statement";
+const getStatementTabFromLocation = ({ pathname, search = "", state = null }) => {
+  const highlight = new URLSearchParams(search).get("highlight") || "";
+
+  if (pathname === "/boat-statement") {
+    return "boat-statement";
+  }
+
+  if (pathname === "/owner-statement") {
+    if (highlight.startsWith("owner-") || state?.universalSearchResult?.group === "Owner Statement") {
+      return "owner-statement";
+    }
+
+    return getCachedTab(SOA_TAB_STORAGE_KEY, SOA_TAB_KEYS, "owner-statement");
+  }
+
+  return "owner-statement";
+};
 
 const getStatementPathFromTab = (tab) =>
   tab === "boat-statement" ? "/boat-statement" : "/owner-statement";
@@ -239,7 +250,11 @@ const SuperStatementOfAccount = () => {
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } = useSidebar();
   const [activeItem, setActiveItem] = useState("SOA");
   const [contentMargin, setContentMargin] = useState(() => (window.innerWidth >= 900 ? 256 : 0));
-  const [activeSoaTab, setActiveSoaTab] = useState(() => getStatementTabFromPathname(location.pathname));
+  const [activeSoaTab, setActiveSoaTab] = useState(() => getStatementTabFromLocation({
+    pathname: location.pathname,
+    search: location.search,
+    state: location.state,
+  }));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [requestedPage, setRequestedPage] = useState(1);
@@ -348,7 +363,11 @@ const SuperStatementOfAccount = () => {
   }, []);
 
   useEffect(() => {
-    const nextTab = getStatementTabFromPathname(location.pathname);
+    const nextTab = getStatementTabFromLocation({
+      pathname: location.pathname,
+      search: location.search,
+      state: location.state,
+    });
     setActiveSoaTab(nextTab);
     cacheTab(SOA_TAB_STORAGE_KEY, nextTab, SOA_TAB_KEYS);
 

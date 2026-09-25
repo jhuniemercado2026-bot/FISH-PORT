@@ -10,12 +10,14 @@ import {
   IoCalendarOutline,
   IoCashOutline,
   IoCheckmarkOutline,
+  IoCallOutline,
   IoChevronBackOutline,
   IoChevronForwardOutline,
   IoCloseOutline,
   IoCreateOutline,
   IoEyeOutline,
   IoLayersOutline,
+  IoLocationOutline,
   IoPersonOutline,
   IoReloadOutline,
   IoSearchOutline,
@@ -67,12 +69,23 @@ const DOCKING_VIEW_TABS = [
 const DOCKING_TAB_STORAGE_KEY = "opol:docking:active-tab";
 const DOCKING_TAB_KEYS = DOCKING_VIEW_TABS.map((tab) => tab.key);
 
-const getDockingViewFromPath = (pathname) =>
-  pathname.endsWith("docking-calendar")
-    ? "schedule"
-    : pathname.endsWith("docking")
-      ? getCachedTab(DOCKING_TAB_STORAGE_KEY, DOCKING_TAB_KEYS, "records")
-      : "records";
+const getDockingViewFromLocation = ({ pathname, search = "", state = null }) => {
+  if (pathname.endsWith("docking-calendar")) {
+    return "schedule";
+  }
+
+  if (pathname.endsWith("docking")) {
+    const highlight = new URLSearchParams(search).get("highlight") || "";
+
+    if (highlight.startsWith("docking-") || state?.universalSearchResult?.group === "Docking") {
+      return "records";
+    }
+
+    return getCachedTab(DOCKING_TAB_STORAGE_KEY, DOCKING_TAB_KEYS, "records");
+  }
+
+  return "records";
+};
 
 const DOCK_COLORS = [
   { bg: "bg-blue-100",   text: "text-blue-700",   border: "bg-blue-500"   },
@@ -113,6 +126,7 @@ const STATUS_OPTIONS = [
   { value: "all", label: "All Status" },
   { value: "active", label: "Active" },
   { value: "voided", label: "Voided" },
+  { value: "visitor", label: "Visitor" },
 ];
 const DOCKING_STATUS_LEGEND = [
   { key: "active", label: "Active", color: "#16a34a" },
@@ -431,9 +445,37 @@ const getTimeParts = (value) => {
 };
 
 const getBoatTypeLabel = (record) =>
+  record?.display_boat_type_name ||
+  record?.visiting_boat_type?.type_name ||
+  record?.visitingBoatType?.type_name ||
   record?.boat?.boat_type?.type_name ||
   record?.boat?.boatType?.type_name ||
   "-";
+
+const getDockingBoatName = (record) =>
+  record?.display_boat_name ||
+  record?.visiting_boat_name ||
+  record?.boat?.boat_name ||
+  "-";
+
+const getDockingOwnerLabel = (record) =>
+  record?.display_owner_name ||
+  [record?.visiting_owner_firstname, record?.visiting_owner_lastname].filter(Boolean).join(" ") ||
+  record?.boat?.owner?.full_name ||
+  record?.boat?.owner_name ||
+  "-";
+
+const getDockingOwnerFirstName = (record) =>
+  record?.visiting_owner_firstname || record?.boat?.owner?.owner_firstname || "-";
+
+const getDockingOwnerLastName = (record) =>
+  record?.visiting_owner_lastname || record?.boat?.owner?.owner_lastname || "-";
+
+const getDockingOwnerAddress = (record) =>
+  record?.visiting_owner_address || record?.boat?.owner?.address || "-";
+
+const getDockingOwnerContact = (record) =>
+  record?.visiting_contact_number || record?.boat?.owner?.contact_number || "-";
 
 const getDockingHighlightId = ({ highlightedSearchResult, search }) => {
   const stateId = highlightedSearchResult?.group === "Docking" ? String(highlightedSearchResult?.id || "") : "";
@@ -496,6 +538,18 @@ const isDockingVoided = (docking) =>
     docking?.voided_at ||
     String(docking?.status ?? "").toLowerCase() === "voided"
   );
+
+const isVisitingDocking = (docking) =>
+  String(docking?.boat_category ?? "").toLowerCase() === "visiting" || Boolean(docking?.visiting_boat_name);
+
+const VisitorPill = () => (
+  <span
+    className="inline-flex flex-shrink-0 items-center rounded-[6px] px-2 py-0.5 text-[10px] font-bold uppercase tracking-normal"
+    style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}
+  >
+    Visitor
+  </span>
+);
 
 const normalizeDockingResponse = (responseData) =>
   responseData?.data ?? responseData?.docking ?? responseData ?? null;
@@ -600,6 +654,41 @@ const ModalInput = ({ label, required, error, icon: Icon, inputStyle, wrapperCla
   );
 };
 
+const BoatCategoryCardSelect = ({ value, onChange }) => (
+  <div>
+    <label className="mb-2 block text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>
+      Boat Category<span className="ml-0.5 text-red-500">*</span>
+    </label>
+    <div className="grid grid-cols-2 gap-3">
+      {[
+        { value: "registered", label: "Registered Boat", icon: IoBoatOutline },
+        { value: "visiting", label: "Visiting Boat", icon: IoLocationOutline },
+      ].map((option) => {
+        const selected = value === option.value;
+        const Icon = option.icon;
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className="flex h-[46px] cursor-pointer items-center justify-center gap-2 rounded-[10px] border px-4 text-[13px] font-normal transition-colors"
+            style={{
+              borderColor: selected ? "#1a1f36" : "#e2e8f0",
+              backgroundColor: selected ? "#1a1f36" : "#ffffff",
+              color: selected ? "#ffffff" : "#1a1f36",
+              fontFamily: FONT,
+            }}
+          >
+            <Icon className="text-[16px] flex-shrink-0" />
+            <span className="truncate">{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
+
 const VoidDockingModal = ({
   open,
   docking,
@@ -629,7 +718,7 @@ const VoidDockingModal = ({
         <ModalInput
           label="Boat Name"
           icon={IoBoatOutline}
-          value={docking?.boat?.boat_name || "-"}
+          value={getDockingBoatName(docking)}
           readOnly
           disabled
           wrapperClassName="!bg-slate-100"
@@ -686,6 +775,17 @@ const ShellInput = ({ icon: Icon, className = "", ...props }) => (
   </div>
 );
 
+const ADD_DOCKING_BOAT_CATEGORY_SESSION_KEY = "opol:add-docking:boat-category";
+const getStoredAddDockingBoatCategory = () => {
+  if (typeof window === "undefined") return "registered";
+  const value = window.sessionStorage.getItem(ADD_DOCKING_BOAT_CATEGORY_SESSION_KEY);
+  return value === "visiting" || value === "registered" ? value : "registered";
+};
+const setStoredAddDockingBoatCategory = (value) => {
+  if (typeof window === "undefined") return;
+  if (value !== "visiting" && value !== "registered") return;
+  window.sessionStorage.setItem(ADD_DOCKING_BOAT_CATEGORY_SESSION_KEY, value);
+};
 
 const buildDockingFormState = (prefillDate, initialDocking, fiscalYear) => {
   const sourceDockingDate =
@@ -699,7 +799,17 @@ const buildDockingFormState = (prefillDate, initialDocking, fiscalYear) => {
     : getManilaTimeParts();
 
   return {
+    boat_category: initialDocking?.boat_category || (initialDocking?.visiting_boat_name ? "visiting" : getStoredAddDockingBoatCategory()),
     boat_id: initialDocking?.boat_id ? String(initialDocking.boat_id) : "",
+    visiting_boat_name: initialDocking?.visiting_boat_name || "",
+    visiting_owner_firstname: initialDocking?.visiting_owner_firstname || "",
+    visiting_owner_lastname: initialDocking?.visiting_owner_lastname || "",
+    visiting_owner_address: initialDocking?.visiting_owner_address || "",
+    visiting_contact_number: initialDocking?.visiting_contact_number || "",
+    visiting_boat_type_id:
+      initialDocking?.visiting_boat_type_id !== null && initialDocking?.visiting_boat_type_id !== undefined
+        ? String(initialDocking.visiting_boat_type_id)
+        : "",
     fee_id: initialDocking?.fee_id !== null && initialDocking?.fee_id !== undefined ? String(initialDocking.fee_id) : undefined,
     docking_date: buildDateFromParts(sourceDateParts.year, sourceDateParts.month, sourceDateParts.day),
     docking_date_month: sourceDateParts.month,
@@ -745,7 +855,14 @@ const applyTimeValueToDockingForm = (current, timeValue) => {
 
 const normalizeDockingPayloadForComparison = (payload) =>
   JSON.stringify({
+    boat_category: String(payload?.boat_category ?? "registered"),
     boat_id: String(payload?.boat_id ?? ""),
+    visiting_boat_name: String(payload?.visiting_boat_name ?? "").trim(),
+    visiting_owner_firstname: String(payload?.visiting_owner_firstname ?? "").trim(),
+    visiting_owner_lastname: String(payload?.visiting_owner_lastname ?? "").trim(),
+    visiting_owner_address: String(payload?.visiting_owner_address ?? "").trim(),
+    visiting_contact_number: String(payload?.visiting_contact_number ?? "").trim(),
+    visiting_boat_type_id: String(payload?.visiting_boat_type_id ?? ""),
     fee_id: String(payload?.fee_id ?? ""),
     docking_date: String(payload?.docking_date ?? "").slice(0, 16),
     docking_fee: parseMoneyValue(payload?.docking_fee),
@@ -776,6 +893,7 @@ const CalendarDockingsDrawer = ({ open, dateLabel, dockings, onClose, onSelectDo
               title: "#2563eb",
               leftBorder: "#2563eb",
             };
+            const isVisitor = isVisitingDocking(docking);
             return (
               <button
                 key={docking.docking_id}
@@ -798,8 +916,9 @@ const CalendarDockingsDrawer = ({ open, dateLabel, dockings, onClose, onSelectDo
               >
                 <div className="min-w-0 flex-1 pt-0.5">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="m-0 truncate text-[15px] font-bold" style={{ color: accent.title }}>{docking?.boat?.boat_name || "-"}</p>
+                    <div className="min-w-0 flex items-center gap-2">
+                      <p className="m-0 truncate text-[15px] font-bold" style={{ color: accent.title }}>{getDockingBoatName(docking)}</p>
+                      {isVisitor ? <VisitorPill /> : null}
                     </div>
                   </div>
                   <p className="m-0 mt-1 text-[12px] text-slate-500">
@@ -819,7 +938,7 @@ const CalendarDockingsDrawer = ({ open, dateLabel, dockings, onClose, onSelectDo
   );
 };
 // ── Add Docking Modal ──────────────────────────────────────────────────────────
-const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefillDate, initialDocking, serverErrors = {}, fiscalYear, isLookupsLoading }) => {
+const AddDockingModal = ({ open, boats, boatTypes = [], fees, onClose, onSubmit, saving, prefillDate, initialDocking, serverErrors = {}, fiscalYear, isLookupsLoading }) => {
   const [form, setForm] = useState(() => buildDockingFormState(prefillDate, initialDocking, fiscalYear));
   const [errors, setErrors] = useState({});
   const hasManualTimeRef = useRef(false);
@@ -843,8 +962,13 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
     if (!open) return;
     hasManualTimeRef.current = false;
     setForm(buildDockingFormState(prefillDate, initialDocking, fiscalYear));
-    setErrors(normalizedServerErrors);
-  }, [open, prefillDate, initialDocking, normalizedServerErrors, fiscalYear]);
+    setErrors({});
+  }, [open, prefillDate, initialDocking, fiscalYear]);
+
+  useEffect(() => {
+    if (!open || Object.keys(normalizedServerErrors).length === 0) return;
+    setErrors((current) => ({ ...current, ...normalizedServerErrors }));
+  }, [open, normalizedServerErrors]);
 
   useEffect(() => {
     if (!open || initialDocking) return undefined;
@@ -875,17 +999,44 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
     return () => window.clearInterval(intervalId);
   }, [open, initialDocking]);
 
+  const isVisitingBoat = form.boat_category === "visiting";
   const selectedBoat = boats.find((b) => String(b.boat_id) === String(form.boat_id));
-  const selectedBoatTypeId = selectedBoat ? getBoatTypeId(selectedBoat) : "";
+  const selectedBoatTypeId = isVisitingBoat ? String(form.visiting_boat_type_id || "") : selectedBoat ? getBoatTypeId(selectedBoat) : "";
+  const boatTypeOptions = useMemo(() => {
+    const optionsById = new Map();
+    boatTypes.forEach((boatType) => {
+      const typeId = String(boatType?.boat_type_id ?? "");
+      const label = boatType?.type_name || "";
+      if (typeId && label && !optionsById.has(typeId)) {
+        optionsById.set(typeId, { value: typeId, label });
+      }
+    });
+    boats.forEach((boat) => {
+      const typeId = getBoatTypeId(boat);
+      const label = boat?.boat_type?.type_name || boat?.boatType?.type_name || "";
+      if (typeId && label && !optionsById.has(typeId)) {
+        optionsById.set(typeId, { value: typeId, label });
+      }
+    });
+    fees.forEach((fee) => {
+      if (!isDockingFee(fee) || !fee?.boat_type_id) return;
+      const typeId = String(fee.boat_type_id);
+      const label = fee?.boat_type?.type_name || fee?.boatType?.type_name || `Boat Type #${typeId}`;
+      if (!optionsById.has(typeId)) {
+        optionsById.set(typeId, { value: typeId, label });
+      }
+    });
+    return Array.from(optionsById.values()).sort((left, right) => left.label.localeCompare(right.label));
+  }, [boatTypes, boats, fees]);
   const availableFees = useMemo(() => fees.filter((fee) => {
     if (!isDockingFee(fee)) return false;
     if (!isFeeActive(fee)) return false;
-    if (!selectedBoat) return false;
+    if (!selectedBoatTypeId) return false;
     return String(fee.boat_type_id || "") === selectedBoatTypeId;
-  }), [fees, selectedBoat, selectedBoatTypeId]);
+  }), [fees, selectedBoatTypeId]);
 
   useEffect(() => {
-    if (!selectedBoat) {
+    if (!selectedBoatTypeId) {
       if (!form.fee_id && !form.docking_fee) return;
       setForm((current) => ({ ...current, fee_id: "", docking_fee: "" }));
       return;
@@ -908,7 +1059,7 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
       docking_fee: nextDockingFee,
     }));
     setErrors((current) => ({ ...current, fee_id: "" }));
-  }, [selectedBoat, availableFees, form.fee_id, form.docking_fee]);
+  }, [selectedBoatTypeId, availableFees, form.fee_id, form.docking_fee]);
 
   if (!open) return null;
 
@@ -920,7 +1071,18 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
     const next = {};
     const builtDockingDate = buildDateFromParts(form.docking_date_year, form.docking_date_month, form.docking_date_day);
     const builtDockingTime = buildTwentyFourHourTime(form.docking_time_hour, form.docking_time_minute, form.docking_time_meridiem);
-    if (!form.boat_id)      next.boat_id      = "Please select a boat.";
+    if (isVisitingBoat) {
+      if (!form.visiting_boat_name.trim()) next.visiting_boat_name = "Boat name is required.";
+      if (!form.visiting_boat_type_id) next.visiting_boat_type_id = "Please select a boat type.";
+      if (!form.visiting_owner_firstname.trim()) next.visiting_owner_firstname = "First name is required.";
+      if (!form.visiting_owner_lastname.trim()) next.visiting_owner_lastname = "Last name is required.";
+      if (!form.visiting_owner_address.trim()) next.visiting_owner_address = "Address is required.";
+      if (form.visiting_contact_number.trim() && !/^\d{11}$/.test(form.visiting_contact_number.trim())) {
+        next.visiting_contact_number = "Contact number must be exactly 11 digits.";
+      }
+    } else if (!form.boat_id) {
+      next.boat_id = "Please select a boat.";
+    }
     if (!form.fee_id)       next.fee_id       = "Fee is required";
     if (!builtDockingDate)  next.docking_date = "Docking date is required.";
     if (builtDockingDate && isFutureDockingDate(builtDockingDate)) {
@@ -936,7 +1098,14 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
     const builtDockingDate = buildDateFromParts(form.docking_date_year, form.docking_date_month, form.docking_date_day);
     const builtDockingTime = buildTwentyFourHourTime(form.docking_time_hour, form.docking_time_minute, form.docking_time_meridiem);
     const payload = {
-      boat_id:      form.boat_id,
+      boat_category: form.boat_category,
+      boat_id:      isVisitingBoat ? null : form.boat_id,
+      visiting_boat_name: isVisitingBoat ? form.visiting_boat_name.trim() : null,
+      visiting_owner_firstname: isVisitingBoat ? form.visiting_owner_firstname.trim() : null,
+      visiting_owner_lastname: isVisitingBoat ? form.visiting_owner_lastname.trim() : null,
+      visiting_owner_address: isVisitingBoat ? form.visiting_owner_address.trim() : null,
+      visiting_contact_number: isVisitingBoat ? form.visiting_contact_number.trim() : null,
+      visiting_boat_type_id: isVisitingBoat ? form.visiting_boat_type_id : null,
       fee_id:       form.fee_id,
       docking_date: `${builtDockingDate} ${builtDockingTime}`,
       docking_fee:  parseMoneyValue(form.docking_fee),
@@ -946,7 +1115,14 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
       initialDocking &&
       normalizeDockingPayloadForComparison(payload) ===
         normalizeDockingPayloadForComparison({
+          boat_category: initialDocking.boat_category || (initialDocking.visiting_boat_name ? "visiting" : "registered"),
           boat_id: initialDocking.boat_id,
+          visiting_boat_name: initialDocking.visiting_boat_name,
+          visiting_owner_firstname: initialDocking.visiting_owner_firstname,
+          visiting_owner_lastname: initialDocking.visiting_owner_lastname,
+          visiting_owner_address: initialDocking.visiting_owner_address,
+          visiting_contact_number: initialDocking.visiting_contact_number,
+          visiting_boat_type_id: initialDocking.visiting_boat_type_id,
           fee_id: initialDocking.fee_id,
           docking_date: initialDocking.docking_date,
           docking_fee: initialDocking.docking_fee,
@@ -970,51 +1146,171 @@ const AddDockingModal = ({ open, boats, fees, onClose, onSubmit, saving, prefill
       closeOnBackdrop
     >
       <div className="flex flex-col gap-5">
-        <Field label="Boat Name" required error={errors.boat_id}>
-          <FilterSelect
-            width="100%"
-            height={46}
-            showSearch
-            loading={isLookupsLoading}
-            placeholder="Select boat name"
-            optionFilterProp="label"
-            optionLabelProp="label"
-            value={form.boat_id || undefined}
-            onChange={(value) => {
-              setForm((c) => ({ ...c, boat_id: value ?? "", fee_id: undefined, docking_fee: "" }));
-              setErrors((c) => ({ ...c, boat_id: "", fee_id: "" }));
-            }}
-            options={boats.map((boat) => ({
-              value: String(boat.boat_id),
-              label: `${boat.boat_name}`,
-            }))}
-          />
-        </Field>
-
-        <ModalInput
-          label="Boat Type"
-          icon={IoLayersOutline}
-          readOnly
-          value={selectedBoat?.boat_type?.type_name || selectedBoat?.boatType?.type_name || ""}
-          placeholder="Auto-filled after selecting a boat"
-          wrapperClassName="!bg-slate-100"
+        <BoatCategoryCardSelect
+          value={form.boat_category}
+          onChange={(value) => {
+            if (!initialDocking) {
+              setStoredAddDockingBoatCategory(value);
+            }
+            setForm((current) => ({
+              ...current,
+              boat_category: value,
+              boat_id: value === "registered" ? current.boat_id : "",
+              visiting_boat_type_id: value === "visiting" ? current.visiting_boat_type_id : "",
+              fee_id: "",
+              docking_fee: "",
+            }));
+            setErrors((current) => ({
+              ...current,
+              boat_id: "",
+              visiting_boat_name: "",
+              visiting_boat_type_id: "",
+              visiting_owner_firstname: "",
+              visiting_owner_lastname: "",
+              visiting_owner_address: "",
+              fee_id: "",
+            }));
+          }}
         />
 
-        <ModalInput
-          label="Boat Owner"
-          icon={IoPersonOutline}
-          readOnly
-          value={selectedBoat?.owner?.full_name || selectedBoat?.owner_name || ""}
-          placeholder="Auto-filled after selecting a boat"
-          wrapperClassName="!bg-slate-100"
-        />
+        {!isVisitingBoat ? (
+          <Field label="Boat Name" required error={errors.boat_id}>
+            <FilterSelect
+              width="100%"
+              height={46}
+              showSearch
+              loading={isLookupsLoading}
+              placeholder="Select boat name"
+              optionFilterProp="label"
+              optionLabelProp="label"
+              value={form.boat_id || undefined}
+              onChange={(value) => {
+                setForm((c) => ({ ...c, boat_id: value ?? "", fee_id: undefined, docking_fee: "" }));
+                setErrors((c) => ({ ...c, boat_id: "", fee_id: "" }));
+              }}
+              options={boats.map((boat) => ({
+                value: String(boat.boat_id),
+                label: `${boat.boat_name}`,
+              }))}
+            />
+          </Field>
+        ) : (
+          <>
+            <ModalInput
+              label="Boat Name"
+              icon={IoBoatOutline}
+              required
+              error={errors.visiting_boat_name}
+              value={form.visiting_boat_name}
+              onChange={(event) => {
+                setForm((current) => ({ ...current, visiting_boat_name: event.target.value }));
+                setErrors((current) => ({ ...current, visiting_boat_name: "" }));
+              }}
+              placeholder="Enter visiting boat name"
+            />
+
+            <Field label="Boat Type" required error={errors.visiting_boat_type_id}>
+              <FilterSelect
+                width="100%"
+                height={46}
+                showSearch
+                loading={isLookupsLoading}
+                placeholder="Select boat type"
+                optionFilterProp="label"
+                optionLabelProp="label"
+                value={form.visiting_boat_type_id || undefined}
+                onChange={(value) => {
+                  setForm((current) => ({ ...current, visiting_boat_type_id: value ?? "", fee_id: "", docking_fee: "" }));
+                  setErrors((current) => ({ ...current, visiting_boat_type_id: "", fee_id: "" }));
+                }}
+                options={boatTypeOptions}
+              />
+            </Field>
+
+            <ModalInput
+              label="First Name"
+              icon={IoPersonOutline}
+              required
+              error={errors.visiting_owner_firstname}
+              value={form.visiting_owner_firstname}
+              onChange={(event) => {
+                setForm((current) => ({ ...current, visiting_owner_firstname: event.target.value }));
+                setErrors((current) => ({ ...current, visiting_owner_firstname: "" }));
+              }}
+              placeholder="Enter owner first name"
+            />
+
+            <ModalInput
+              label="Last Name"
+              icon={IoPersonOutline}
+              required
+              error={errors.visiting_owner_lastname}
+              value={form.visiting_owner_lastname}
+              onChange={(event) => {
+                setForm((current) => ({ ...current, visiting_owner_lastname: event.target.value }));
+                setErrors((current) => ({ ...current, visiting_owner_lastname: "" }));
+              }}
+              placeholder="Enter owner last name"
+            />
+
+            <ModalInput
+              label="Address"
+              icon={IoLocationOutline}
+              required
+              error={errors.visiting_owner_address}
+              value={form.visiting_owner_address}
+              onChange={(event) => {
+                setForm((current) => ({ ...current, visiting_owner_address: event.target.value }));
+                setErrors((current) => ({ ...current, visiting_owner_address: "" }));
+              }}
+              placeholder="Enter owner address"
+            />
+
+            <ModalInput
+              label="Contact Number (Optional)"
+              icon={IoCallOutline}
+              error={errors.visiting_contact_number}
+              value={form.visiting_contact_number}
+              onChange={(event) => {
+                const value = event.target.value.replace(/\D/g, "").slice(0, 11);
+                setForm((current) => ({ ...current, visiting_contact_number: value }));
+                setErrors((current) => ({ ...current, visiting_contact_number: "" }));
+              }}
+              inputMode="numeric"
+              maxLength={11}
+              placeholder="Enter contact number"
+            />
+          </>
+        )}
+
+        {!isVisitingBoat ? (
+          <>
+            <ModalInput
+              label="Boat Type"
+              icon={IoLayersOutline}
+              readOnly
+              value={selectedBoat?.boat_type?.type_name || selectedBoat?.boatType?.type_name || ""}
+              placeholder="Auto-filled after selecting a boat"
+              wrapperClassName="!bg-slate-100"
+            />
+
+            <ModalInput
+              label="Boat Owner"
+              icon={IoPersonOutline}
+              readOnly
+              value={selectedBoat?.owner?.full_name || selectedBoat?.owner_name || ""}
+              placeholder="Auto-filled after selecting a boat"
+              wrapperClassName="!bg-slate-100"
+            />
+          </>
+        ) : null}
 
         <Field label="Applicable Fee" required error={errors.fee_id}>
           <div className="modal-input-shell flex h-[46px] items-center gap-3 rounded-[10px] border border-slate-200 bg-slate-100 px-4 transition-all">
             <input
               readOnly
               value={applicableFeeValue}
-              placeholder={selectedBoat ? "No matching docking fee" : "₱0.00"}
+              placeholder={selectedBoatTypeId ? "No matching docking fee" : "₱0.00"}
               className="w-full cursor-default border-none bg-transparent text-[14px] font-medium text-[#0d1117] outline-none placeholder:font-normal placeholder:text-slate-400"
               style={{ fontFamily: FONT }}
             />
@@ -1290,6 +1586,31 @@ const EditDockingDrawer = ({ docking, open, boats, fees, onClose, onSubmit, savi
 // ── Docking Drawer ─────────────────────────────────────────────────────────────
 const DockingDrawer = ({ docking, open, onClose, onBack }) => {
   if (!open || !docking) return null;
+  const isVisitor = isVisitingDocking(docking);
+  const dockingInfoCards = [
+    {
+      label: "Status",
+      value: isDockingVoided(docking) ? "Voided" : "Active",
+      indicatorColor: getDockingStatusLegendColor(isDockingVoided(docking) ? "voided" : "active"),
+    },
+    { label: "Docking Date", value: formatDate(docking.docking_date) },
+    { label: "Docking Time", value: formatTime(docking.docking_date) },
+    { label: "Docking Fee", value: formatPeso(docking.docking_fee) },
+  ];
+  const boatInfoCards = isVisitor
+    ? [
+        { label: "Boat Name", value: getDockingBoatName(docking) },
+        { label: "Boat Type", value: getBoatTypeLabel(docking) },
+        { label: "Boat Owner", value: getDockingOwnerLabel(docking), className: "col-span-2" },
+        { label: "Address", value: getDockingOwnerAddress(docking), className: "col-span-2" },
+        { label: "Contact Number", value: getDockingOwnerContact(docking), className: "col-span-2" },
+      ]
+    : [
+        { label: "Boat Name", value: getDockingBoatName(docking) },
+        { label: "Boat Type", value: getBoatTypeLabel(docking) },
+        { label: "Boat Owner", value: getDockingOwnerLabel(docking), className: "col-span-2" },
+      ];
+
   return (
     <DetailDrawer
       open={open}
@@ -1309,19 +1630,26 @@ const DockingDrawer = ({ docking, open, onClose, onBack }) => {
         fontFamily={FONT}
       >
         <div className="grid grid-cols-2 gap-3">
-          {[
-            { label: "Boat Name", value: docking?.boat?.boat_name || "-" },
-            {
-              label: "Status",
-              value: isDockingVoided(docking) ? "Voided" : "Active",
-              indicatorColor: getDockingStatusLegendColor(isDockingVoided(docking) ? "voided" : "active"),
-            },
-            { label: "Boat Type", value: getBoatTypeLabel(docking) },
-            { label: "Boat Owner", value: docking?.boat?.owner?.full_name || docking?.boat?.owner_name || "-" },
-            { label: "Docking Date", value: formatDate(docking.docking_date) },
-            { label: "Docking Time", value: formatTime(docking.docking_date) },
-            { label: "Docking Fee", value: formatPeso(docking.docking_fee), className: "col-span-2" },
-          ].map(({ label, value, indicatorColor, className }) => (
+          {dockingInfoCards.map(({ label, value, indicatorColor, className }) => (
+            <DrawerInfoCard
+              key={label}
+              label={label}
+              value={value}
+              indicatorColor={indicatorColor}
+              className={className}
+            />
+          ))}
+        </div>
+      </DrawerSection>
+
+      <DrawerSection
+        icon={IoBoatOutline}
+        title="Boat Info"
+        subtitle={isVisitor ? "Manual visitor boat details" : "Registered boat details"}
+        fontFamily={FONT}
+      >
+        <div className="grid grid-cols-2 gap-3">
+          {boatInfoCards.map(({ label, value, indicatorColor, className }) => (
             <DrawerInfoCard
               key={label}
               label={label}
@@ -1374,7 +1702,11 @@ const SuperDocking = () => {
   const [search, setSearch]                   = useState("");
   const [statusFilter, setStatusFilter]       = useState("all");
   const [periodFilter, setPeriodFilter]       = useState("all");
-  const [activeView, setActiveView]           = useState(() => getDockingViewFromPath(location.pathname));
+  const [activeView, setActiveView]           = useState(() => getDockingViewFromLocation({
+    pathname: location.pathname,
+    search: location.search,
+    state: location.state,
+  }));
   const [requestedPage, setRequestedPage]     = useState(1);
   const [currentPage, setCurrentPage]         = useState(1);
   const [showAddModal, setShowAddModal]       = useState(false);
@@ -1391,7 +1723,7 @@ const SuperDocking = () => {
   const [serverErrors, setServerErrors]       = useState({});
   const [hasLoadedCalendarOnce, setHasLoadedCalendarOnce] = useState(false);
   const didRunTableFilterResetRef = useRef(false);
-  const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery();
+  const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery("transactions");
   const isHeadViewOnly = isHeadRole();
   const debouncedSearch = useDebounce(search, SEARCH_DEBOUNCE_MS);
   const rawHighlightedDockingId = getDockingHighlightId({ highlightedSearchResult, search: location.search });
@@ -1428,14 +1760,18 @@ const SuperDocking = () => {
   }, [location.key]);
 
   useEffect(() => {
-    const nextView = getDockingViewFromPath(location.pathname);
+    const nextView = getDockingViewFromLocation({
+      pathname: location.pathname,
+      search: location.search,
+      state: location.state,
+    });
     setActiveView(nextView);
     cacheTab(DOCKING_TAB_STORAGE_KEY, nextView, DOCKING_TAB_KEYS);
 
     if (location.pathname === "/docking" && nextView === "schedule") {
       navigate("/docking-calendar", { replace: true, state: location.state });
     }
-  }, [location.pathname, location.state, navigate]);
+  }, [location.pathname, location.search, location.state, navigate]);
 
   // Calendar state
   const [calendarDate, setCalendarDate] = useState(() => getFiscalCalendarDate(fiscalYear));
@@ -1501,9 +1837,11 @@ const SuperDocking = () => {
     total_fee_today: 0,
   };
   const lookupBoats = lookupsData?.boats ?? EMPTY_ARRAY;
+  const lookupBoatTypes = lookupsData?.boatTypes ?? EMPTY_ARRAY;
   const lookupFees = lookupsData?.fees ?? EMPTY_ARRAY;
   const lookupUsers = lookupsData?.users ?? EMPTY_ARRAY;
   const boats    = useMemo(() => lookupBoats.filter((b) => !b.deleted_at), [lookupBoats]);
+  const boatTypes = useMemo(() => lookupBoatTypes.filter((type) => !type.deleted_at), [lookupBoatTypes]);
   const fees     = useMemo(() => lookupFees, [lookupFees]);
 
   // ── Calendar helpers ──────────────────────────────────────────────────────
@@ -2165,7 +2503,7 @@ const SuperDocking = () => {
                                   }}
                                 >
                                   <span style={{ fontSize: 11, fontWeight: 600, color: c.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                    {item?.boat?.boat_name || "Docking"}
+                                    {getDockingBoatName(item)}
                                   </span>
                                 </div>
                               );
@@ -2176,7 +2514,7 @@ const SuperDocking = () => {
                                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                                     {dayDockings.slice(visible.length).map((item) => (
                                       <p key={item.docking_id} style={{ margin: 0, fontSize: 13, fontFamily: FONT }}>
-                                        {item?.boat?.boat_name || "Docking"}
+                                        {getDockingBoatName(item)}
                                       </p>
                                     ))}
                                   </div>
@@ -2336,6 +2674,7 @@ const SuperDocking = () => {
                             highlightedDockingId &&
                             String(highlightedDockingId) === String(docking.docking_id);
                           const isVoided = isDockingVoided(docking);
+                          const isVisitor = isVisitingDocking(docking);
                           return (
                         <tr key={docking.docking_id} className={`cursor-pointer transition-colors ${highlightedDockingId ? "table-row-plain" : index % 2 === 0 ? "table-row-even" : "table-row-odd"} ${isHighlighted ? "universal-search-highlight" : ""}`.trim()}
                           onClick={() => setSelectedDocking(docking)}
@@ -2350,7 +2689,8 @@ const SuperDocking = () => {
                                   className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
                                   style={{ backgroundColor: isVoided ? "#f59e0b" : "#16a34a" }}
                                 />
-                                <p className="m-0 text-[13px] font-medium text-[#1a1f36]">{docking?.boat?.boat_name || "-"}</p>
+                                <p className="m-0 text-[13px] font-medium text-[#1a1f36]">{getDockingBoatName(docking)}</p>
+                                {isVisitor ? <VisitorPill /> : null}
                               </div>
                             </button>
                           </td>
@@ -2450,6 +2790,7 @@ const SuperDocking = () => {
         onClose={closeDockingModal}
         onSubmit={handleSaveDocking}
         saving={saving}
+        boatTypes={boatTypes}
         prefillDate={prefillDate}
         initialDocking={editingDocking}
         serverErrors={serverErrors}

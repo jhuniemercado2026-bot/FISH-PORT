@@ -33,6 +33,64 @@ const parseMoneyValue = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const compactText = (...parts: Array<unknown>) =>
+  parts
+    .map((part) => String(part ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+
+const isVisitingBoatRecord = (record: any) =>
+  String(record?.boat_category ?? "").toLowerCase() === "visiting" ||
+  Boolean(record?.visiting_boat_name);
+
+const getHistoryBoatName = (record: any) =>
+  String(
+    record?.display_boat_name ||
+      record?.visiting_boat_name ||
+      record?.boat?.boat_name ||
+      record?.boat_name ||
+      "Unknown Boat"
+  );
+
+const getHistoryBoatTypeName = (record: any) =>
+  String(
+    record?.display_boat_type_name ||
+      record?.visitingBoatType?.type_name ||
+      record?.visiting_boat_type?.type_name ||
+      record?.boat?.boat_type?.type_name ||
+      record?.boat?.boatType?.type_name ||
+      record?.boat?.boat_type_name ||
+      record?.boat_type_name ||
+      ""
+  ).trim();
+
+const getHistoryBoatOwnerName = (record: any) => {
+  const visitingOwner = compactText(
+    record?.visiting_owner_firstname,
+    record?.visiting_owner_lastname
+  );
+
+  return String(
+    record?.display_owner_name ||
+      visitingOwner ||
+      record?.boat?.owner?.full_name ||
+      record?.boat?.owner_name ||
+      record?.boat?.boat_owner ||
+      record?.owner_name ||
+      ""
+  ).trim();
+};
+
+const getHistoryBoatSubtitle = (record: any) => {
+  const parts = [
+    isVisitingBoatRecord(record) ? "Visiting Boat" : "",
+    getHistoryBoatTypeName(record),
+    getHistoryBoatOwnerName(record),
+  ].filter(Boolean);
+
+  return parts.join(" • ");
+};
+
 const tabs: {
   key: TransactionType;
   label: string;
@@ -195,6 +253,22 @@ const transactionIdForType = (type: TransactionCardType, data: any) => {
   return data?.ticket_id ?? data?.id;
 };
 
+const syncedTransactionIdForType = (transaction: SyncedHistoryTransaction) =>
+  transactionIdForType(
+    transaction.type,
+    unwrapSyncedTransactionData(transaction.data)
+  );
+
+const displayedTransactionKey = (transaction: {
+  type: TransactionCardType;
+  id: number | string;
+  data: any;
+}) => {
+  const data = unwrapSyncedTransactionData(transaction.data);
+  const id = transactionIdForType(transaction.type, data) ?? transaction.id;
+  return `${transaction.type}:${String(id)}`;
+};
+
 const upsertTransaction = (items: any[], type: TransactionCardType, nextItem: any) => {
   const nextId = transactionIdForType(type, nextItem);
 
@@ -299,10 +373,25 @@ const createDraftCardData = (draft: OfflineTransactionDraft) => {
   const metadata = draft.metadata ?? {};
 
   if (draft.type === "docking") {
+    const isVisitingBoat = payload.boat_category === "visiting";
     return {
       __isDraft: true,
       local_id: draft.local_id,
       created_at: draft.created_at,
+      boat_category: payload.boat_category ?? "registered",
+      visiting_boat_name: payload.visiting_boat_name,
+      visiting_owner_firstname: payload.visiting_owner_firstname,
+      visiting_owner_lastname: payload.visiting_owner_lastname,
+      visiting_owner_address: payload.visiting_owner_address,
+      visiting_contact_number: payload.visiting_contact_number,
+      visiting_boat_type_id: payload.visiting_boat_type_id,
+      display_boat_name: isVisitingBoat
+        ? payload.visiting_boat_name
+        : metadata.boat_name,
+      display_boat_type_name: metadata.boat_type_name,
+      display_owner_name: isVisitingBoat
+        ? compactText(payload.visiting_owner_firstname, payload.visiting_owner_lastname)
+        : undefined,
       boat: {
         boat_name: metadata.boat_name || `Boat #${payload.boat_id ?? "-"}`,
       },
@@ -312,6 +401,7 @@ const createDraftCardData = (draft: OfflineTransactionDraft) => {
   }
 
   if (draft.type === "banyera") {
+    const isVisitingBoat = payload.boat_category === "visiting";
     const items = Array.isArray(payload.items) ? payload.items : [];
     const totalFee = items.reduce(
       (sum, item) => sum + parseMoneyValue(item?.subtotal),
@@ -322,6 +412,20 @@ const createDraftCardData = (draft: OfflineTransactionDraft) => {
       __isDraft: true,
       local_id: draft.local_id,
       created_at: draft.created_at,
+      boat_category: payload.boat_category ?? "registered",
+      visiting_boat_name: payload.visiting_boat_name,
+      visiting_owner_firstname: payload.visiting_owner_firstname,
+      visiting_owner_lastname: payload.visiting_owner_lastname,
+      visiting_owner_address: payload.visiting_owner_address,
+      visiting_contact_number: payload.visiting_contact_number,
+      visiting_boat_type_id: payload.visiting_boat_type_id,
+      display_boat_name: isVisitingBoat
+        ? payload.visiting_boat_name
+        : metadata.boat_name,
+      display_boat_type_name: metadata.boat_type_name,
+      display_owner_name: isVisitingBoat
+        ? compactText(payload.visiting_owner_firstname, payload.visiting_owner_lastname)
+        : undefined,
       boat: {
         boat_name: metadata.boat_name || `Boat #${payload.boat_id ?? "-"}`,
       },
@@ -376,7 +480,9 @@ const getTransactionStatus = (data: any) => {
     };
   }
 
-  if (String(data?.status ?? "").toLowerCase() === "pending") {
+  const normalizedStatus = String(data?.status ?? "").toLowerCase();
+
+  if (["pending", "unchecked"].includes(normalizedStatus)) {
     return {
       label: "Unchecked",
       icon: "time-outline" as keyof typeof Ionicons.glyphMap,
@@ -386,7 +492,7 @@ const getTransactionStatus = (data: any) => {
     };
   }
 
-  if (String(data?.status ?? "").toLowerCase() === "remitted") {
+  if (["remitted", "checked"].includes(normalizedStatus)) {
     return {
       label: "Checked",
       icon: "checkmark-circle" as keyof typeof Ionicons.glyphMap,
@@ -427,6 +533,31 @@ function StatusPill({ data }: { data: any }) {
   );
 }
 
+function VisitorPill({ data }: { data: any }) {
+  if (!isVisitingBoatRecord(data)) return null;
+
+  return (
+    <View
+      className="flex-shrink-0 items-center rounded-[6px] px-2 py-0.5"
+      style={{
+        backgroundColor: "#fef3c7",
+        borderColor: "#fde68a",
+        borderWidth: 1,
+      }}
+    >
+      <Text
+        className="text-[10px] uppercase"
+        style={{
+          color: "#92400e",
+          fontFamily: "Montserrat_700Bold",
+        }}
+      >
+        Visitor
+      </Text>
+    </View>
+  );
+}
+
 function HistorySkeletonCard() {
   return (
     <View
@@ -452,7 +583,7 @@ function HistorySkeletonCard() {
 function HistorySkeletonCards() {
   return (
     <View>
-      {Array.from({ length: 5 }).map((_, index) => (
+      {Array.from({ length: 8 }).map((_, index) => (
         <HistorySkeletonCard key={`history-skeleton-${index}`} />
       ))}
     </View>
@@ -469,7 +600,7 @@ function TransactionCard({
   onPress?: () => void;
 }) {
   if (type === "docking") {
-    const boatName = data.boat?.boat_name || "Unknown Boat";
+    const boatName = getHistoryBoatName(data);
     const date = formatPhilippineDate(data.docking_date);
     const time = formatPhilippineTime(data.docking_date);
     const dockingFee = parseMoneyValue(data.docking_fee);
@@ -486,13 +617,20 @@ function TransactionCard({
         style={cardShadowStyle}
       >
         <View className="flex-row items-start justify-between">
-          <View className="flex-1">
-            <Text
-              className="text-[14px] font-semibold text-[#1A1F36]"
-              style={{ fontFamily: "Montserrat_600SemiBold" }}
-            >
-              {boatName}
-            </Text>
+          <View className="flex-1 pr-3">
+            <View className="flex-row items-center gap-2">
+              <Text
+                className="text-[14px] font-semibold text-[#1A1F36]"
+                numberOfLines={1}
+                style={{
+                  flexShrink: 1,
+                  fontFamily: "Montserrat_600SemiBold",
+                }}
+              >
+                {boatName}
+              </Text>
+              <VisitorPill data={data} />
+            </View>
           </View>
           <View className="items-end">
             <Text
@@ -518,7 +656,7 @@ function TransactionCard({
   }
 
   if (type === "banyera") {
-    const boatName = data.boat?.boat_name || "Unknown Boat";
+    const boatName = getHistoryBoatName(data);
     const date = formatPhilippineDate(data.transaction_date);
     const time = formatPhilippineTime(data.transaction_date);
     const itemCount = data.items?.length || 0;
@@ -536,13 +674,20 @@ function TransactionCard({
         style={cardShadowStyle}
       >
         <View className="flex-row items-start justify-between">
-          <View className="flex-1">
-            <Text
-              className="text-[14px] font-semibold text-[#1A1F36]"
-              style={{ fontFamily: "Montserrat_600SemiBold" }}
-            >
-              {boatName}
-            </Text>
+          <View className="flex-1 pr-3">
+            <View className="flex-row items-center gap-2">
+              <Text
+                className="text-[14px] font-semibold text-[#1A1F36]"
+                numberOfLines={1}
+                style={{
+                  flexShrink: 1,
+                  fontFamily: "Montserrat_600SemiBold",
+                }}
+              >
+                {boatName}
+              </Text>
+              <VisitorPill data={data} />
+            </View>
           </View>
           <View className="items-end">
             <Text
@@ -688,6 +833,8 @@ export default function HistoryScreen() {
   const refreshKey = useHistoryStore((state) => state.refreshKey);
   const syncedTransactions = useHistoryStore((state) => state.syncedTransactions);
   const queuedDrafts = useHistoryStore((state) => state.queuedDrafts);
+  const offlineSyncProgress = useHistoryStore((state) => state.offlineSyncProgress);
+  const setOfflineSyncModalVisible = useHistoryStore((state) => state.setOfflineSyncModalVisible);
   const cacheTransactionDetail = useHistoryStore((state) => state.cacheTransactionDetail);
   const handledSyncedIdsRef = useRef<Set<string>>(new Set());
   const handledQueuedDraftIdsRef = useRef<Set<string>>(new Set());
@@ -1010,6 +1157,11 @@ export default function HistoryScreen() {
 
   const getDisplayedTransactions = () => {
     let transactions: { type: TransactionCardType; id: number | string; data: any }[] = [];
+    const syncedLocalIds = new Set(
+      syncedTransactions
+        .filter((transaction) => syncedTransactionIdForType(transaction))
+        .map((transaction) => transaction.local_id)
+    );
 
     if (selectedTab === "all" || selectedTab === "docking") {
       transactions.push(
@@ -1054,7 +1206,11 @@ export default function HistoryScreen() {
     {
       transactions.push(
         ...offlineDrafts
-          .filter((draft) => selectedTab === "all" || draft.type === selectedTab)
+          .filter(
+            (draft) =>
+              !syncedLocalIds.has(draft.local_id) &&
+              (selectedTab === "all" || draft.type === selectedTab)
+          )
           .map((draft) => ({
             type: draft.type,
             id: draft.local_id,
@@ -1062,6 +1218,18 @@ export default function HistoryScreen() {
           }))
       );
     }
+
+    const seenTransactionKeys = new Set<string>();
+    transactions = transactions.filter((transaction) => {
+      const key = displayedTransactionKey(transaction);
+
+      if (seenTransactionKeys.has(key)) {
+        return false;
+      }
+
+      seenTransactionKeys.add(key);
+      return true;
+    });
 
     transactions.sort((a, b) => {
       const aTimestamp = getTransactionSortValue(getTransactionDateValue(a.data, a.type));
@@ -1075,12 +1243,20 @@ export default function HistoryScreen() {
         const values: string[] = [];
 
         if (t.type === "docking") {
-          values.push(String(t.data?.boat?.boat_name || ""));
+          values.push(getHistoryBoatName(t.data));
+          values.push(getHistoryBoatTypeName(t.data));
+          values.push(getHistoryBoatOwnerName(t.data));
+          values.push(String(t.data?.visiting_owner_address || ""));
+          values.push(String(t.data?.visiting_contact_number || ""));
           values.push(String(t.data?.docking_fee || ""));
         }
 
         if (t.type === "banyera") {
-          values.push(String(t.data?.boat?.boat_name || ""));
+          values.push(getHistoryBoatName(t.data));
+          values.push(getHistoryBoatTypeName(t.data));
+          values.push(getHistoryBoatOwnerName(t.data));
+          values.push(String(t.data?.visiting_owner_address || ""));
+          values.push(String(t.data?.visiting_contact_number || ""));
           values.push(String(t.data?.total_fee || ""));
         }
 
@@ -1104,7 +1280,13 @@ export default function HistoryScreen() {
     if (statusFilter !== "all") {
       transactions = transactions.filter((t) => {
         const status = getTransactionStatus(t.data).label.toLowerCase();
-        return statusFilter === status;
+        const normalizedFilter =
+          statusFilter === "pending"
+            ? "unchecked"
+            : statusFilter === "remitted"
+              ? "checked"
+              : statusFilter;
+        return normalizedFilter === status;
       });
     }
 
@@ -1128,7 +1310,17 @@ export default function HistoryScreen() {
         : hasActiveFilter
           ? "No matching transactions found."
           : `No ${selectedTabLabel.toLowerCase()} transactions found.`;
-  const shouldShowSkeleton = isLoading && !hasAnyTransactionData;
+  const shouldShowSkeleton =
+    (isLoading || !hasLoadedTransactions) && !hasAnyTransactionData;
+  const shouldShowSyncIndicator = Boolean(
+    offlineSyncProgress &&
+      offlineSyncProgress.total > 0 &&
+      offlineSyncProgress.status !== "finished"
+  );
+  const isSyncPaused = offlineSyncProgress?.status === "paused";
+  const syncIndicatorText = offlineSyncProgress
+    ? `${offlineSyncProgress.processed}/${offlineSyncProgress.total}`
+    : "";
 
   return (
     <View className="flex-1 bg-[#FFFDFB]">
@@ -1141,13 +1333,46 @@ export default function HistoryScreen() {
         <View
           className="h-[66px] flex-row items-center justify-between overflow-hidden bg-[#1A1F36] px-5"
         >
-          <Text
-            className="text-[18px] text-white"
-            style={{ fontFamily: "Montserrat_400Regular" }}
+          <View className="w-[86px]">
+            <Text
+              className="text-[18px] text-white"
+              style={{ fontFamily: "Montserrat_400Regular" }}
+            >
+              History
+            </Text>
+          </View>
+          <View className="flex-1 items-center">
+            {shouldShowSyncIndicator ? (
+              <Pressable
+                hitSlop={10}
+                onPress={() => setOfflineSyncModalVisible(true)}
+                className="flex-row items-center rounded-full px-3 py-2"
+                style={{
+                  backgroundColor: isSyncPaused ? "#FEF3C7" : "#DBEAFE",
+                }}
+              >
+                <Ionicons
+                  name={isSyncPaused ? "cloud-offline-outline" : "cloud-upload-outline"}
+                  size={13}
+                  color={isSyncPaused ? "#92400E" : "#2563EB"}
+                />
+                <Text
+                  className="ml-1.5 text-[11px]"
+                  style={{
+                    color: isSyncPaused ? "#92400E" : "#2563EB",
+                    fontFamily: "Montserrat_600SemiBold",
+                  }}
+                >
+                  {isSyncPaused ? "Paused" : syncIndicatorText}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <Pressable
+            hitSlop={10}
+            onPress={() => setOptionModalVisible(true)}
+            className="w-[86px] items-end"
           >
-            History
-          </Text>
-          <Pressable hitSlop={10} onPress={() => setOptionModalVisible(true)}>
             <Ionicons name="options-outline" size={24} color="#FFFFFF" />
           </Pressable>
         </View>

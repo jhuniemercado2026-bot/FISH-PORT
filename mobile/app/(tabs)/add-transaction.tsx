@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import * as ImagePicker from "expo-image-picker";
 import { usePreventScreenCapture } from "expo-screen-capture";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -27,6 +27,9 @@ import PlateNumberPicker from "../../components/PlateNumberPicker";
 import PrintPreviewModal, {
   PrintPreviewLine,
 } from "../../components/PrintPreviewModal";
+import RemittanceBreakdown, {
+  RemittanceBreakdownRow,
+} from "../../components/RemittanceBreakdown";
 import SearchFilter from "../../components/SearchFilter";
 import SignatureModal from "../../components/SignatureModal";
 import TimePicker from "../../components/TimePicker";
@@ -46,6 +49,7 @@ import { printThermalReceiptWithSignature } from "../../utils/thermalReceiptPrin
 
 
 type TransactionType = "banyera" | "docking" | "tickets" | "remittance";
+type BoatCategory = "registered" | "visiting";
 
 const REMITTANCE_COLLECTION_CACHE_PREFIX = "opol:remittance_today_collection";
 
@@ -53,6 +57,7 @@ type RemittanceCollectionCache = {
   amount: string;
   date: string;
   hasSubmittedRemittance: boolean;
+  breakdown: RemittanceBreakdownRow[];
 };
 
 const transactionOptions: Array<{
@@ -165,6 +170,57 @@ function InlineErrorCard({ message }: { message: string }) {
   );
 }
 
+function BoatCategoryCardSelect({
+  value,
+  onChange,
+}: {
+  value: BoatCategory;
+  onChange: (value: BoatCategory) => void;
+}) {
+  const options: Array<{
+    value: BoatCategory;
+    label: string;
+    icon: keyof typeof Ionicons.glyphMap;
+  }> = [
+    { value: "registered", label: "Registered Boat", icon: "boat-outline" },
+    { value: "visiting", label: "Visiting Boat", icon: "location-outline" },
+  ];
+
+  return (
+    <View className="mt-4">
+      <FormSectionLabel label="Boat Category" required />
+      <View className="gap-3">
+        {options.map((option) => {
+          const selected = value === option.value;
+
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => onChange(option.value)}
+              className={`h-[46px] w-full flex-row items-center justify-center rounded-[10px] border px-3 ${
+                selected ? "border-[#1A1F36] bg-[#1A1F36]" : "border-[#E2E8F0] bg-white"
+              }`}
+            >
+              <Ionicons
+                name={option.icon}
+                size={16}
+                color={selected ? "#FFFFFF" : "#1A1F36"}
+              />
+              <Text
+                className={`ml-2 text-center text-[13px] ${selected ? "text-white" : "text-[#1A1F36]"}`}
+                numberOfLines={1}
+                style={{ fontFamily: "Montserrat_400Regular" }}
+              >
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 function getManilaDateParts() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Manila",
@@ -251,6 +307,19 @@ type FeeOption = {
     type_name?: string | null;
     deleted_at?: string | null;
   } | null;
+  boat_type?: {
+    boat_type_id?: number | null;
+    type_name?: string | null;
+  } | null;
+  boatType?: {
+    boat_type_id?: number | null;
+    type_name?: string | null;
+  } | null;
+};
+
+type BoatTypeOption = {
+  value: string;
+  label: string;
 };
 
 type BanyeraItem = {
@@ -586,6 +655,46 @@ function getBoatTypeId(boat?: BoatOption | null) {
   );
 }
 
+function getBoatTypeName(boat?: BoatOption | null) {
+  return String(
+    boat?.boatType?.boat_type_name ??
+      boat?.boatType?.type_name ??
+      boat?.boat_type?.boat_type_name ??
+      boat?.boat_type?.type_name ??
+      ""
+  ).trim();
+}
+
+function buildBoatTypeOptions(boats: BoatOption[], fees: FeeOption[]): BoatTypeOption[] {
+  const optionsById = new Map<string, BoatTypeOption>();
+
+  boats.forEach((boat) => {
+    const typeId = getBoatTypeId(boat);
+    const label = getBoatTypeName(boat);
+    if (typeId && label && !optionsById.has(typeId)) {
+      optionsById.set(typeId, { value: typeId, label });
+    }
+  });
+
+  fees.forEach((fee) => {
+    if (!fee.boat_type_id) return;
+
+    const typeId = String(fee.boat_type_id);
+    const label =
+      fee.boat_type?.type_name ||
+      fee.boatType?.type_name ||
+      `Boat Type #${typeId}`;
+
+    if (!optionsById.has(typeId)) {
+      optionsById.set(typeId, { value: typeId, label });
+    }
+  });
+
+  return Array.from(optionsById.values()).sort((left, right) =>
+    left.label.localeCompare(right.label)
+  );
+}
+
 function matchesId(left?: string | number | null, right?: string | number | null) {
   return String(left ?? "") === String(right ?? "");
 }
@@ -676,6 +785,7 @@ async function readRemittanceCollectionCache(
       amount: String(cached.amount ?? "0"),
       date,
       hasSubmittedRemittance: Boolean(cached.hasSubmittedRemittance),
+      breakdown: Array.isArray(cached.breakdown) ? cached.breakdown : [],
     };
   } catch {
     return null;
@@ -865,6 +975,20 @@ export default function AddTransactionScreen() {
   const [feeId, setFeeId] = useState("");
   const [subtotal, setSubtotal] = useState("");
   const [dockingBoatId, setDockingBoatId] = useState("");
+  const [dockingBoatCategory, setDockingBoatCategory] =
+    useState<BoatCategory>("registered");
+  const [dockingVisitingBoatName, setDockingVisitingBoatName] = useState("");
+  const [dockingVisitingBoatTypeId, setDockingVisitingBoatTypeId] = useState("");
+  const [dockingVisitingBoatTypeSearch, setDockingVisitingBoatTypeSearch] =
+    useState("");
+  const [dockingVisitingOwnerFirstName, setDockingVisitingOwnerFirstName] =
+    useState("");
+  const [dockingVisitingOwnerLastName, setDockingVisitingOwnerLastName] =
+    useState("");
+  const [dockingVisitingOwnerAddress, setDockingVisitingOwnerAddress] =
+    useState("");
+  const [dockingVisitingContactNumber, setDockingVisitingContactNumber] =
+    useState("");
   const [dockingFeeId, setDockingFeeId] = useState("");
   const [dockingFee, setDockingFee] = useState("");
   const [dockingMonth, setDockingMonth] = useState(manilaNow.month);
@@ -882,6 +1006,20 @@ export default function AddTransactionScreen() {
   const [isLoadingClassifications, setIsLoadingClassifications] = useState(false);
   const [boats, setBoats] = useState<BoatOption[]>([]);
   const [banyeraBoatId, setBanyeraBoatId] = useState("");
+  const [banyeraBoatCategory, setBanyeraBoatCategory] =
+    useState<BoatCategory>("registered");
+  const [banyeraVisitingBoatName, setBanyeraVisitingBoatName] = useState("");
+  const [banyeraVisitingBoatTypeId, setBanyeraVisitingBoatTypeId] = useState("");
+  const [banyeraVisitingBoatTypeSearch, setBanyeraVisitingBoatTypeSearch] =
+    useState("");
+  const [banyeraVisitingOwnerFirstName, setBanyeraVisitingOwnerFirstName] =
+    useState("");
+  const [banyeraVisitingOwnerLastName, setBanyeraVisitingOwnerLastName] =
+    useState("");
+  const [banyeraVisitingOwnerAddress, setBanyeraVisitingOwnerAddress] =
+    useState("");
+  const [banyeraVisitingContactNumber, setBanyeraVisitingContactNumber] =
+    useState("");
   const [banyeraBoatSearch, setBanyeraBoatSearch] = useState("");
   const [isBanyeraBoatPickerOpen, setIsBanyeraBoatPickerOpen] = useState(false);
   const [banyeraFeeId, setBanyeraFeeId] = useState("");
@@ -959,6 +1097,8 @@ export default function AddTransactionScreen() {
   const [isLoadingRemittanceCollection, setIsLoadingRemittanceCollection] =
     useState(false);
   const [hasSubmittedRemittance, setHasSubmittedRemittance] = useState(false);
+  const [remittanceBreakdown, setRemittanceBreakdown] = useState<RemittanceBreakdownRow[]>([]);
+  const [isRemittanceBreakdownOpen, setIsRemittanceBreakdownOpen] = useState(false);
   const [remittanceFieldErrors, setRemittanceFieldErrors] = useState<
     Record<string, string>
   >({});
@@ -992,6 +1132,7 @@ export default function AddTransactionScreen() {
     remittanceSystemCollection - remittanceCashAmount,
     0
   );
+
   const isGlobalTransactionLocked = Boolean(
     transactionLock?.is_locked && transactionLock?.applies_to === "transactions"
   );
@@ -1007,7 +1148,8 @@ export default function AddTransactionScreen() {
   const isRemittanceAlreadySubmitted = Boolean(
     selectedType === "remittance" &&
       (hasSubmittedRemittance ||
-        (transactionLock?.is_locked && transactionLock?.applies_to === "vehicle-tickets"))
+        (transactionLock?.is_locked &&
+          ["transactions", "vehicle-tickets"].includes(String(transactionLock?.applies_to ?? ""))))
   );
   const isOfflineRemittance = selectedType === "remittance" && !hasInternet;
   const isSaveDisabled =
@@ -1041,6 +1183,7 @@ export default function AddTransactionScreen() {
           setHasSubmittedRemittance(cached.hasSubmittedRemittance);
           setRemittanceCollected(cached.amount);
           setRemittanceCash(cached.amount);
+          setRemittanceBreakdown(cached.breakdown);
           setRemittanceFieldErrors((current) => ({ ...current, date: "" }));
         }
       }
@@ -1058,7 +1201,7 @@ export default function AddTransactionScreen() {
         const response = await fetch(
           `${getApiBaseUrl()}/remittances/today-collection?date=${encodeURIComponent(
             selectedRemittanceDate
-          )}`,
+          )}&summary=1&breakdown=1`,
           { headers: buildApiHeaders(authToken) }
         );
         const data = await response.json().catch(() => null);
@@ -1078,11 +1221,13 @@ export default function AddTransactionScreen() {
         setHasSubmittedRemittance(hasSubmittedForDate);
         setRemittanceCollected(amountText);
         setRemittanceCash(amountText);
+        setRemittanceBreakdown(Array.isArray(data?.breakdown) ? data.breakdown : []);
         setRemittanceFieldErrors((current) => ({ ...current, date: "" }));
         await saveRemittanceCollectionCache(userId, {
           amount: amountText,
           date: selectedRemittanceDate,
           hasSubmittedRemittance: hasSubmittedForDate,
+          breakdown: Array.isArray(data?.breakdown) ? data.breakdown : [],
         });
       } catch {
         if (requestId !== remittanceCollectionRequestRef.current || hasCachedCollection) {
@@ -1188,7 +1333,7 @@ export default function AddTransactionScreen() {
       }
 
       try {
-        const response = await fetch(`${getApiBaseUrl()}/transaction-lock?resource=vehicle-tickets`, {
+        const response = await fetch(`${getApiBaseUrl()}/transaction-lock?resource=transactions`, {
           headers: buildApiHeaders(authToken),
         });
         const json = await response.json().catch(() => null);
@@ -1633,25 +1778,46 @@ export default function AddTransactionScreen() {
       (boat.registration_id ?? "").toLowerCase().includes(search)
     );
   });
+  const boatTypeOptions = useMemo(
+    () => buildBoatTypeOptions(boats, fees),
+    [boats, fees]
+  );
   const filteredBanyeraBoats = filteredBoats.filter((boat) => isBoatActive(boat));
   const selectedBanyeraBoat =
     boats.find((boat) => matchesId(boat.boat_id, banyeraBoatId)) ?? null;
+  const selectedBanyeraBoatName =
+    banyeraBoatCategory === "visiting"
+      ? banyeraVisitingBoatName.trim()
+      : selectedBanyeraBoat?.boat_name ?? "";
+  const selectedBanyeraBoatTypeId =
+    banyeraBoatCategory === "visiting"
+      ? banyeraVisitingBoatTypeId
+      : getBoatTypeId(selectedBanyeraBoat);
   const selectedBanyeraBoatType =
-    selectedBanyeraBoat?.boatType?.boat_type_name ??
-    selectedBanyeraBoat?.boatType?.type_name ??
-    selectedBanyeraBoat?.boat_type?.boat_type_name ??
-    selectedBanyeraBoat?.boat_type?.type_name ??
-    "";
+    banyeraBoatCategory === "visiting"
+      ? boatTypeOptions.find((option) =>
+          matchesId(option.value, banyeraVisitingBoatTypeId)
+        )?.label ?? ""
+      : getBoatTypeName(selectedBanyeraBoat);
   const selectedBanyeraBoatOwner =
-    selectedBanyeraBoat?.owner?.full_name ||
-    [
-      selectedBanyeraBoat?.owner?.owner_firstname,
-      selectedBanyeraBoat?.owner?.owner_lastname,
-    ].filter(Boolean).join(" ") ||
-    selectedBanyeraBoat?.owner_name ||
-    "";
+    banyeraBoatCategory === "visiting"
+      ? [
+          banyeraVisitingOwnerFirstName.trim(),
+          banyeraVisitingOwnerLastName.trim(),
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : selectedBanyeraBoat?.owner?.full_name ||
+        [
+          selectedBanyeraBoat?.owner?.owner_firstname,
+          selectedBanyeraBoat?.owner?.owner_lastname,
+        ].filter(Boolean).join(" ") ||
+        selectedBanyeraBoat?.owner_name ||
+        "";
   const selectedBanyeraBoatOwnerSignature =
-    selectedBanyeraBoat?.owner?.owner_signature_data_url ?? "";
+    banyeraBoatCategory === "visiting"
+      ? ""
+      : selectedBanyeraBoat?.owner?.owner_signature_data_url ?? "";
   const hasFreshBanyeraOwnerSignature =
     !!banyeraOwnerSignature &&
     banyeraOwnerSignature !== selectedBanyeraBoatOwnerSignature;
@@ -1659,7 +1825,9 @@ export default function AddTransactionScreen() {
     !!banyeraOwnerSignature || !!selectedBanyeraBoatOwnerSignature;
   const banyeraOwnerSignatureImage =
     banyeraOwnerSignature || selectedBanyeraBoatOwnerSignature;
-  const banyeraOwnerSignatureStatus = !selectedBanyeraBoat
+  const banyeraOwnerSignatureStatus = banyeraBoatCategory === "visiting"
+    ? "Not required for visiting boats"
+    : !selectedBanyeraBoat
     ? "Auto-filled after selecting a boat"
     : hasBanyeraOwnerSignature
       ? hasFreshBanyeraOwnerSignature
@@ -1667,14 +1835,14 @@ export default function AddTransactionScreen() {
         : "Signature registered"
       : "No signature registered";
   const banyeraApplicableFees = fees.filter((fee) => {
-    if (!selectedBanyeraBoat?.boat_type_id) {
+    if (!selectedBanyeraBoatTypeId) {
       return false;
     }
 
     return (
       isBanyeraFee(fee) &&
       isFeeActive(fee) &&
-      String(fee.boat_type_id ?? "") === String(selectedBanyeraBoat.boat_type_id)
+      String(fee.boat_type_id ?? "") === String(selectedBanyeraBoatTypeId)
     );
   });
   const filteredBanyeraFees = banyeraApplicableFees.filter((fee) => {
@@ -1727,7 +1895,7 @@ export default function AddTransactionScreen() {
     };
   });
   const banyeraReceiptText = buildBanyeraReceiptText({
-    boatName: selectedBanyeraBoat?.boat_name ?? "",
+    boatName: selectedBanyeraBoatName,
     ownerName: selectedBanyeraBoatOwner,
     transactionDateTime: banyeraPreviewDateTime,
     lines: banyeraPreviewLines,
@@ -1736,7 +1904,7 @@ export default function AddTransactionScreen() {
   const banyeraPrintPreviewDetails = [
     { label: "Date", value: formatPreviewDate(banyeraPreviewDateTime) },
     { label: "Time", value: formatPreviewTime(banyeraPreviewDateTime) },
-    { label: "Boat", value: selectedBanyeraBoat?.boat_name || "-" },
+    { label: "Boat", value: selectedBanyeraBoatName || "-" },
   ];
   const banyeraPrintPreviewLines: PrintPreviewLine[] = banyeraPreviewLines.map((line) => ({
     name: line.name,
@@ -1748,30 +1916,39 @@ export default function AddTransactionScreen() {
 
   const selectedDockingBoat =
     boats.find((boat) => matchesId(boat.boat_id, dockingBoatId)) ?? null;
+  const selectedDockingBoatTypeId =
+    dockingBoatCategory === "visiting"
+      ? dockingVisitingBoatTypeId
+      : getBoatTypeId(selectedDockingBoat);
   const selectedDockingBoatType =
-    selectedDockingBoat?.boatType?.boat_type_name ??
-    selectedDockingBoat?.boatType?.type_name ??
-    selectedDockingBoat?.boat_type?.boat_type_name ??
-    selectedDockingBoat?.boat_type?.type_name ??
-    "";
+    dockingBoatCategory === "visiting"
+      ? boatTypeOptions.find((option) =>
+          matchesId(option.value, dockingVisitingBoatTypeId)
+        )?.label ?? ""
+      : getBoatTypeName(selectedDockingBoat);
   const selectedDockingBoatOwner =
-    (selectedDockingBoat as BoatOption & {
-      owner?: { full_name?: string | null } | null;
-      owner_name?: string | null;
-    })?.owner?.full_name ??
-    (selectedDockingBoat as BoatOption & { owner_name?: string | null })?.owner_name ??
-    "";
+    dockingBoatCategory === "visiting"
+      ? [
+          dockingVisitingOwnerFirstName.trim(),
+          dockingVisitingOwnerLastName.trim(),
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : (selectedDockingBoat as BoatOption & {
+          owner?: { full_name?: string | null } | null;
+          owner_name?: string | null;
+        })?.owner?.full_name ??
+        (selectedDockingBoat as BoatOption & { owner_name?: string | null })?.owner_name ??
+        "";
   const availableFees = fees.filter((fee) => {
-    const selectedBoatTypeId = getBoatTypeId(selectedDockingBoat);
-
-    if (!selectedBoatTypeId) {
+    if (!selectedDockingBoatTypeId) {
       return false;
     }
 
     return (
       getFeeName(fee) === "docking" &&
       isFeeActive(fee) &&
-      matchesId(fee.boat_type_id, selectedBoatTypeId)
+      matchesId(fee.boat_type_id, selectedDockingBoatTypeId)
     );
   });
   const filteredFees = availableFees.filter((fee) => {
@@ -1835,7 +2012,7 @@ export default function AddTransactionScreen() {
   }, 0);
 
   useEffect(() => {
-    if (!selectedBanyeraBoat || banyeraFeeId || banyeraApplicableFees.length === 0) {
+    if (!selectedBanyeraBoatTypeId || banyeraFeeId || banyeraApplicableFees.length === 0) {
       return;
     }
 
@@ -1843,10 +2020,10 @@ export default function AddTransactionScreen() {
 
     setBanyeraFeeId(String(defaultFee.fee_id));
     setBanyeraFeeSearch("");
-  }, [banyeraApplicableFees, banyeraFeeId, selectedBanyeraBoat]);
+  }, [banyeraApplicableFees, banyeraFeeId, selectedBanyeraBoatTypeId]);
 
   useEffect(() => {
-    if (!selectedDockingBoat || dockingFeeId || availableFees.length === 0) {
+    if (!selectedDockingBoatTypeId || dockingFeeId || availableFees.length === 0) {
       return;
     }
 
@@ -1855,7 +2032,7 @@ export default function AddTransactionScreen() {
     setDockingFeeId(String(defaultFee.fee_id));
     setDockingFee(String(defaultFee.amount));
     setFeeSearch("");
-  }, [availableFees, dockingFeeId, selectedDockingBoat]);
+  }, [availableFees, dockingFeeId, selectedDockingBoatTypeId]);
 
   useEffect(() => {
     if (vehicleTypes.length > 0 || isLoadingVehicleTypes || fees.length === 0) {
@@ -1961,6 +2138,14 @@ export default function AddTransactionScreen() {
   function resetBanyeraForm() {
     const resetNow = getManilaDateParts();
     setBanyeraBoatId("");
+    setBanyeraBoatCategory("registered");
+    setBanyeraVisitingBoatName("");
+    setBanyeraVisitingBoatTypeId("");
+    setBanyeraVisitingBoatTypeSearch("");
+    setBanyeraVisitingOwnerFirstName("");
+    setBanyeraVisitingOwnerLastName("");
+    setBanyeraVisitingOwnerAddress("");
+    setBanyeraVisitingContactNumber("");
     setBanyeraBoatSearch("");
     setIsBanyeraBoatPickerOpen(false);
     setBanyeraFeeId("");
@@ -1982,6 +2167,34 @@ export default function AddTransactionScreen() {
     setIsBanyeraConsentModalOpen(false);
     setIsBanyeraPrintPreviewOpen(false);
     setBanyeraFieldErrors({});
+  }
+
+  function resetDockingForm() {
+    const resetNow = getManilaDateParts();
+    setDockingBoatId("");
+    setDockingBoatCategory("registered");
+    setDockingVisitingBoatName("");
+    setDockingVisitingBoatTypeId("");
+    setDockingVisitingBoatTypeSearch("");
+    setDockingVisitingOwnerFirstName("");
+    setDockingVisitingOwnerLastName("");
+    setDockingVisitingOwnerAddress("");
+    setDockingVisitingContactNumber("");
+    setDockingFeeId("");
+    setDockingFee("");
+    setDockingMonth(resetNow.month);
+    setDockingDay(resetNow.day);
+    setDockingYear(resetNow.year);
+    setDockingHour(resetNow.hour);
+    setDockingMinute(resetNow.minute);
+    setDockingMeridiem(resetNow.meridiem === "PM" ? "PM" : "AM");
+    setIsDockingDateAuto(true);
+    setIsDockingTimeAuto(true);
+    setBoatSearch("");
+    setFeeSearch("");
+    setIsBoatPickerOpen(false);
+    setIsFeePickerOpen(false);
+    setDockingFieldErrors({});
   }
 
   async function saveBanyeraOwnerSignature(
@@ -2138,6 +2351,7 @@ export default function AddTransactionScreen() {
     setRemittanceCollected("0");
     setRemittanceCash("0");
     setRemittanceRemarks("");
+    setIsRemittanceBreakdownOpen(false);
     setRemittanceFieldErrors({});
   }
 
@@ -2303,8 +2517,32 @@ export default function AddTransactionScreen() {
       if (selectedType === "banyera") {
         const nextErrors: Record<string, string> = {};
         const builtDate = `${banyeraYear}-${banyeraMonth.padStart(2, "0")}-${banyeraDay.padStart(2, "0")}`;
+        const isVisitingBanyeraBoat = banyeraBoatCategory === "visiting";
 
-        if (!banyeraBoatId.trim()) {
+        if (isVisitingBanyeraBoat) {
+          if (!banyeraVisitingBoatName.trim()) {
+            nextErrors.visiting_boat_name = "Boat name is required.";
+          }
+          if (!banyeraVisitingBoatTypeId.trim()) {
+            nextErrors.visiting_boat_type_id = "Boat type is required.";
+          }
+          if (!banyeraVisitingOwnerFirstName.trim()) {
+            nextErrors.visiting_owner_firstname = "First name is required.";
+          }
+          if (!banyeraVisitingOwnerLastName.trim()) {
+            nextErrors.visiting_owner_lastname = "Last name is required.";
+          }
+          if (!banyeraVisitingOwnerAddress.trim()) {
+            nextErrors.visiting_owner_address = "Address is required.";
+          }
+          if (
+            banyeraVisitingContactNumber.trim() &&
+            !/^\d{11}$/.test(banyeraVisitingContactNumber.trim())
+          ) {
+            nextErrors.visiting_contact_number =
+              "Contact number must be exactly 11 digits.";
+          }
+        } else if (!banyeraBoatId.trim()) {
           nextErrors.boat_id = "Please select a boat.";
         } else if (!isBoatActive(selectedBanyeraBoat)) {
           nextErrors.boat_id =
@@ -2336,7 +2574,11 @@ export default function AddTransactionScreen() {
           nextErrors.fish_items = "Please select a fish and put 1 or more quantity.";
         }
 
-        if (!banyeraOwnerSignature && !selectedBanyeraBoatOwnerSignature) {
+        if (
+          !isVisitingBanyeraBoat &&
+          !banyeraOwnerSignature &&
+          !selectedBanyeraBoatOwnerSignature
+        ) {
           nextErrors.owner_signature = "Boat owner signature is required.";
         }
 
@@ -2366,11 +2608,36 @@ export default function AddTransactionScreen() {
         }
 
         const banyeraPayload = {
-          boat_id: Number(banyeraBoatId),
+          boat_category: banyeraBoatCategory,
+          boat_id: isVisitingBanyeraBoat ? null : Number(banyeraBoatId),
+          visiting_boat_name: isVisitingBanyeraBoat
+            ? banyeraVisitingBoatName.trim()
+            : null,
+          visiting_owner_firstname: isVisitingBanyeraBoat
+            ? banyeraVisitingOwnerFirstName.trim()
+            : null,
+          visiting_owner_lastname: isVisitingBanyeraBoat
+            ? banyeraVisitingOwnerLastName.trim()
+            : null,
+          visiting_owner_address: isVisitingBanyeraBoat
+            ? banyeraVisitingOwnerAddress.trim()
+            : null,
+          visiting_contact_number:
+            isVisitingBanyeraBoat && banyeraVisitingContactNumber.trim()
+              ? banyeraVisitingContactNumber.trim()
+              : null,
+          visiting_boat_type_id: isVisitingBanyeraBoat
+            ? Number(banyeraVisitingBoatTypeId)
+            : null,
           transaction_date: transactionDateTime,
-          owner_signature_data_url: banyeraOwnerSignature || selectedBanyeraBoatOwnerSignature,
-          owner_signature_signed_at: new Date().toISOString(),
-          owner_signature_save_for_future: banyeraOwnerSignatureSaveForFuture,
+          ...(!isVisitingBanyeraBoat
+            ? {
+                owner_signature_data_url:
+                  banyeraOwnerSignature || selectedBanyeraBoatOwnerSignature,
+                owner_signature_signed_at: new Date().toISOString(),
+                owner_signature_save_for_future: banyeraOwnerSignatureSaveForFuture,
+              }
+            : {}),
           print_count: options.printed ? 1 : 0,
           items: banyeraItems.map((item) => ({
             classification_id: Number(item.classification_id),
@@ -2395,7 +2662,9 @@ export default function AddTransactionScreen() {
           label: "Banyera",
           token: signedInToken,
           metadata: {
-            boat_name: selectedBanyeraBoat?.boat_name,
+            boat_name: isVisitingBanyeraBoat
+              ? banyeraVisitingBoatName.trim()
+              : selectedBanyeraBoat?.boat_name,
             boat_type_name: selectedBanyeraBoatType,
           },
         });
@@ -2435,8 +2704,32 @@ export default function AddTransactionScreen() {
 
       if (selectedType === "docking") {
         const nextDockingErrors: Record<string, string> = {};
+        const isVisitingDockingBoat = dockingBoatCategory === "visiting";
 
-        if (!dockingBoatId.trim()) {
+        if (isVisitingDockingBoat) {
+          if (!dockingVisitingBoatName.trim()) {
+            nextDockingErrors.visiting_boat_name = "Boat name is required.";
+          }
+          if (!dockingVisitingBoatTypeId.trim()) {
+            nextDockingErrors.visiting_boat_type_id = "Boat type is required.";
+          }
+          if (!dockingVisitingOwnerFirstName.trim()) {
+            nextDockingErrors.visiting_owner_firstname = "First name is required.";
+          }
+          if (!dockingVisitingOwnerLastName.trim()) {
+            nextDockingErrors.visiting_owner_lastname = "Last name is required.";
+          }
+          if (!dockingVisitingOwnerAddress.trim()) {
+            nextDockingErrors.visiting_owner_address = "Address is required.";
+          }
+          if (
+            dockingVisitingContactNumber.trim() &&
+            !/^\d{11}$/.test(dockingVisitingContactNumber.trim())
+          ) {
+            nextDockingErrors.visiting_contact_number =
+              "Contact number must be exactly 11 digits.";
+          }
+        } else if (!dockingBoatId.trim()) {
           nextDockingErrors.boat_id = "Boat name is required.";
         }
 
@@ -2489,7 +2782,27 @@ export default function AddTransactionScreen() {
         }
 
         const dockingPayload = {
-          boat_id: Number(dockingBoatId),
+          boat_category: dockingBoatCategory,
+          boat_id: isVisitingDockingBoat ? null : Number(dockingBoatId),
+          visiting_boat_name: isVisitingDockingBoat
+            ? dockingVisitingBoatName.trim()
+            : null,
+          visiting_owner_firstname: isVisitingDockingBoat
+            ? dockingVisitingOwnerFirstName.trim()
+            : null,
+          visiting_owner_lastname: isVisitingDockingBoat
+            ? dockingVisitingOwnerLastName.trim()
+            : null,
+          visiting_owner_address: isVisitingDockingBoat
+            ? dockingVisitingOwnerAddress.trim()
+            : null,
+          visiting_contact_number:
+            isVisitingDockingBoat && dockingVisitingContactNumber.trim()
+              ? dockingVisitingContactNumber.trim()
+              : null,
+          visiting_boat_type_id: isVisitingDockingBoat
+            ? Number(dockingVisitingBoatTypeId)
+            : null,
           fee_id: Number(dockingFeeId),
           docking_date: dockingDateTime,
           docking_fee: Number(dockingFee),
@@ -2502,7 +2815,9 @@ export default function AddTransactionScreen() {
           label: "Docking",
           token: signedInToken,
           metadata: {
-            boat_name: selectedDockingBoat?.boat_name,
+            boat_name: isVisitingDockingBoat
+              ? dockingVisitingBoatName.trim()
+              : selectedDockingBoat?.boat_name,
             boat_type_name: selectedDockingBoatType,
           },
         });
@@ -2512,20 +2827,7 @@ export default function AddTransactionScreen() {
             addQueuedDrafts([draft]);
           }
           showToast("success", "Docking saved as offline draft.");
-          setDockingBoatId("");
-          setDockingFeeId("");
-          setDockingFee("");
-          const resetNow = getManilaDateParts();
-          setDockingMonth(resetNow.month);
-          setDockingDay(resetNow.day);
-          setDockingYear(resetNow.year);
-          setDockingHour(resetNow.hour);
-          setDockingMinute(resetNow.minute);
-          setDockingMeridiem(resetNow.meridiem === "PM" ? "PM" : "AM");
-          setIsDockingDateAuto(true);
-          setIsDockingTimeAuto(true);
-          setBoatSearch("");
-          setIsBoatPickerOpen(false);
+          resetDockingForm();
           return;
         }
 
@@ -2549,20 +2851,7 @@ export default function AddTransactionScreen() {
         } else {
           triggerHistoryRefresh();
         }
-        setDockingBoatId("");
-        setDockingFeeId("");
-        setDockingFee("");
-        const resetNow = getManilaDateParts();
-        setDockingMonth(resetNow.month);
-        setDockingDay(resetNow.day);
-        setDockingYear(resetNow.year);
-        setDockingHour(resetNow.hour);
-        setDockingMinute(resetNow.minute);
-        setDockingMeridiem(resetNow.meridiem === "PM" ? "PM" : "AM");
-        setIsDockingDateAuto(true);
-        setIsDockingTimeAuto(true);
-        setBoatSearch("");
-        setIsBoatPickerOpen(false);
+        resetDockingForm();
         return;
       }
 
@@ -2870,68 +3159,223 @@ export default function AddTransactionScreen() {
 
             {selectedType === "docking" ? (
               <>
-                <SearchFilter
-                  containerStyle={{ marginTop: 16 }}
-                  label="Boat Name"
-                  required
-                  error={dockingFieldErrors.boat_id}
-                  errorVariant="card"
-                  placeholder="Select boat name"
-                  value={dockingBoatId}
-                  loading={isLoadingBoats}
-                  searchText={boatSearch}
-                  onSearchTextChange={(value) => setBoatSearch(value)}
-                  options={boats.map((boat) => ({
-                    value: String(boat.boat_id),
-                    label: boat.boat_name,
-                    subtitle:
-                      selectedDockingBoatType || "Boat",
-                  }))}
-                  emptyText="No matching boats found."
-                  sheetTitle="Select Boat"
-                  onChangeValue={(value) => {
-                    setDockingBoatId(value);
+                <BoatCategoryCardSelect
+                  value={dockingBoatCategory}
+                  onChange={(value) => {
+                    setDockingBoatCategory(value);
+                    setDockingBoatId("");
                     setDockingFeeId("");
                     setDockingFee("");
                     setBoatSearch("");
                     setFeeSearch("");
-                    setDockingFieldErrors((current) => ({
-                      ...current,
-                      boat_id: "",
-                      fee_id: "",
-                    }));
+                    setDockingFieldErrors({});
                   }}
                 />
 
-                <View className="mt-4">
-                  <FormSectionLabel label="Boat Type" />
-                  <View className="h-14 justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
-                    <Text
-                      className={`text-[14px] ${
-                        selectedDockingBoatType
-                          ? "text-[#1A1F36]"
-                          : "text-[#9AA3AF]"
-                      }`}
-                      style={{ fontFamily: "Montserrat_400Regular" }}
-                    >
-                      {selectedDockingBoatType || "Auto-filled after selecting a boat"}
-                    </Text>
-                  </View>
-                </View>
+                {dockingBoatCategory === "registered" ? (
+                  <>
+                    <SearchFilter
+                      containerStyle={{ marginTop: 16 }}
+                      label="Boat Name"
+                      required
+                      error={dockingFieldErrors.boat_id}
+                      errorVariant="card"
+                      placeholder="Select boat name"
+                      value={dockingBoatId}
+                      loading={isLoadingBoats}
+                      searchText={boatSearch}
+                      onSearchTextChange={(value) => setBoatSearch(value)}
+                      options={boats.map((boat) => ({
+                        value: String(boat.boat_id),
+                        label: boat.boat_name,
+                        subtitle: getBoatTypeName(boat) || "Boat",
+                      }))}
+                      emptyText="No matching boats found."
+                      sheetTitle="Select Boat"
+                      onChangeValue={(value) => {
+                        setDockingBoatId(value);
+                        setDockingFeeId("");
+                        setDockingFee("");
+                        setBoatSearch("");
+                        setFeeSearch("");
+                        setDockingFieldErrors((current) => ({
+                          ...current,
+                          boat_id: "",
+                          fee_id: "",
+                        }));
+                      }}
+                    />
 
-                <View className="mt-4">
-                  <FormSectionLabel label="Boat Owner" />
-                  <View className="h-14 justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
-                    <Text
-                      className={`text-[14px] ${
-                        selectedDockingBoatOwner ? "text-[#1A1F36]" : "text-[#9AA3AF]"
-                      }`}
-                      style={{ fontFamily: "Montserrat_400Regular" }}
-                    >
-                      {selectedDockingBoatOwner || "Auto-filled after selecting a boat"}
-                    </Text>
-                  </View>
-                </View>
+                    <View className="mt-4">
+                      <FormSectionLabel label="Boat Type" />
+                      <View className="h-14 justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
+                        <Text
+                          className={`text-[14px] ${
+                            selectedDockingBoatType
+                              ? "text-[#1A1F36]"
+                              : "text-[#9AA3AF]"
+                          }`}
+                          style={{ fontFamily: "Montserrat_400Regular" }}
+                        >
+                          {selectedDockingBoatType || "Auto-filled after selecting a boat"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View className="mt-4">
+                      <FormSectionLabel label="Boat Owner" />
+                      <View className="h-14 justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
+                        <Text
+                          className={`text-[14px] ${
+                            selectedDockingBoatOwner ? "text-[#1A1F36]" : "text-[#9AA3AF]"
+                          }`}
+                          style={{ fontFamily: "Montserrat_400Regular" }}
+                        >
+                          {selectedDockingBoatOwner || "Auto-filled after selecting a boat"}
+                        </Text>
+                      </View>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <View className="mt-4">
+                      <FormSectionLabel label="Boat Name" required />
+                      <TextInput
+                        value={dockingVisitingBoatName}
+                        onChangeText={(value) => {
+                          setDockingVisitingBoatName(value);
+                          setDockingFieldErrors((current) => ({
+                            ...current,
+                            visiting_boat_name: "",
+                          }));
+                        }}
+                        placeholder="Enter boat name"
+                        placeholderTextColor="#9AA3AF"
+                        className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-4 text-[14px] text-[#1A1F36]"
+                        style={{ fontFamily: "Montserrat_400Regular" }}
+                      />
+                      {dockingFieldErrors.visiting_boat_name ? (
+                        <InlineErrorCard message={dockingFieldErrors.visiting_boat_name} />
+                      ) : null}
+                    </View>
+
+                    <SearchFilter
+                      containerStyle={{ marginTop: 16 }}
+                      label="Boat Type"
+                      required
+                      error={dockingFieldErrors.visiting_boat_type_id}
+                      errorVariant="card"
+                      placeholder="Select boat type"
+                      value={dockingVisitingBoatTypeId}
+                      searchText={dockingVisitingBoatTypeSearch}
+                      onSearchTextChange={(value) =>
+                        setDockingVisitingBoatTypeSearch(value)
+                      }
+                      options={boatTypeOptions}
+                      emptyText="No matching boat types found."
+                      sheetTitle="Select Boat Type"
+                      onChangeValue={(value) => {
+                        setDockingVisitingBoatTypeId(value);
+                        setDockingVisitingBoatTypeSearch("");
+                        setDockingFeeId("");
+                        setDockingFee("");
+                        setFeeSearch("");
+                        setDockingFieldErrors((current) => ({
+                          ...current,
+                          visiting_boat_type_id: "",
+                          fee_id: "",
+                        }));
+                      }}
+                    />
+
+                    <View className="mt-4 gap-3">
+                      <View>
+                        <FormSectionLabel label="First Name" required />
+                        <TextInput
+                          value={dockingVisitingOwnerFirstName}
+                          onChangeText={(value) => {
+                            setDockingVisitingOwnerFirstName(value);
+                            setDockingFieldErrors((current) => ({
+                              ...current,
+                              visiting_owner_firstname: "",
+                            }));
+                          }}
+                          placeholder="Enter first name"
+                          placeholderTextColor="#9AA3AF"
+                          className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-4 text-[14px] text-[#1A1F36]"
+                          style={{ fontFamily: "Montserrat_400Regular" }}
+                        />
+                        {dockingFieldErrors.visiting_owner_firstname ? (
+                          <InlineErrorCard message={dockingFieldErrors.visiting_owner_firstname} />
+                        ) : null}
+                      </View>
+                      <View>
+                        <FormSectionLabel label="Last Name" required />
+                        <TextInput
+                          value={dockingVisitingOwnerLastName}
+                          onChangeText={(value) => {
+                            setDockingVisitingOwnerLastName(value);
+                            setDockingFieldErrors((current) => ({
+                              ...current,
+                              visiting_owner_lastname: "",
+                            }));
+                          }}
+                          placeholder="Enter last name"
+                          placeholderTextColor="#9AA3AF"
+                          className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-4 text-[14px] text-[#1A1F36]"
+                          style={{ fontFamily: "Montserrat_400Regular" }}
+                        />
+                        {dockingFieldErrors.visiting_owner_lastname ? (
+                          <InlineErrorCard message={dockingFieldErrors.visiting_owner_lastname} />
+                        ) : null}
+                      </View>
+                    </View>
+
+                    <View className="mt-4">
+                      <FormSectionLabel label="Address" required />
+                      <TextInput
+                        value={dockingVisitingOwnerAddress}
+                        onChangeText={(value) => {
+                          setDockingVisitingOwnerAddress(value);
+                          setDockingFieldErrors((current) => ({
+                            ...current,
+                            visiting_owner_address: "",
+                          }));
+                        }}
+                        placeholder="Enter address"
+                        placeholderTextColor="#9AA3AF"
+                        className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-4 text-[14px] text-[#1A1F36]"
+                        style={{ fontFamily: "Montserrat_400Regular" }}
+                      />
+                      {dockingFieldErrors.visiting_owner_address ? (
+                        <InlineErrorCard message={dockingFieldErrors.visiting_owner_address} />
+                      ) : null}
+                    </View>
+
+                    <View className="mt-4">
+                      <FormSectionLabel label="Contact Number (Optional)" />
+                      <TextInput
+                        value={dockingVisitingContactNumber}
+                        onChangeText={(value) => {
+                          setDockingVisitingContactNumber(value.replace(/\D/g, ""));
+                          setDockingFieldErrors((current) => ({
+                            ...current,
+                            visiting_contact_number: "",
+                          }));
+                        }}
+                        keyboardType="numeric"
+                        maxLength={11}
+                        placeholder="Enter contact number"
+                        placeholderTextColor="#9AA3AF"
+                        className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-4 text-[14px] text-[#1A1F36]"
+                        style={{ fontFamily: "Montserrat_400Regular" }}
+                      />
+                      {dockingFieldErrors.visiting_contact_number ? (
+                        <InlineErrorCard message={dockingFieldErrors.visiting_contact_number} />
+                      ) : null}
+                    </View>
+                  </>
+                )}
 
                 <View className="mt-4">
                   <FormSectionLabel label="Applicable Fee" />
@@ -3041,76 +3485,238 @@ export default function AddTransactionScreen() {
 
             {selectedType === "banyera" ? (
               <>
-                <View className="mt-4">
-                  <SearchFilter
-                    containerStyle={{ marginTop: 0 }}
-                    label="Boat Name"
-                    required
-                    error={banyeraFieldErrors.boat_id}
-                    errorVariant="card"
-                    placeholder="Select boat name"
-                    value={banyeraBoatId}
-                    loading={isLoadingBoats}
-                    searchText={banyeraBoatSearch}
-                    onSearchTextChange={(value) => setBanyeraBoatSearch(value)}
-                    options={filteredBanyeraBoats.map((boat) => ({
-                      value: String(boat.boat_id),
-                      label: boat.boat_name,
-                      subtitle: selectedBanyeraBoatType || "Boat",
-                    }))}
-                    emptyText="No matching boats found."
-                    sheetTitle="Select Boat"
-                    onChangeValue={(value) => {
-                      const nextBoat = boats.find((boat) => matchesId(boat.boat_id, value)) ?? null;
-                      setBanyeraBoatId(value);
-                      setBanyeraFeeId("");
-                      setBanyeraFeeSearch("");
-                      setBanyeraOwnerSignature(nextBoat?.owner?.owner_signature_data_url ?? "");
-                      setBanyeraOwnerSignatureSaveForFuture(false);
-                      setPendingBanyeraOwnerSignature("");
-                      setIsBanyeraSignatureModalOpen(false);
-                      setIsBanyeraConsentModalOpen(false);
-                      setBanyeraFieldErrors((current) => ({
-                        ...current,
-                        boat_id: "",
-                        fee_id: "",
-                        owner_signature: "",
-                      }));
-                    }}
-                  />
-                </View>
+                <BoatCategoryCardSelect
+                  value={banyeraBoatCategory}
+                  onChange={(value) => {
+                    setBanyeraBoatCategory(value);
+                    setBanyeraBoatId("");
+                    setBanyeraFeeId("");
+                    setBanyeraFeeSearch("");
+                    setBanyeraBoatSearch("");
+                    setBanyeraOwnerSignature("");
+                    setBanyeraOwnerSignatureSaveForFuture(false);
+                    setPendingBanyeraOwnerSignature("");
+                    setIsBanyeraSignatureModalOpen(false);
+                    setIsBanyeraConsentModalOpen(false);
+                    setBanyeraFieldErrors({});
+                  }}
+                />
 
-                <View className="mt-4">
-                  <FormSectionLabel label="Boat Type" />
-                  <View className="h-14 justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
-                    <Text
-                      className={`text-[14px] ${
-                        selectedBanyeraBoatType
-                          ? "text-[#1A1F36]"
-                          : "text-[#9AA3AF]"
-                      }`}
-                      style={{ fontFamily: "Montserrat_400Regular" }}
-                    >
-                      {selectedBanyeraBoatType || "Auto-filled after selecting a boat"}
-                    </Text>
-                  </View>
-                </View>
+                {banyeraBoatCategory === "registered" ? (
+                  <>
+                    <View className="mt-4">
+                      <SearchFilter
+                        containerStyle={{ marginTop: 0 }}
+                        label="Boat Name"
+                        required
+                        error={banyeraFieldErrors.boat_id}
+                        errorVariant="card"
+                        placeholder="Select boat name"
+                        value={banyeraBoatId}
+                        loading={isLoadingBoats}
+                        searchText={banyeraBoatSearch}
+                        onSearchTextChange={(value) => setBanyeraBoatSearch(value)}
+                        options={filteredBanyeraBoats.map((boat) => ({
+                          value: String(boat.boat_id),
+                          label: boat.boat_name,
+                          subtitle: getBoatTypeName(boat) || "Boat",
+                        }))}
+                        emptyText="No matching boats found."
+                        sheetTitle="Select Boat"
+                        onChangeValue={(value) => {
+                          const nextBoat =
+                            boats.find((boat) => matchesId(boat.boat_id, value)) ?? null;
+                          setBanyeraBoatId(value);
+                          setBanyeraFeeId("");
+                          setBanyeraFeeSearch("");
+                          setBanyeraOwnerSignature(
+                            nextBoat?.owner?.owner_signature_data_url ?? ""
+                          );
+                          setBanyeraOwnerSignatureSaveForFuture(false);
+                          setPendingBanyeraOwnerSignature("");
+                          setIsBanyeraSignatureModalOpen(false);
+                          setIsBanyeraConsentModalOpen(false);
+                          setBanyeraFieldErrors((current) => ({
+                            ...current,
+                            boat_id: "",
+                            fee_id: "",
+                            owner_signature: "",
+                          }));
+                        }}
+                      />
+                    </View>
 
-                <View className="mt-4">
-                  <FormSectionLabel label="Boat Owner" />
-                  <View className="h-14 justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
-                    <Text
-                      className={`text-[14px] ${
-                        selectedBanyeraBoatOwner
-                          ? "text-[#1A1F36]"
-                          : "text-[#9AA3AF]"
-                      }`}
-                      style={{ fontFamily: "Montserrat_400Regular" }}
-                    >
-                      {selectedBanyeraBoatOwner || "Auto-filled after selecting a boat"}
-                    </Text>
-                  </View>
-                </View>
+                    <View className="mt-4">
+                      <FormSectionLabel label="Boat Type" />
+                      <View className="h-14 justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
+                        <Text
+                          className={`text-[14px] ${
+                            selectedBanyeraBoatType
+                              ? "text-[#1A1F36]"
+                              : "text-[#9AA3AF]"
+                          }`}
+                          style={{ fontFamily: "Montserrat_400Regular" }}
+                        >
+                          {selectedBanyeraBoatType || "Auto-filled after selecting a boat"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View className="mt-4">
+                      <FormSectionLabel label="Boat Owner" />
+                      <View className="h-14 justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
+                        <Text
+                          className={`text-[14px] ${
+                            selectedBanyeraBoatOwner
+                              ? "text-[#1A1F36]"
+                              : "text-[#9AA3AF]"
+                          }`}
+                          style={{ fontFamily: "Montserrat_400Regular" }}
+                        >
+                          {selectedBanyeraBoatOwner || "Auto-filled after selecting a boat"}
+                        </Text>
+                      </View>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <View className="mt-4">
+                      <FormSectionLabel label="Boat Name" required />
+                      <TextInput
+                        value={banyeraVisitingBoatName}
+                        onChangeText={(value) => {
+                          setBanyeraVisitingBoatName(value);
+                          setBanyeraFieldErrors((current) => ({
+                            ...current,
+                            visiting_boat_name: "",
+                          }));
+                        }}
+                        placeholder="Enter boat name"
+                        placeholderTextColor="#9AA3AF"
+                        className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-4 text-[14px] text-[#1A1F36]"
+                        style={{ fontFamily: "Montserrat_400Regular" }}
+                      />
+                      {banyeraFieldErrors.visiting_boat_name ? (
+                        <InlineErrorCard message={banyeraFieldErrors.visiting_boat_name} />
+                      ) : null}
+                    </View>
+
+                    <SearchFilter
+                      containerStyle={{ marginTop: 16 }}
+                      label="Boat Type"
+                      required
+                      error={banyeraFieldErrors.visiting_boat_type_id}
+                      errorVariant="card"
+                      placeholder="Select boat type"
+                      value={banyeraVisitingBoatTypeId}
+                      searchText={banyeraVisitingBoatTypeSearch}
+                      onSearchTextChange={(value) =>
+                        setBanyeraVisitingBoatTypeSearch(value)
+                      }
+                      options={boatTypeOptions}
+                      emptyText="No matching boat types found."
+                      sheetTitle="Select Boat Type"
+                      onChangeValue={(value) => {
+                        setBanyeraVisitingBoatTypeId(value);
+                        setBanyeraVisitingBoatTypeSearch("");
+                        setBanyeraFeeId("");
+                        setBanyeraFeeSearch("");
+                        setBanyeraFieldErrors((current) => ({
+                          ...current,
+                          visiting_boat_type_id: "",
+                          fee_id: "",
+                        }));
+                      }}
+                    />
+
+                    <View className="mt-4 gap-3">
+                      <View>
+                        <FormSectionLabel label="First Name" required />
+                        <TextInput
+                          value={banyeraVisitingOwnerFirstName}
+                          onChangeText={(value) => {
+                            setBanyeraVisitingOwnerFirstName(value);
+                            setBanyeraFieldErrors((current) => ({
+                              ...current,
+                              visiting_owner_firstname: "",
+                            }));
+                          }}
+                          placeholder="Enter first name"
+                          placeholderTextColor="#9AA3AF"
+                          className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-4 text-[14px] text-[#1A1F36]"
+                          style={{ fontFamily: "Montserrat_400Regular" }}
+                        />
+                        {banyeraFieldErrors.visiting_owner_firstname ? (
+                          <InlineErrorCard message={banyeraFieldErrors.visiting_owner_firstname} />
+                        ) : null}
+                      </View>
+                      <View>
+                        <FormSectionLabel label="Last Name" required />
+                        <TextInput
+                          value={banyeraVisitingOwnerLastName}
+                          onChangeText={(value) => {
+                            setBanyeraVisitingOwnerLastName(value);
+                            setBanyeraFieldErrors((current) => ({
+                              ...current,
+                              visiting_owner_lastname: "",
+                            }));
+                          }}
+                          placeholder="Enter last name"
+                          placeholderTextColor="#9AA3AF"
+                          className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-4 text-[14px] text-[#1A1F36]"
+                          style={{ fontFamily: "Montserrat_400Regular" }}
+                        />
+                        {banyeraFieldErrors.visiting_owner_lastname ? (
+                          <InlineErrorCard message={banyeraFieldErrors.visiting_owner_lastname} />
+                        ) : null}
+                      </View>
+                    </View>
+
+                    <View className="mt-4">
+                      <FormSectionLabel label="Address" required />
+                      <TextInput
+                        value={banyeraVisitingOwnerAddress}
+                        onChangeText={(value) => {
+                          setBanyeraVisitingOwnerAddress(value);
+                          setBanyeraFieldErrors((current) => ({
+                            ...current,
+                            visiting_owner_address: "",
+                          }));
+                        }}
+                        placeholder="Enter address"
+                        placeholderTextColor="#9AA3AF"
+                        className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-4 text-[14px] text-[#1A1F36]"
+                        style={{ fontFamily: "Montserrat_400Regular" }}
+                      />
+                      {banyeraFieldErrors.visiting_owner_address ? (
+                        <InlineErrorCard message={banyeraFieldErrors.visiting_owner_address} />
+                      ) : null}
+                    </View>
+
+                    <View className="mt-4">
+                      <FormSectionLabel label="Contact Number (Optional)" />
+                      <TextInput
+                        value={banyeraVisitingContactNumber}
+                        onChangeText={(value) => {
+                          setBanyeraVisitingContactNumber(value.replace(/\D/g, ""));
+                          setBanyeraFieldErrors((current) => ({
+                            ...current,
+                            visiting_contact_number: "",
+                          }));
+                        }}
+                        keyboardType="numeric"
+                        maxLength={11}
+                        placeholder="Enter contact number"
+                        placeholderTextColor="#9AA3AF"
+                        className="h-14 rounded-[10px] border border-[#E8E1E6] bg-white px-4 text-[14px] text-[#1A1F36]"
+                        style={{ fontFamily: "Montserrat_400Regular" }}
+                      />
+                      {banyeraFieldErrors.visiting_contact_number ? (
+                        <InlineErrorCard message={banyeraFieldErrors.visiting_contact_number} />
+                      ) : null}
+                    </View>
+                  </>
+                )}
 
                 <View className="mt-4">
                   <FormSectionLabel label="Applicable Fee" />
@@ -3371,75 +3977,77 @@ export default function AddTransactionScreen() {
                   </View>
                 </View>
 
-                <View className="mt-4">
-                  <View className="mb-2 flex-row items-center justify-between">
-                    <View className="h-6 mt-2 justify-center">
-                      <FormSectionLabel label="Signature" required className="mb-0" />
-                    </View>
-                    <Pressable
-                      className="h-6 flex-row items-center justify-center"
-                      disabled={!selectedBanyeraBoat}
-                      onPress={() => {
-                        setIsBanyeraSignatureModalOpen(true);
-                        setBanyeraFieldErrors((current) => ({
-                          ...current,
-                          owner_signature: "",
-                        }));
-                      }}
-                    >
-                      <Ionicons
-                        name={hasBanyeraOwnerSignature ? "create-outline" : "add-outline"}
-                        size={16}
-                        color={selectedBanyeraBoat ? "#2563EB" : "#9AA3AF"}
-                      />
-                      <Text
-                        className={`ml-1 text-[12px] ${
-                          selectedBanyeraBoat ? "text-[#2563EB]" : "text-[#9AA3AF]"
-                        }`}
-                        style={{ fontFamily: "Montserrat_600SemiBold" }}
+                {banyeraBoatCategory === "registered" ? (
+                  <View className="mt-4">
+                    <View className="mb-2 flex-row items-center justify-between">
+                      <View className="h-6 mt-2 justify-center">
+                        <FormSectionLabel label="Signature" required className="mb-0" />
+                      </View>
+                      <Pressable
+                        className="h-6 flex-row items-center justify-center"
+                        disabled={!selectedBanyeraBoat}
+                        onPress={() => {
+                          setIsBanyeraSignatureModalOpen(true);
+                          setBanyeraFieldErrors((current) => ({
+                            ...current,
+                            owner_signature: "",
+                          }));
+                        }}
                       >
-                        {hasBanyeraOwnerSignature ? "Update Signature" : "Add Signature"}
-                      </Text>
-                    </Pressable>
-                  </View>
-                  <View className="relative h-24 justify-center overflow-hidden border border-[#E8E1E6] bg-white px-4">
-                    {banyeraOwnerSignatureImage ? (
-                      <>
-                        <Image
-                          source={{ uri: banyeraOwnerSignatureImage }}
-                          className="h-20 w-full opacity-70"
-                          resizeMode="contain"
-                          blurRadius={12}
+                        <Ionicons
+                          name={hasBanyeraOwnerSignature ? "create-outline" : "add-outline"}
+                          size={16}
+                          color={selectedBanyeraBoat ? "#2563EB" : "#9AA3AF"}
                         />
-                        <View className="absolute inset-0 items-center justify-center bg-white/40">
-                          <View className="flex-row items-center bg-[#1A1F36]/90 px-3 py-1.5">
-                            <Ionicons
-                              name="eye-off-outline"
-                              size={14}
-                              color="#FFFFFF"
-                            />
-                            <Text
-                              className="ml-1.5 text-[11px] text-white"
-                              style={{ fontFamily: "Montserrat_600SemiBold" }}
-                            >
-                              Signature hidden
-                            </Text>
+                        <Text
+                          className={`ml-1 text-[12px] ${
+                            selectedBanyeraBoat ? "text-[#2563EB]" : "text-[#9AA3AF]"
+                          }`}
+                          style={{ fontFamily: "Montserrat_600SemiBold" }}
+                        >
+                          {hasBanyeraOwnerSignature ? "Update Signature" : "Add Signature"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <View className="relative h-24 justify-center overflow-hidden border border-[#E8E1E6] bg-white px-4">
+                      {banyeraOwnerSignatureImage ? (
+                        <>
+                          <Image
+                            source={{ uri: banyeraOwnerSignatureImage }}
+                            className="h-20 w-full opacity-70"
+                            resizeMode="contain"
+                            blurRadius={12}
+                          />
+                          <View className="absolute inset-0 items-center justify-center bg-white/40">
+                            <View className="flex-row items-center bg-[#1A1F36]/90 px-3 py-1.5">
+                              <Ionicons
+                                name="eye-off-outline"
+                                size={14}
+                                color="#FFFFFF"
+                              />
+                              <Text
+                                className="ml-1.5 text-[11px] text-white"
+                                style={{ fontFamily: "Montserrat_600SemiBold" }}
+                              >
+                                Signature hidden
+                              </Text>
+                            </View>
                           </View>
-                        </View>
-                      </>
-                    ) : (
-                      <Text
-                        className="text-center text-[14px] text-[#9AA3AF]"
-                        style={{ fontFamily: "Montserrat_400Regular" }}
-                      >
-                        {banyeraOwnerSignatureStatus}
-                      </Text>
-                    )}
+                        </>
+                      ) : (
+                        <Text
+                          className="text-center text-[14px] text-[#9AA3AF]"
+                          style={{ fontFamily: "Montserrat_400Regular" }}
+                        >
+                          {banyeraOwnerSignatureStatus}
+                        </Text>
+                      )}
+                    </View>
+                    {banyeraFieldErrors.owner_signature ? (
+                      <InlineErrorCard message={banyeraFieldErrors.owner_signature} />
+                    ) : null}
                   </View>
-                  {banyeraFieldErrors.owner_signature ? (
-                    <InlineErrorCard message={banyeraFieldErrors.owner_signature} />
-                  ) : null}
-                </View>
+                ) : null}
 
               </>
             ) : null}
@@ -3736,12 +4344,16 @@ export default function AddTransactionScreen() {
               <>
                 <View className="mt-4">
                   <FormSectionLabel label="Today's Collection" required />
-                  <View className="h-14 flex-row items-center justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4">
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setIsRemittanceBreakdownOpen(true)}
+                    className="h-14 flex-row items-center justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-4"
+                  >
                     {isLoadingRemittanceCollection ? (
                       <ActivityIndicator color="#1A1F36" size="small" />
                     ) : (
                       <Text
-                        className="w-full text-[14px] text-[#1A1F36]"
+                        className="w-full text-[14px] text-[#2563EB]"
                         style={{ fontFamily: "Montserrat_400Regular" }}
                       >
                         {`₱${remittanceSystemCollection.toLocaleString("en-PH", {
@@ -3750,7 +4362,7 @@ export default function AddTransactionScreen() {
                         })}`}
                       </Text>
                     )}
-                  </View>
+                  </Pressable>
                   <InlineErrorCard message={remittanceFieldErrors.date || ""} />
                 </View>
 
@@ -3863,6 +4475,12 @@ export default function AddTransactionScreen() {
           </View>
         </View>
       </ScrollView>
+      <RemittanceBreakdown
+        visible={isRemittanceBreakdownOpen}
+        rows={remittanceBreakdown}
+        totalAmount={remittanceSystemCollection}
+        onClose={() => setIsRemittanceBreakdownOpen(false)}
+      />
       <PrintPreviewModal
         visible={isBanyeraPrintPreviewOpen}
         title="OPOL FISH PORT"

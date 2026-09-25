@@ -228,6 +228,14 @@ const buildLabeledSubtitle = (pairs) =>
     .map(([label, value]) => `${label}: ${String(value).trim()}`)
     .join(" | ");
 const UNIVERSAL_SEARCH_MIN_LENGTH = 1;
+const UniversalSearchVisitorPill = () => (
+  <span
+    className="inline-flex flex-shrink-0 items-center rounded-[6px] px-2 py-0.5 text-[10px] font-bold uppercase tracking-normal"
+    style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}
+  >
+    Visitor
+  </span>
+);
 
 const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
   const navigate = useNavigate();
@@ -257,7 +265,7 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
 
   const notificationsQuery = useNotificationsDataQuery({ perPage: 10, paginated: true });
   const universalSearchQuery = useUniversalSearchQuery(
-    { search: debouncedSearchValue, limit: 30 },
+    { search: debouncedSearchValue, limit: 120 },
     { enabled: searchDataEnabled }
   );
 
@@ -552,7 +560,7 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
         }
       `}</style>
       {showLogoutModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="rounded-2xl p-8 flex flex-col items-center gap-5 mx-4 w-full max-w-sm bg-white shadow-2xl">
             <div className="w-16 h-16 rounded-full flex items-center justify-center bg-[#1a1f36]">
               <IoLogOutOutline className="text-3xl text-white" />
@@ -699,7 +707,10 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="m-0 truncate text-[13px] font-semibold text-[#1a1f36]">{item.title}</p>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="m-0 truncate text-[13px] font-semibold text-[#1a1f36]">{item.title}</p>
+                              {item.is_visitor ? <UniversalSearchVisitorPill /> : null}
+                            </div>
                             {String(item.subtitle || "").trim() ? (
                               <p className="m-0 mt-0.5 truncate text-[12px] text-slate-700">{item.subtitle}</p>
                             ) : null}

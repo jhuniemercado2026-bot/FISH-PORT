@@ -166,10 +166,56 @@ class BanyeraTransactionController extends Controller
         $transaction->load([
             'boat.owner',
             'boat.boatType',
+            'visitingBoatType',
             'items.classification',
             'createdBy' => fn ($query) => $query->select('user_id', 'first_name', 'last_name', 'email'),
             'voidedBy' => fn ($query) => $query->select('user_id', 'first_name', 'last_name', 'email'),
         ]);
+    }
+
+    private function isVisitingBanyera(array|BanyeraTransaction $source): bool
+    {
+        $category = is_array($source)
+            ? ($source['boat_category'] ?? 'registered')
+            : ($source->boat_category ?? 'registered');
+
+        return strtolower((string) $category) === 'visiting';
+    }
+
+    private function visitingOwnerFullName(BanyeraTransaction $transaction): string
+    {
+        return trim(collect([
+            $transaction->visiting_owner_firstname,
+            $transaction->visiting_owner_lastname,
+        ])->filter()->implode(' '));
+    }
+
+    private function validateBanyeraFeesMatchBoatType(array $items, int $boatTypeId): ?array
+    {
+        $feeIds = collect($items)->pluck('fee_id')->filter()->unique()->values();
+
+        if ($feeIds->isEmpty()) {
+            return null;
+        }
+
+        $fees = Fee::query()
+            ->whereIn('fee_id', $feeIds)
+            ->get(['fee_id', 'boat_type_id']);
+
+        foreach ($feeIds as $feeId) {
+            $fee = $fees->firstWhere('fee_id', (int) $feeId);
+
+            if (!$fee || (int) $fee->boat_type_id !== $boatTypeId) {
+                return [
+                    'message' => 'The selected banyera fee does not match the selected boat type.',
+                    'errors' => [
+                        'items' => ['The selected banyera fee does not match the selected boat type.'],
+                    ],
+                ];
+            }
+        }
+
+        return null;
     }
 
     private function withoutSignatureDataUrls(array $payload): array
@@ -197,10 +243,19 @@ class BanyeraTransactionController extends Controller
         return [
             'banyera_id' => $transaction->banyera_id,
             'boat_id' => $transaction->boat_id,
+            'boat_category' => $transaction->boat_category ?? 'registered',
+            'visiting_boat_name' => $transaction->visiting_boat_name ?? null,
+            'visiting_owner_firstname' => $transaction->visiting_owner_firstname ?? null,
+            'visiting_owner_lastname' => $transaction->visiting_owner_lastname ?? null,
+            'visiting_owner_address' => $transaction->visiting_owner_address ?? null,
+            'visiting_contact_number' => $transaction->visiting_contact_number ?? null,
+            'visiting_boat_type_id' => $transaction->visiting_boat_type_id ?? null,
             'boat' => $transaction->boat ? [
                 'boat_id' => $transaction->boat->boat_id,
                 'boat_name' => $transaction->boat->boat_name,
             ] : null,
+            'display_boat_name' => $transaction->boat?->boat_name ?? $transaction->visiting_boat_name,
+            'display_owner_name' => $transaction->boat?->owner?->full_name ?? $this->visitingOwnerFullName($transaction),
             'transaction_date' => $this->formatBanyeraDateValue($transaction->transaction_date),
             'total_fee' => $transaction->total_fee,
             'is_billed' => (bool) ($transaction->billed_exists ?? false),
@@ -287,6 +342,24 @@ class BanyeraTransactionController extends Controller
         $query = BanyeraTransaction::where('boat_id', $boatId)
             ->whereNull('voided_at')
             ->whereDate('transaction_date', $date);
+
+        if ($excludeBanyeraId) {
+            $query->where('banyera_id', '!=', $excludeBanyeraId);
+        }
+
+        return $query->exists();
+    }
+
+    private function banyeraExistsForVisitingBoatOnDate(string $boatName, $boatTypeId, $transactionDate, $excludeBanyeraId = null): bool
+    {
+        $date = Carbon::parse($transactionDate, 'Asia/Manila')->toDateString();
+        $normalizedBoatName = mb_strtolower(trim($boatName));
+
+        $query = BanyeraTransaction::where('boat_category', 'visiting')
+            ->whereNull('voided_at')
+            ->whereDate('transaction_date', $date)
+            ->where('visiting_boat_type_id', (int) $boatTypeId)
+            ->whereRaw('LOWER(TRIM(visiting_boat_name)) = ?', [$normalizedBoatName]);
 
         if ($excludeBanyeraId) {
             $query->where('banyera_id', '!=', $excludeBanyeraId);
@@ -491,8 +564,9 @@ class BanyeraTransactionController extends Controller
     {
         $request = request();
         $fiscalYear = $this->fiscalYear($request);
+        $includeArchived = $request->boolean('include_archived') || $request->boolean('include_archived_lookups');
 
-        $query = FishClassification::query()
+        $query = ($includeArchived ? FishClassification::withTrashed() : FishClassification::query())
             ->with('createdBy:user_id,first_name,last_name,email')
             ->withCount(['banyeraItems as fish_using_count' => function ($q) use ($fiscalYear) {
                 $q->whereHas('transaction', function ($t) use ($fiscalYear) {
@@ -501,8 +575,11 @@ class BanyeraTransactionController extends Controller
                     }
                     $t->whereNull('voided_at');
                 });
-            }])
-            ->active();
+            }]);
+
+        if (! $includeArchived) {
+            $query->active();
+        }
 
         $search = trim((string) $request->query('search', ''));
         $status = (string) $request->query('status', 'all');
@@ -727,10 +804,43 @@ class BanyeraTransactionController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
+            'boat_category' => 'nullable|string|in:registered,visiting',
             'boat_id' => [
-                'required',
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', 'registered')) !== 'visiting'),
+                'nullable',
                 'integer',
                 Rule::exists('boats', 'boat_id')->whereNull('deleted_at'),
+            ],
+            'visiting_boat_name' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', 'registered')) === 'visiting'),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'visiting_owner_firstname' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', 'registered')) === 'visiting'),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'visiting_owner_lastname' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', 'registered')) === 'visiting'),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'visiting_owner_address' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', 'registered')) === 'visiting'),
+                'nullable',
+                'string',
+                'max:500',
+            ],
+            'visiting_contact_number' => 'nullable|string|regex:/^\d{11}$/',
+            'visiting_boat_type_id' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', 'registered')) === 'visiting'),
+                'nullable',
+                'integer',
+                Rule::exists('boat_types', 'boat_type_id')->whereNull('deleted_at'),
             ],
             'transaction_date' => 'nullable|date',
             'items' => 'nullable|array',
@@ -756,9 +866,21 @@ class BanyeraTransactionController extends Controller
             ], 422);
         }
 
-        $boat = $this->resolveActiveBoatForBanyera((int) $validated['boat_id']);
+        $validated['boat_category'] = strtolower((string) ($validated['boat_category'] ?? 'registered')) === 'visiting'
+            ? 'visiting'
+            : 'registered';
+        $isVisitingBoat = $this->isVisitingBanyera($validated);
+        $boat = null;
+        $boatTypeId = null;
 
-        if (!$boat) {
+        if ($isVisitingBoat) {
+            $boatTypeId = (int) $validated['visiting_boat_type_id'];
+        } else {
+            $boat = $this->resolveActiveBoatForBanyera((int) $validated['boat_id']);
+            $boatTypeId = (int) ($boat?->boat_type_id ?? 0);
+        }
+
+        if (!$isVisitingBoat && !$boat) {
             return response()->json([
                 'message' => 'Only active boats can be used for Banyera transactions.',
                 'errors' => [
@@ -767,14 +889,29 @@ class BanyeraTransactionController extends Controller
             ], 422);
         }
 
-        if ($this->banyeraExistsForBoatOnDate($validated['boat_id'], $transactionDate)) {
+        if ($feeError = $this->validateBanyeraFeesMatchBoatType($validated['items'] ?? [], $boatTypeId)) {
+            return response()->json($feeError, 422);
+        }
+
+        if (!$isVisitingBoat && $this->banyeraExistsForBoatOnDate($validated['boat_id'], $transactionDate)) {
             return response()->json([
                 'code' => 'duplicate_record',
                 'message' => 'A banyera record already exists for this boat on this date.',
             ], 422);
         }
 
-        $transaction = DB::transaction(function () use ($validated, $transactionDate, $boat) {
+        if ($isVisitingBoat && $this->banyeraExistsForVisitingBoatOnDate($validated['visiting_boat_name'], $validated['visiting_boat_type_id'], $transactionDate)) {
+            return response()->json([
+                'code' => 'duplicate_record',
+                'message' => 'A banyera record already exists for this visiting boat on this date.',
+                'errors' => [
+                    'visiting_boat_name' => ['Only one banyera record per visiting boat per day is allowed.'],
+                    'visiting_boat_type_id' => ['Only one banyera record per visiting boat per day is allowed.'],
+                ],
+            ], 422);
+        }
+
+        $transaction = DB::transaction(function () use ($validated, $transactionDate, $boat, $isVisitingBoat) {
             $itemPayload = $this->normalizeBanyeraItemPayload($validated['items'] ?? []);
             $totalFee = $this->calculateBanyeraItemsTotal($itemPayload);
             $signatureSignedAt = isset($validated['owner_signature_signed_at'])
@@ -786,7 +923,7 @@ class BanyeraTransactionController extends Controller
             if (
                 !empty($validated['owner_signature_data_url']) &&
                 !empty($validated['owner_signature_save_for_future']) &&
-                $boat->owner
+                $boat?->owner
             ) {
                 $uploadedSignature = $this->uploadSignatureToCloudinary($validated['owner_signature_data_url']);
                 $transactionSignatureDataUrl = $uploadedSignature['url'];
@@ -808,8 +945,15 @@ class BanyeraTransactionController extends Controller
             }
 
             $transaction = BanyeraTransaction::create([
-                'boat_id' => $validated['boat_id'],
-                'owner_id' => $boat->owner_id,
+                'boat_id' => $isVisitingBoat ? null : $validated['boat_id'],
+                'boat_category' => $validated['boat_category'],
+                'visiting_boat_name' => $isVisitingBoat ? trim($validated['visiting_boat_name']) : null,
+                'visiting_owner_firstname' => $isVisitingBoat ? trim($validated['visiting_owner_firstname']) : null,
+                'visiting_owner_lastname' => $isVisitingBoat ? trim($validated['visiting_owner_lastname']) : null,
+                'visiting_owner_address' => $isVisitingBoat ? trim($validated['visiting_owner_address']) : null,
+                'visiting_contact_number' => $isVisitingBoat ? ($validated['visiting_contact_number'] ?? null) : null,
+                'visiting_boat_type_id' => $isVisitingBoat ? $validated['visiting_boat_type_id'] : null,
+                'owner_id' => $boat?->owner_id,
                 'transaction_date' => $transactionDate,
                 'total_fee' => $totalFee,
                 'print_count' => (int) ($validated['print_count'] ?? 0),
@@ -830,7 +974,7 @@ class BanyeraTransactionController extends Controller
 
         $this->appendTransactionState($transaction);
         $payload = $this->transformTransaction($transaction);
-        $boatName = trim((string) ($payload['boat']['boat_name'] ?? 'Unknown boat'));
+        $boatName = trim((string) ($payload['display_boat_name'] ?? $payload['boat']['boat_name'] ?? 'Unknown boat'));
         $totalFee = number_format((float) ($payload['total_fee'] ?? $transaction->total_fee ?? 0), 2);
 
         app(ActivityLogService::class)->log(
@@ -1024,7 +1168,44 @@ class BanyeraTransactionController extends Controller
         }
 
         $validated = $request->validate([
-            'boat_id' => 'required|integer|exists:boats,boat_id',
+            'boat_category' => 'nullable|string|in:registered,visiting',
+            'boat_id' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', $transaction->boat_category ?? 'registered')) !== 'visiting'),
+                'nullable',
+                'integer',
+                Rule::exists('boats', 'boat_id')->whereNull('deleted_at'),
+            ],
+            'visiting_boat_name' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', $transaction->boat_category ?? 'registered')) === 'visiting'),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'visiting_owner_firstname' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', $transaction->boat_category ?? 'registered')) === 'visiting'),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'visiting_owner_lastname' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', $transaction->boat_category ?? 'registered')) === 'visiting'),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'visiting_owner_address' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', $transaction->boat_category ?? 'registered')) === 'visiting'),
+                'nullable',
+                'string',
+                'max:500',
+            ],
+            'visiting_contact_number' => 'nullable|string|regex:/^\d{11}$/',
+            'visiting_boat_type_id' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('boat_category', $transaction->boat_category ?? 'registered')) === 'visiting'),
+                'nullable',
+                'integer',
+                Rule::exists('boat_types', 'boat_type_id')->whereNull('deleted_at'),
+            ],
             'transaction_date' => 'nullable|date',
             'items' => 'nullable|array',
             'items.*.classification_id' => 'required|integer|exists:fish_classifications,classification_id',
@@ -1043,9 +1224,26 @@ class BanyeraTransactionController extends Controller
             ], 422);
         }
 
-        $boatIdChanged = $transaction->boat_id != $validated['boat_id'];
+        $validated['boat_category'] = strtolower((string) ($validated['boat_category'] ?? $transaction->boat_category ?? 'registered')) === 'visiting'
+            ? 'visiting'
+            : 'registered';
+        $isVisitingBoat = $this->isVisitingBanyera($validated);
+        $boat = null;
+        $boatTypeId = null;
 
-        if ($boatIdChanged && !$this->resolveActiveBoatForBanyera((int) $validated['boat_id'])) {
+        if ($isVisitingBoat) {
+            $boatTypeId = (int) $validated['visiting_boat_type_id'];
+        } else {
+            $boat = $this->resolveActiveBoatForBanyera((int) $validated['boat_id']);
+            $boatTypeId = (int) ($boat?->boat_type_id ?? 0);
+        }
+
+        $boatIdChanged = (int) ($transaction->boat_id ?? 0) !== (int) ($validated['boat_id'] ?? 0);
+        $categoryChanged = strtolower((string) ($transaction->boat_category ?? 'registered')) !== $validated['boat_category'];
+        $visitingBoatChanged = strtolower(trim((string) $transaction->visiting_boat_name)) !== strtolower(trim((string) ($validated['visiting_boat_name'] ?? '')));
+        $visitingBoatTypeChanged = (int) ($transaction->visiting_boat_type_id ?? 0) !== (int) ($validated['visiting_boat_type_id'] ?? 0);
+
+        if (!$isVisitingBoat && !$boat) {
             return response()->json([
                 'message' => 'Only active boats can be used for Banyera transactions.',
                 'errors' => [
@@ -1054,10 +1252,15 @@ class BanyeraTransactionController extends Controller
             ], 422);
         }
 
+        if ($feeError = $this->validateBanyeraFeesMatchBoatType($validated['items'] ?? [], $boatTypeId)) {
+            return response()->json($feeError, 422);
+        }
+
         $dateChanged = Carbon::parse($transaction->transaction_date)->toDateString() !== Carbon::parse($validated['transaction_date'] ?? $transaction->transaction_date)->toDateString();
 
         if (
-            ($boatIdChanged || $dateChanged)
+            !$isVisitingBoat
+            && ($boatIdChanged || $categoryChanged || $dateChanged)
             && $this->banyeraExistsForBoatOnDate(
                 $validated['boat_id'],
                 $validated['transaction_date'] ?? $transaction->transaction_date,
@@ -1069,19 +1272,46 @@ class BanyeraTransactionController extends Controller
             ], 422);
         }
 
+        if (
+            $isVisitingBoat
+            && ($categoryChanged || $visitingBoatChanged || $visitingBoatTypeChanged || $dateChanged)
+            && $this->banyeraExistsForVisitingBoatOnDate(
+                $validated['visiting_boat_name'],
+                $validated['visiting_boat_type_id'],
+                $validated['transaction_date'] ?? $transaction->transaction_date,
+                $transaction->banyera_id
+            )
+        ) {
+            return response()->json([
+                'message' => 'A banyera record already exists for this visiting boat on this date.',
+                'errors' => [
+                    'visiting_boat_name' => ['Only one banyera record per visiting boat per day is allowed.'],
+                    'visiting_boat_type_id' => ['Only one banyera record per visiting boat per day is allowed.'],
+                ],
+            ], 422);
+        }
+
         $beforeState = [
-            'boat' => $transaction->boat?->boat_name ?? ('Boat #' . $transaction->boat_id),
+            'boat' => $transaction->boat?->boat_name ?? $transaction->visiting_boat_name ?? ('Boat #' . $transaction->boat_id),
             'transaction_date' => $this->formatBanyeraDateLabel($transaction->transaction_date),
             'items' => $this->summarizeBanyeraItems($transaction->items),
             'total_fee' => number_format((float) $transaction->total_fee, 2),
         ];
 
-        $updatedTransaction = DB::transaction(function () use ($validated, $transaction) {
+        $updatedTransaction = DB::transaction(function () use ($validated, $transaction, $boat, $isVisitingBoat) {
             $itemPayload = $this->normalizeBanyeraItemPayload($validated['items'] ?? []);
             $totalFee = $this->calculateBanyeraItemsTotal($itemPayload);
 
             $transaction->update([
-                'boat_id' => $validated['boat_id'],
+                'boat_id' => $isVisitingBoat ? null : $validated['boat_id'],
+                'boat_category' => $validated['boat_category'],
+                'visiting_boat_name' => $isVisitingBoat ? trim($validated['visiting_boat_name']) : null,
+                'visiting_owner_firstname' => $isVisitingBoat ? trim($validated['visiting_owner_firstname']) : null,
+                'visiting_owner_lastname' => $isVisitingBoat ? trim($validated['visiting_owner_lastname']) : null,
+                'visiting_owner_address' => $isVisitingBoat ? trim($validated['visiting_owner_address']) : null,
+                'visiting_contact_number' => $isVisitingBoat ? ($validated['visiting_contact_number'] ?? null) : null,
+                'visiting_boat_type_id' => $isVisitingBoat ? $validated['visiting_boat_type_id'] : null,
+                'owner_id' => $boat?->owner_id,
                 'transaction_date' => $validated['transaction_date'] ?? $transaction->transaction_date,
                 'total_fee' => $totalFee,
             ]);
@@ -1096,7 +1326,7 @@ class BanyeraTransactionController extends Controller
         });
 
         $afterState = [
-            'boat' => $updatedTransaction->boat?->boat_name ?? ('Boat #' . $updatedTransaction->boat_id),
+            'boat' => $updatedTransaction->boat?->boat_name ?? $updatedTransaction->visiting_boat_name ?? ('Boat #' . $updatedTransaction->boat_id),
             'transaction_date' => $this->formatBanyeraDateLabel($updatedTransaction->transaction_date),
             'items' => $this->summarizeBanyeraItems($updatedTransaction->items),
             'total_fee' => number_format((float) $updatedTransaction->total_fee, 2),
@@ -1271,6 +1501,23 @@ class BanyeraTransactionController extends Controller
             ];
         }
 
+        $visitingBoatType = $transaction->visitingBoatType ? [
+            'boat_type_id' => $transaction->visitingBoatType->boat_type_id,
+            'type_name' => $transaction->visitingBoatType->type_name,
+            'deleted_at' => $transaction->visitingBoatType->deleted_at ?? null,
+        ] : null;
+
+        $isVisitingBoat = strtolower((string) ($transaction->boat_category ?? 'registered')) === 'visiting';
+        $displayBoatName = $isVisitingBoat
+            ? ($transaction->visiting_boat_name ?: 'Visiting Boat')
+            : ($transaction->boat?->boat_name ?? null);
+        $displayOwnerName = $isVisitingBoat
+            ? ($this->visitingOwnerFullName($transaction) ?: null)
+            : ($transaction->boat?->owner?->full_name ?? trim(($transaction->boat?->owner?->owner_firstname ?? '') . ' ' . ($transaction->boat?->owner?->owner_lastname ?? '')));
+        $displayBoatType = $isVisitingBoat
+            ? ($transaction->visitingBoatType?->type_name ?? null)
+            : ($transaction->boat?->boatType?->type_name ?? null);
+
         $items = collect($transaction->items ?? [])->map(function ($item) {
             $isArray = is_array($item);
             $classification = $isArray ? ($item['classification'] ?? null) : ($item->classification ?? null);
@@ -1309,6 +1556,13 @@ class BanyeraTransactionController extends Controller
         return [
             'banyera_id' => $transaction->banyera_id,
             'boat_id' => $transaction->boat_id,
+            'boat_category' => $transaction->boat_category ?? 'registered',
+            'visiting_boat_name' => $transaction->visiting_boat_name ?? null,
+            'visiting_owner_firstname' => $transaction->visiting_owner_firstname ?? null,
+            'visiting_owner_lastname' => $transaction->visiting_owner_lastname ?? null,
+            'visiting_owner_address' => $transaction->visiting_owner_address ?? null,
+            'visiting_contact_number' => $transaction->visiting_contact_number ?? null,
+            'visiting_boat_type_id' => $transaction->visiting_boat_type_id ?? null,
             'owner_id' => $transaction->owner_id ?? $transaction->boat?->owner_id ?? null,
             'transaction_date' => $transaction->transaction_date,
             'total_fee' => number_format((float) ($transaction->total_fee ?? 0), 2),
@@ -1328,7 +1582,11 @@ class BanyeraTransactionController extends Controller
             'is_voided' => $transaction->is_voided ?? (!is_null($transaction->voided_at)),
             'status' => $transaction->status ?? (!is_null($transaction->voided_at) ? 'voided' : 'active'),
             'is_billed' => $transaction->is_billed ?? (array_key_exists('billed_exists', $transaction->getAttributes()) ? (bool) $transaction->billed_exists : $this->banyeraIsBilled($transaction->banyera_id)),
+            'display_boat_name' => $displayBoatName,
+            'display_owner_name' => $displayOwnerName,
+            'display_boat_type' => $displayBoatType,
             'boat' => $boat,
+            'visiting_boat_type' => $visitingBoatType,
             'items' => $items,
         ];
     }

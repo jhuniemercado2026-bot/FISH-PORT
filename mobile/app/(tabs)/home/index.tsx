@@ -50,6 +50,44 @@ const parseMoneyValue = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const isVisitingBoatRecord = (record: any) =>
+  String(record?.boat_category ?? "").toLowerCase() === "visiting" ||
+  Boolean(record?.visiting_boat_name);
+
+const getHomeBoatName = (record: any) =>
+  String(
+    record?.display_boat_name ||
+      record?.visiting_boat_name ||
+      record?.boat?.boat_name ||
+      record?.boat_name ||
+      "Unknown Boat"
+  );
+
+function VisitorPill({ data }: { data: any }) {
+  if (!isVisitingBoatRecord(data)) return null;
+
+  return (
+    <View
+      className="flex-shrink-0 items-center rounded-[6px] px-2 py-0.5"
+      style={{
+        backgroundColor: "#fef3c7",
+        borderColor: "#fde68a",
+        borderWidth: 1,
+      }}
+    >
+      <Text
+        className="text-[10px] uppercase"
+        style={{
+          color: "#92400e",
+          fontFamily: "Montserrat_700Bold",
+        }}
+      >
+        Visitor
+      </Text>
+    </View>
+  );
+}
+
 const normalizeHistoryPayload = (payload: any, keys: string[] = []) => {
   if (Array.isArray(payload)) return payload;
   if (payload && Array.isArray(payload.data)) return payload.data;
@@ -256,6 +294,15 @@ const transactionIdForType = (type: "docking" | "banyera" | "tickets" | "remitta
   return data?.ticket_id ?? data?.id;
 };
 
+const syncedTransactionIdForType = (transaction: {
+  type: "docking" | "banyera" | "tickets" | "remittance";
+  data: Record<string, any>;
+}) =>
+  transactionIdForType(
+    transaction.type,
+    unwrapSyncedTransactionData(transaction.data)
+  );
+
 const upsertTransaction = (items: any[], type: "docking" | "banyera" | "tickets" | "remittance", nextItem: any) => {
   const nextId = transactionIdForType(type, nextItem);
 
@@ -281,12 +328,17 @@ const createDraftHomeRecord = (draft: OfflineTransactionDraft) => {
   const metadata = draft.metadata ?? {};
 
   if (draft.type === "docking") {
+    const isVisitingBoat = payload.boat_category === "visiting";
     return {
       __isDraft: true,
       local_id: draft.local_id,
       created_at: draft.created_at,
+      boat_category: payload.boat_category ?? "registered",
+      visiting_boat_name: payload.visiting_boat_name,
       boat: {
-        boat_name: metadata.boat_name || `Boat #${payload.boat_id ?? "-"}`,
+        boat_name: isVisitingBoat
+          ? payload.visiting_boat_name
+          : metadata.boat_name || `Boat #${payload.boat_id ?? "-"}`,
       },
       docking_date: payload.docking_date ?? draft.created_at,
       docking_fee: payload.docking_fee ?? 0,
@@ -296,13 +348,18 @@ const createDraftHomeRecord = (draft: OfflineTransactionDraft) => {
   if (draft.type === "banyera") {
     const items = Array.isArray(payload.items) ? payload.items : [];
     const totalFee = items.reduce((sum, item) => sum + parseMoneyValue(item?.subtotal), 0);
+    const isVisitingBoat = payload.boat_category === "visiting";
 
     return {
       __isDraft: true,
       local_id: draft.local_id,
       created_at: draft.created_at,
+      boat_category: payload.boat_category ?? "registered",
+      visiting_boat_name: payload.visiting_boat_name,
       boat: {
-        boat_name: metadata.boat_name || `Boat #${payload.boat_id ?? "-"}`,
+        boat_name: isVisitingBoat
+          ? payload.visiting_boat_name
+          : metadata.boat_name || `Boat #${payload.boat_id ?? "-"}`,
       },
       transaction_date: payload.transaction_date ?? draft.created_at,
       items,
@@ -775,7 +832,11 @@ export default function HomeScreen() {
           ? filterRecordsByCurrentUser(cachedHistory.remittance, currentUserId)
           : [];
         const storedDrafts = await getOfflineTransactionDrafts();
-        const syncedLocalIds = new Set(syncedTransactions.map((transaction) => transaction.local_id));
+        const syncedLocalIds = new Set(
+          syncedTransactions
+            .filter((transaction) => syncedTransactionIdForType(transaction))
+            .map((transaction) => transaction.local_id)
+        );
         const draftIds = new Set(storedDrafts.map((draft) => draft.local_id));
         const liveDrafts = queuedDrafts.filter((draft) => !draftIds.has(draft.local_id));
         const allDrafts = [...liveDrafts, ...storedDrafts];
@@ -937,9 +998,9 @@ export default function HomeScreen() {
   const banyeraCards = banyeraRecords.map((record) => {
     const itemCount = Array.isArray(record?.items) ? record.items.length : 0;
     const itemLabel = itemCount > 0 ? `${itemCount} item${itemCount > 1 ? "s" : ""}` : "No items";
-    const boatName = record?.boat?.boat_name || record?.boat_name || "Unknown Boat";
+    const boatName = getHomeBoatName(record);
     const transactionDate = record?.transaction_date || record?.created_at || record?.docking_date || null;
-    const subtitle = `${itemLabel} • ${formatBanyeraDate(transactionDate)} • ${formatBanyeraTime(transactionDate)}`;
+    const subtitle = `${itemLabel} • ${formatBanyeraDate(transactionDate)}\n${formatBanyeraTime(transactionDate)}`;
     const totalFee = parseMoneyValue(record?.total_fee);
 
     return {
@@ -960,9 +1021,9 @@ export default function HomeScreen() {
   });
 
   const dockingCards = dockingRecords.map((record) => {
-    const boatName = record?.boat?.boat_name || record?.boat_name || "Unknown Boat";
+    const boatName = getHomeBoatName(record);
     const transactionDate = record?.docking_date || record?.created_at || null;
-    const subtitle = `${formatBanyeraDate(transactionDate)} • ${formatBanyeraTime(transactionDate)}`;
+    const subtitle = `${formatBanyeraDate(transactionDate)}\n${formatBanyeraTime(transactionDate)}`;
     const totalFee = parseMoneyValue(record?.docking_fee);
 
     return {
@@ -985,7 +1046,7 @@ export default function HomeScreen() {
   const ticketCards = ticketRecords.map((record) => {
     const title = record?.plate_number || record?.vehicle_type?.type_name || record?.vehicleType?.type_name || "Ticket";
     const transactionDate = record?.transaction_date || record?.ticket_date || record?.created_at || null;
-    const subtitle = `${formatBanyeraDate(transactionDate)} • ${formatBanyeraTime(transactionDate)}`;
+    const subtitle = `${formatBanyeraDate(transactionDate)}\n${formatBanyeraTime(transactionDate)}`;
     const totalFee = parseMoneyValue(record?.total_fee || record?.ticket_fee);
 
     return {
@@ -1402,12 +1463,21 @@ export default function HomeScreen() {
                       >
                         <View className="flex-row items-start justify-between">
                           <View className="flex-1 pr-3">
-                            <Text
-                              className="text-[14px] text-[#1A1F36]"
-                              style={{ fontFamily: "Montserrat_600SemiBold" }}
-                            >
-                              {card.title}
-                            </Text>
+                            <View className="flex-row items-center gap-2">
+                              <Text
+                                className="text-[14px] text-[#1A1F36]"
+                                numberOfLines={1}
+                                style={{
+                                  flexShrink: 1,
+                                  fontFamily: "Montserrat_600SemiBold",
+                                }}
+                              >
+                                {card.title}
+                              </Text>
+                              {(card.type === "docking" || card.type === "banyera") && (
+                                <VisitorPill data={card.data} />
+                              )}
+                            </View>
                             <Text
                               className="mt-1 text-[12px] text-[#8A94A3]"
                               style={{ fontFamily: "Montserrat_400Regular" }}

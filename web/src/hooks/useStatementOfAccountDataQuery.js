@@ -58,11 +58,13 @@ export const getStatementOfAccountDataQueryOptions = ({
       },
       stats: res.data?.stats ?? {
         total_billed: 0,
+        total_unbilled: 0,
         total_collected: 0,
         total_receivables: 0,
       },
       overviewStats: res.data?.overview_stats ?? res.data?.stats ?? {
         total_billed: 0,
+        total_unbilled: 0,
         total_collected: 0,
         total_receivables: 0,
       },

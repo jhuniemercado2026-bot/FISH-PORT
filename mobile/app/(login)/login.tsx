@@ -24,6 +24,31 @@ const FORGOT_PASSWORD_RESEND_COOLDOWN_SECONDS = 59;
 const VERIFICATION_CODE_LIMIT_MESSAGE =
   "You have reached the verification code limit for today. Please use the latest verification code sent to your email. This code expires within this day.";
 const EMPTY_RESET_CODE = ["", "", "", "", "", ""];
+const PASSWORD_RULES = [
+  { key: "length", label: "At least 8 characters" },
+  { key: "uppercase", label: "One uppercase letter" },
+  { key: "number", label: "One number" },
+  { key: "symbol", label: "One symbol" },
+] as const;
+
+const getPasswordStatus = (password = "") => ({
+  length: password.length >= 8,
+  uppercase: /[A-Z]/.test(password),
+  number: /\d/.test(password),
+  symbol: /[^A-Za-z0-9]/.test(password),
+});
+
+const getPasswordError = (password = "") => {
+  const status = getPasswordStatus(password);
+
+  if (!password) return "New password is required.";
+  if (!status.length) return "Password must be at least 8 characters.";
+  if (!status.uppercase) return "Password must include at least 1 uppercase letter.";
+  if (!status.number) return "Password must include at least 1 number.";
+  if (!status.symbol) return "Password must include at least 1 symbol.";
+
+  return "";
+};
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -43,6 +68,7 @@ export default function LoginScreen() {
   const [forgotEmailError, setForgotEmailError] = useState("");
   const [forgotEmailVerified, setForgotEmailVerified] = useState(false);
   const [forgotCodeVerified, setForgotCodeVerified] = useState(false);
+  const [forgotFirstLoginBlocked, setForgotFirstLoginBlocked] = useState(false);
   const [resetCode, setResetCode] = useState(EMPTY_RESET_CODE);
   const [forgotCodeError, setForgotCodeError] = useState("");
   const [forgotNewPassword, setForgotNewPassword] = useState("");
@@ -59,6 +85,14 @@ export default function LoginScreen() {
   const passwordRef = useRef<TextInput>(null);
   const resetCodeInputRefs = useRef<(TextInput | null)[]>([]);
   const forgotStep = forgotCodeVerified ? 3 : forgotEmailVerified ? 2 : 1;
+  const forgotPasswordLiveError = forgotNewPassword
+    ? getPasswordError(forgotNewPassword)
+    : forgotPasswordErrors.password;
+  const forgotConfirmPasswordLiveError = forgotConfirmPassword
+    ? forgotConfirmPassword === forgotNewPassword
+      ? ""
+      : "Passwords do not match."
+    : forgotPasswordErrors.password_confirmation;
 
   useEffect(() => {
     if (forgotResendCountdown <= 0) return undefined;
@@ -121,6 +155,7 @@ export default function LoginScreen() {
         body: JSON.stringify({
           email: trimmedEmail,
           password,
+          client_type: "mobile",
         }),
       });
 
@@ -165,6 +200,7 @@ export default function LoginScreen() {
     setForgotEmailError("");
     setForgotEmailVerified(false);
     setForgotCodeVerified(false);
+    setForgotFirstLoginBlocked(false);
     setResetCode([...EMPTY_RESET_CODE]);
     setForgotCodeError("");
     setForgotNewPassword("");
@@ -236,6 +272,7 @@ export default function LoginScreen() {
 
     setForgotEmailError("");
     setForgotCodeError("");
+    setForgotFirstLoginBlocked(false);
     setForgotCodeVerified(false);
     setResetCode([...EMPTY_RESET_CODE]);
 
@@ -283,6 +320,11 @@ export default function LoginScreen() {
           (options.resend
             ? "Failed to resend the verification code."
             : "Email does not exist.");
+        if (result?.requires_first_login) {
+          setForgotFirstLoginBlocked(true);
+          setForgotEmailError("");
+          return;
+        }
         if (options.resend) {
           setForgotCodeError(
             remainingResends === 0 ? VERIFICATION_CODE_LIMIT_MESSAGE : message
@@ -362,8 +404,8 @@ export default function LoginScreen() {
 
     if (!forgotNewPassword.trim()) {
       nextErrors.password = "New password is required.";
-    } else if (forgotNewPassword.length < 8) {
-      nextErrors.password = "New password must be at least 8 characters.";
+    } else if (getPasswordError(forgotNewPassword)) {
+      nextErrors.password = getPasswordError(forgotNewPassword);
     }
 
     if (!forgotConfirmPassword.trim()) {
@@ -540,7 +582,7 @@ export default function LoginScreen() {
                       autoCapitalize="none"
                       keyboardType="email-address"
                       editable={!isSubmitting}
-                      placeholder="you@gmail.com"
+                      placeholder="Enter your email"
                       placeholderTextColor="#A8AFB8"
                       className="flex-1 text-base text-[#1A1F36]"
                       onChangeText={(value) => {
@@ -579,7 +621,7 @@ export default function LoginScreen() {
                     <TextInput
                       ref={passwordRef}
                       editable={!isSubmitting}
-                      placeholder="•••••••••••"
+                      placeholder="Enter your password"
                       placeholderTextColor="#A8AFB8"
                       secureTextEntry={!showPassword}
                       className="flex-1 text-base text-[#1A1F36]"
@@ -703,13 +745,13 @@ export default function LoginScreen() {
                       <Text className="mb-2 text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
                         Email Address
                       </Text>
-                      <View className="h-14 flex-row items-center rounded-xl border border-[#F2E6EB] bg-white pl-4 pr-[14px]">
+                      <View className={`h-14 flex-row items-center rounded-xl border bg-white pl-4 pr-[14px] ${forgotEmailError ? "border-[#DC2626]" : "border-[#F2E6EB]"}`}>
                         <Ionicons name="mail-outline" size={18} color="#8C95A1" style={{ marginRight: 10 }} />
                         <TextInput
                           autoCapitalize="none"
                           keyboardType="email-address"
                           editable={!isCheckingForgotEmail}
-                          placeholder="you@gmail.com"
+                          placeholder="Enter your email"
                           placeholderTextColor="#A8AFB8"
                           className="flex-1 text-base text-[#1A1F36]"
                           value={forgotEmail}
@@ -722,6 +764,17 @@ export default function LoginScreen() {
                         />
                       </View>
                       <InlineErrorCard message={forgotEmailError} />
+                      {forgotFirstLoginBlocked ? (
+                        <View className="mt-2 flex-row items-start gap-2 rounded-[12px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-3">
+                          <Ionicons name="information-circle-outline" size={17} color="#D97706" />
+                          <Text
+                            className="flex-1 text-[12px] leading-4 text-[#92400E]"
+                            style={{ fontFamily: "Montserrat_400Regular" }}
+                          >
+                            This is a new account. Please sign in first with your temporary password to complete your account before using Forgot Password.
+                          </Text>
+                        </View>
+                      ) : null}
                       <Pressable
                         className="mt-5 h-14 items-center justify-center rounded-[8px] bg-[#1A1F36]"
                         disabled={isCheckingForgotEmail}
@@ -804,7 +857,7 @@ export default function LoginScreen() {
                       <Text className="mb-2 text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
                         New Password
                       </Text>
-                      <View className="h-14 flex-row items-center rounded-xl border border-[#F2E6EB] bg-white pl-4 pr-[14px]">
+                      <View className={`h-14 flex-row items-center rounded-xl border bg-white pl-4 pr-[14px] ${forgotPasswordLiveError ? "border-[#DC2626]" : forgotNewPassword ? "border-[#22C55E]" : "border-[#F2E6EB]"}`}>
                         <Ionicons name="lock-closed-outline" size={18} color="#8C95A1" style={{ marginRight: 10 }} />
                         <TextInput
                           editable={!isResettingForgotPassword}
@@ -815,10 +868,21 @@ export default function LoginScreen() {
                           value={forgotNewPassword}
                           onChangeText={(value) => {
                             setForgotNewPassword(value);
-                            setForgotPasswordErrors((current) => ({ ...current, password: "" }));
+                            setForgotPasswordErrors((current) => ({
+                              ...current,
+                              password: value ? getPasswordError(value) : "New password is required.",
+                              password_confirmation: forgotConfirmPassword
+                                ? value === forgotConfirmPassword
+                                  ? ""
+                                  : "Passwords do not match."
+                                : current.password_confirmation,
+                            }));
                           }}
                           style={{ fontFamily: "Montserrat_400Regular" }}
                         />
+                        {forgotNewPassword && !forgotPasswordLiveError ? (
+                          <Ionicons name="checkmark-outline" size={19} color="#22C55E" />
+                        ) : null}
                         <Pressable
                           disabled={isResettingForgotPassword}
                           hitSlop={10}
@@ -827,12 +891,37 @@ export default function LoginScreen() {
                           <Ionicons name={showForgotNewPassword ? "eye-off-outline" : "eye-outline"} size={22} color="#8C95A1" />
                         </Pressable>
                       </View>
-                      <InlineErrorCard message={forgotPasswordErrors.password} />
+                      <View className="mt-2 gap-1.5">
+                        {PASSWORD_RULES.map((rule) => {
+                          const passed = getPasswordStatus(forgotNewPassword)[rule.key];
+                          const active = Boolean(forgotNewPassword);
+
+                          return (
+                            <View key={rule.key} className="flex-row items-center gap-2">
+                              <Ionicons
+                                name={passed ? "checkmark-outline" : "close-outline"}
+                                size={14}
+                                color={passed ? "#22C55E" : active ? "#F87171" : "#CBD5E1"}
+                              />
+                              <Text
+                                className="text-[11px]"
+                                style={{
+                                  color: passed ? "#15803D" : active ? "#B91C1C" : "#94A3B8",
+                                  fontFamily: "Montserrat_400Regular",
+                                }}
+                              >
+                                {rule.label}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                      <InlineErrorCard message={forgotPasswordLiveError} />
 
                       <Text className="mb-2 mt-4 text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
                         Confirm Password
                       </Text>
-                      <View className="h-14 flex-row items-center rounded-xl border border-[#F2E6EB] bg-white pl-4 pr-[14px]">
+                      <View className={`h-14 flex-row items-center rounded-xl border bg-white pl-4 pr-[14px] ${forgotConfirmPasswordLiveError ? "border-[#DC2626]" : forgotConfirmPassword ? "border-[#22C55E]" : "border-[#F2E6EB]"}`}>
                         <Ionicons name="lock-closed-outline" size={18} color="#8C95A1" style={{ marginRight: 10 }} />
                         <TextInput
                           editable={!isResettingForgotPassword}
@@ -843,10 +932,20 @@ export default function LoginScreen() {
                           value={forgotConfirmPassword}
                           onChangeText={(value) => {
                             setForgotConfirmPassword(value);
-                            setForgotPasswordErrors((current) => ({ ...current, password_confirmation: "" }));
+                            setForgotPasswordErrors((current) => ({
+                              ...current,
+                              password_confirmation: value
+                                ? value === forgotNewPassword
+                                  ? ""
+                                  : "Passwords do not match."
+                                : "Confirm password is required.",
+                            }));
                           }}
                           style={{ fontFamily: "Montserrat_400Regular" }}
                         />
+                        {forgotConfirmPassword && !forgotConfirmPasswordLiveError ? (
+                          <Ionicons name="checkmark-outline" size={19} color="#22C55E" />
+                        ) : null}
                         <Pressable
                           disabled={isResettingForgotPassword}
                           hitSlop={10}
@@ -855,7 +954,7 @@ export default function LoginScreen() {
                           <Ionicons name={showForgotConfirmPassword ? "eye-off-outline" : "eye-outline"} size={22} color="#8C95A1" />
                         </Pressable>
                       </View>
-                      <InlineErrorCard message={forgotPasswordErrors.password_confirmation} />
+                      <InlineErrorCard message={forgotConfirmPasswordLiveError} />
                       <InlineErrorCard message={forgotPasswordErrors.verification_code} />
                       <Pressable
                         className="mt-6 h-14 items-center justify-center rounded-[8px] bg-[#1A1F36]"

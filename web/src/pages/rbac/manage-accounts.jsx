@@ -4,7 +4,6 @@ import { ConfigProvider, Select } from "antd";
 import { useLocation, useNavigate } from "react-router-dom";
 import "typeface-montserrat";
 import {
-  IoAddOutline,
   IoAlertCircleOutline,
   IoCallOutline,
   IoCheckmarkOutline,
@@ -148,6 +147,37 @@ const generatePasswordValue = () => {
   return requiredChars.sort(() => Math.random() - 0.5).join("");
 };
 
+const PASSWORD_RULE_LABELS = [
+  { key: "length", label: "At least 8 characters" },
+  { key: "uppercase", label: "One uppercase letter" },
+  { key: "number", label: "One number" },
+  { key: "symbol", label: "One symbol" },
+];
+
+const getPasswordRuleStatus = (password = "") => ({
+  length: password.length >= 8,
+  uppercase: /[A-Z]/.test(password),
+  number: /\d/.test(password),
+  symbol: /[^A-Za-z0-9]/.test(password),
+});
+
+const getPasswordErrorMessage = (password = "") => {
+  const status = getPasswordRuleStatus(password);
+
+  if (!password) return "Password is required.";
+  if (!status.length) return "Password must be at least 8 characters.";
+  if (!status.uppercase) return "Password must include at least 1 uppercase letter.";
+  if (!status.number) return "Password must include at least 1 number.";
+  if (!status.symbol) return "Password must include at least 1 symbol.";
+
+  return "";
+};
+
+const isStrongPassword = (password = "") => !getPasswordErrorMessage(password);
+
+const getRequiredFieldError = (value = "", label) => (
+  String(value || "").trim() ? "" : `${label} is required.`
+);
 
 const TailDropdown = ({ value, onChange, options, height = 42, minWidth = 150 }) => (
   <FilterButton value={value} onChange={onChange} options={options} height={height} width={minWidth} />
@@ -166,24 +196,33 @@ const FieldError = ({ message }) => message ? (
   </div>
 ) : null;
 
-const ModalInput = ({ label, value, onChange, placeholder, type = "text", icon: Icon, required = false, autoComplete = "off", error = "" }) => (
+const FieldSuccess = ({ message }) => message ? (
+  <div className="mt-2 flex items-center gap-2 rounded-xl border border-green-100 bg-green-50 px-3 py-2">
+    <IoCheckmarkOutline className="flex-shrink-0 text-[14px] text-green-500" />
+    <p className="m-0 text-[12px] font-normal text-green-700" style={{ fontFamily: FONT }}>{message}</p>
+  </div>
+) : null;
+
+const ModalInput = ({ label, value, onChange, onBlur, placeholder, type = "text", icon: Icon, required = false, autoComplete = "off", error = "", success = false }) => (
   <div>
     <p className="m-0 mb-2 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82" }}>
       {label}{required && <span className="text-red-500 ml-0.5"> *</span>}
     </p>
     <div
-      className={`flex items-center gap-3 px-4 rounded-xl border bg-white transition-all ${error ? "border-red-300" : "border-slate-200 focus-within:border-[#4096ff]"}`}
+      className={`flex items-center gap-3 px-4 rounded-xl border bg-white transition-all ${error ? "border-red-300" : success ? "border-green-300" : "border-slate-200 focus-within:border-[#4096ff]"}`}
       style={{ height: 46 }}
     >
       <input
         type={type}
         value={value}
         onChange={onChange}
+        onBlur={onBlur}
         placeholder={placeholder}
         autoComplete={autoComplete}
         className="border-none outline-none text-[14px] font-medium w-full bg-transparent placeholder:font-normal placeholder:text-slate-400"
         style={{ fontFamily: FONT, color: "#0d1117" }}
       />
+      {success && !error ? <IoCheckmarkOutline className="flex-shrink-0 text-[18px] text-green-500" /> : null}
     </div>
   </div>
 );
@@ -353,6 +392,7 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError, roleOpti
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [touched, setTouched] = useState({});
 
   useEffect(() => {
     if (!open) {
@@ -370,12 +410,53 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError, roleOpti
       });
       setShowPassword(false);
       setShowConfirmPassword(false);
+      setTouched({});
     }
   }, [defaultRole, open]);
 
   const updateFormField = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setError((prev) => ({ ...prev, [field]: undefined }));
+    setTouched((prev) => ({
+      ...prev,
+      [field]: true,
+      ...(field === "password" && prev.password_confirmation ? { password_confirmation: true } : {}),
+    }));
+  };
+
+  const markTouched = (field) => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+  };
+
+  const passwordRuleStatus = getPasswordRuleStatus(form.password);
+  const localErrors = {
+    first_name: getRequiredFieldError(form.first_name, "First name"),
+    last_name: getRequiredFieldError(form.last_name, "Last name"),
+    password: getPasswordErrorMessage(form.password),
+    password_confirmation: !form.password_confirmation
+      ? "Please re type the password."
+      : form.password_confirmation !== form.password
+        ? "Passwords do not match."
+        : "",
+  };
+  const getFieldError = (field) => error?.[field]?.[0] || (touched[field] ? localErrors[field] : "");
+  const getFieldSuccess = (field) => touched[field] && !getFieldError(field) && String(form[field] || "").trim() !== "";
+  const firstNameError = getFieldError("first_name");
+  const lastNameError = getFieldError("last_name");
+  const passwordError = getFieldError("password");
+  const confirmPasswordError = getFieldError("password_confirmation");
+  const passwordSuccess = touched.password && !passwordError && isStrongPassword(form.password);
+  const confirmPasswordSuccess = touched.password_confirmation && !confirmPasswordError && form.password_confirmation !== "";
+
+  const handleSave = () => {
+    setTouched((prev) => ({
+      ...prev,
+      first_name: true,
+      last_name: true,
+      password: true,
+      password_confirmation: true,
+    }));
+    onSave(form);
   };
 
   if (!open) return null;
@@ -384,7 +465,7 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError, roleOpti
     <Modal
       title="Add User (Manual Creation)"
       onClose={onClose}
-      onSave={() => onSave(form)}
+      onSave={handleSave}
       saving={saving}
       saveLabel="Add"
       closeOnBackdrop
@@ -397,12 +478,14 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError, roleOpti
               <FieldError message={error?.role?.[0]} />
             </div>
             <div>
-              <ModalInput label="First Name" required icon={IoPersonOutline} value={form.first_name} onChange={(e) => updateFormField("first_name", e.target.value)} placeholder="Enter first name" error={error?.first_name?.[0]} />
-              <FieldError message={error?.first_name?.[0]} />
+              <ModalInput label="First Name" required icon={IoPersonOutline} value={form.first_name} onChange={(e) => updateFormField("first_name", e.target.value)} onBlur={() => markTouched("first_name")} placeholder="Enter first name" error={firstNameError} success={getFieldSuccess("first_name")} />
+              <FieldError message={firstNameError} />
+              <FieldSuccess message={getFieldSuccess("first_name") ? "First name looks good." : ""} />
             </div>
             <div>
-              <ModalInput label="Last Name" required icon={IoPersonOutline} value={form.last_name} onChange={(e) => updateFormField("last_name", e.target.value)} placeholder="Enter last name" error={error?.last_name?.[0]} />
-              <FieldError message={error?.last_name?.[0]} />
+              <ModalInput label="Last Name" required icon={IoPersonOutline} value={form.last_name} onChange={(e) => updateFormField("last_name", e.target.value)} onBlur={() => markTouched("last_name")} placeholder="Enter last name" error={lastNameError} success={getFieldSuccess("last_name")} />
+              <FieldError message={lastNameError} />
+              <FieldSuccess message={getFieldSuccess("last_name") ? "Last name looks good." : ""} />
             </div>
             <div>
               <GenderCardSelect
@@ -468,6 +551,11 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError, roleOpti
                       password: undefined,
                       password_confirmation: undefined,
                     }));
+                    setTouched((prev) => ({
+                      ...prev,
+                      password: true,
+                      password_confirmation: true,
+                    }));
                   }}
                     className="flex h-[46px] w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-[13px] font-semibold cursor-pointer transition-colors hover:bg-slate-100"
                     style={{ color: "#1a1f36", fontFamily: FONT }}
@@ -482,18 +570,20 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError, roleOpti
                 Password <span className="text-red-500 ml-0.5"> *</span>
               </p>
               <div
-                className={`flex items-center gap-3 px-4 rounded-xl border bg-white transition-all ${error?.password?.[0] ? "border-red-300" : "border-slate-200 focus-within:border-[#4096ff]"}`}
+                className={`flex items-center gap-3 px-4 rounded-xl border bg-white transition-all ${passwordError ? "border-red-300" : passwordSuccess ? "border-green-300" : "border-slate-200 focus-within:border-[#4096ff]"}`}
                 style={{ height: 46 }}
               >
                 <input
                   type={showPassword ? "text" : "password"}
                   value={form.password}
                   onChange={(e) => updateFormField("password", e.target.value)}
-                  placeholder="Minimum 8 characters"
+                  onBlur={() => markTouched("password")}
+                  placeholder="Uppercase, number, and symbol"
                   autoComplete="new-password"
                   className="border-none outline-none text-[14px] font-medium w-full bg-transparent"
                   style={{ fontFamily: FONT, color: "#0d1117" }}
                 />
+                {passwordSuccess ? <IoCheckmarkOutline className="flex-shrink-0 text-[18px] text-green-500" /> : null}
                 <button
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
@@ -502,25 +592,47 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError, roleOpti
                   {showPassword ? <IoEyeOffOutline className="text-[18px]" /> : <IoEyeOutline className="text-[18px]" />}
                 </button>
               </div>
-              <FieldError message={error?.password?.[0]} />
+              <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                {PASSWORD_RULE_LABELS.map((rule) => {
+                  const passed = passwordRuleStatus[rule.key];
+                  const active = touched.password || form.password !== "";
+
+                  return (
+                    <div key={rule.key} className="flex items-center gap-2">
+                      {passed ? (
+                        <IoCheckmarkOutline className="flex-shrink-0 text-[13px] text-green-500" />
+                      ) : (
+                        <IoCloseOutline className={`flex-shrink-0 text-[13px] ${active ? "text-red-400" : "text-slate-300"}`} />
+                      )}
+                      <span className={`text-[11px] ${passed ? "text-green-700" : active ? "text-red-500" : "text-slate-400"}`}>
+                        {rule.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <FieldError message={passwordError} />
+              <FieldSuccess message={passwordSuccess ? "Password is strong." : ""} />
             </div>
             <div>
               <p className="m-0 mb-2 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82" }}>
                 Confirm Password <span className="text-red-500 ml-0.5"> *</span>
               </p>
               <div
-                className={`flex items-center gap-3 px-4 rounded-xl border bg-white transition-all ${error?.password_confirmation?.[0] ? "border-red-300" : "border-slate-200 focus-within:border-[#4096ff]"}`}
+                className={`flex items-center gap-3 px-4 rounded-xl border bg-white transition-all ${confirmPasswordError ? "border-red-300" : confirmPasswordSuccess ? "border-green-300" : "border-slate-200 focus-within:border-[#4096ff]"}`}
                 style={{ height: 46 }}
               >
                 <input
                   type={showConfirmPassword ? "text" : "password"}
                   value={form.password_confirmation}
                   onChange={(e) => updateFormField("password_confirmation", e.target.value)}
-                  placeholder="Confirm password"
+                  onBlur={() => markTouched("password_confirmation")}
+                  placeholder="Re type password"
                   autoComplete="new-password"
                   className="border-none outline-none text-[14px] font-medium w-full bg-transparent"
                   style={{ fontFamily: FONT, color: "#0d1117" }}
                 />
+                {confirmPasswordSuccess ? <IoCheckmarkOutline className="flex-shrink-0 text-[18px] text-green-500" /> : null}
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword((prev) => !prev)}
@@ -529,7 +641,8 @@ const AddUserModal = ({ open, onClose, onSave, saving, error, setError, roleOpti
                   {showConfirmPassword ? <IoEyeOffOutline className="text-[18px]" /> : <IoEyeOutline className="text-[18px]" />}
                 </button>
               </div>
-              <FieldError message={error?.password_confirmation?.[0]} />
+              <FieldError message={confirmPasswordError} />
+              <FieldSuccess message={confirmPasswordSuccess ? "Passwords match." : ""} />
             </div>
           </div>
     </Modal>
@@ -636,6 +749,7 @@ const SendUserEmailModal = ({ open, onClose, onSend, sending, error, setError, r
                       {showPassword ? <IoEyeOffOutline className="text-[18px]" /> : <IoEyeOutline className="text-[18px]" />}
                     </button>
                   </div>
+                  <FieldError message={error?.password?.[0]} />
                   <button
                     type="button"
                     onClick={() => {
@@ -949,8 +1063,8 @@ const SuperManageAccounts = () => {
     if (!payload.address.trim()) nextErrors.address = ["Address is required."];
     if (!payload.email.trim()) nextErrors.email = ["Email is required."];
     else if (!emailPattern.test(payload.email.trim())) nextErrors.email = ["Please enter a valid email address."];
-    if (!payload.password) nextErrors.password = ["Password is required."];
-    else if (payload.password.length < 8) nextErrors.password = ["Password must be at least 8 characters."];
+    const passwordError = getPasswordErrorMessage(payload.password);
+    if (passwordError) nextErrors.password = [passwordError];
     if (!payload.password_confirmation) nextErrors.password_confirmation = ["Please confirm the password."];
     else if (payload.password_confirmation !== payload.password) nextErrors.password_confirmation = ["Passwords do not match."];
 
@@ -989,8 +1103,7 @@ const SuperManageAccounts = () => {
     if (!payload.role) nextErrors.role = ["Role is required."];
     if (!payload.email.trim()) nextErrors.email = ["Email is required."];
     else if (!emailPattern.test(payload.email.trim())) nextErrors.email = ["Please enter a valid email address."];
-    if (!payload.password) nextErrors.password = ["Password is required."];
-    else if (payload.password.length < 8) nextErrors.password = ["Password must be at least 8 characters."];
+    if (!payload.password) nextErrors.password = ["Temporary password is required."];
     if (!payload.password_confirmation) nextErrors.password_confirmation = ["Please confirm the password."];
     else if (payload.password_confirmation !== payload.password) nextErrors.password_confirmation = ["Passwords do not match."];
 
@@ -1003,9 +1116,17 @@ const SuperManageAccounts = () => {
     setSendInviteErrors({});
 
     try {
-      await api.post("/users/send-invite", payload);
+      const response = await api.post("/users/send-invite", payload);
       setSendEmailModalOpen(false);
-      showToast("success", "Invite Sent", `Account for "${payload.email}" created and credentials sent successfully.`);
+      if (response.data?.email_sent === false) {
+        showToast(
+          "info",
+          "Account Created",
+          `Account for "${payload.email}" was created, but the email could not be sent. Share the generated password manually.`
+        );
+      } else {
+        showToast("success", "Invite Sent", `Account for "${payload.email}" created and credentials sent successfully.`);
+      }
       void queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY, refetchType: "active" });
     } catch (error) {
       if (error.response?.status === 422) {
@@ -1176,14 +1297,6 @@ const SuperManageAccounts = () => {
                     style={{ fontFamily: FONT }}
                   >
                     <IoPaperPlaneOutline className="flex-shrink-0 text-[16px]" /> Add User
-                  </button>
-                  <button
-                    onClick={() => { if (!isTransactionLocked) setAddModalOpen(true); else showToast("error", "Transactions Locked", transactionLockMessage); }}
-                    disabled={isTransactionLocked}
-                    className="flex h-[42px] w-[112px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border-none bg-[#1a1f36] px-4 text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
-                    style={{ fontFamily: FONT }}
-                  >
-                    <IoAddOutline className="flex-shrink-0 text-[16px]" /> Add User
                   </button>
                 </>
               }

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { clearStoredAuth, getStoredUser } from "../pages/login/auth";
+import { clearStoredAuth, getStoredUser, normalizeRole } from "../pages/login/auth";
 import { disconnectEcho, getEcho, REALTIME_AUTH_CHANGED_EVENT } from "../lib/realtime";
 import { accountPresenceActions } from "../store/accountPresenceStore";
 
@@ -12,6 +12,23 @@ const currentUserMatchesRecord = (record) => {
   const recordUserId = String(record?.user_id ?? record?.id ?? "");
 
   return currentUserId !== "" && currentUserId === recordUserId;
+};
+
+const currentUserHasAffectedRole = (record) => {
+  const currentRole = normalizeRole(getStoredUser()?.role);
+  const affectedRoles = Array.isArray(record?.affected_roles)
+    ? record.affected_roles.map(normalizeRole)
+    : [];
+
+  return currentRole !== "" && affectedRoles.includes(currentRole);
+};
+
+const forceLogout = (message = FORCED_LOGOUT_MESSAGE) => {
+  sessionStorage.setItem(FORCED_LOGOUT_MESSAGE_KEY, message || FORCED_LOGOUT_MESSAGE);
+  clearStoredAuth();
+  disconnectEcho();
+  accountPresenceActions.clearOnlineUsers();
+  window.location.replace("/login");
 };
 
 export default function AccountStatusRealtimeBridge() {
@@ -57,18 +74,24 @@ export default function AccountStatusRealtimeBridge() {
 
       channel.listen(".updated", (payload) => {
         const resource = String(payload?.resource || "");
+        const action = String(payload?.action || "");
         const record = payload?.record;
         const status = String(record?.status || "").toLowerCase();
+
+        if (
+          resource === "database"
+          && action === "restored"
+          && currentUserHasAffectedRole(record)
+        ) {
+          forceLogout(record?.message);
+          return;
+        }
 
         if (resource !== "users" || status !== "deactivated" || !currentUserMatchesRecord(record)) {
           return;
         }
 
-        sessionStorage.setItem(FORCED_LOGOUT_MESSAGE_KEY, FORCED_LOGOUT_MESSAGE);
-        clearStoredAuth();
-        disconnectEcho();
-        accountPresenceActions.clearOnlineUsers();
-        window.location.replace("/login");
+        forceLogout();
       });
 
       cleanupSubscriptions = () => {

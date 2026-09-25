@@ -95,7 +95,48 @@ class CollectionController extends Controller
             ]);
         $this->applyFiscalYear($tickets, $request, 'vt.ticket_date');
 
-        return $payments->unionAll($tickets);
+        $visitorDockings = DB::table('dockings as d')
+            ->leftJoin('boat_types as boat_type', 'boat_type.boat_type_id', '=', 'd.visiting_boat_type_id')
+            ->leftJoin('bill_items as bill_item', 'bill_item.docking_id', '=', 'd.docking_id')
+            ->where('d.boat_category', 'visiting')
+            ->whereNull('d.voided_at')
+            ->whereNull('bill_item.docking_id')
+            ->select([
+                DB::raw("'visitor_docking' as source_type"),
+                'd.docking_id as source_id',
+                DB::raw("'Visiting Boat for Docking' as transaction"),
+                DB::raw("COALESCE(d.visiting_boat_name, boat_type.type_name, '-') as type_name"),
+                DB::raw("NULL as official_receipt_no"),
+                'd.docking_date as collection_date',
+                'd.docking_fee as cash_received',
+                DB::raw('COALESCE(d.docking_date, d.created_at) as sort_date'),
+                'd.created_at as sort_created_at',
+            ]);
+        $this->applyFiscalYear($visitorDockings, $request, 'd.docking_date');
+
+        $visitorBanyera = DB::table('banyera_transactions as bt')
+            ->leftJoin('boat_types as boat_type', 'boat_type.boat_type_id', '=', 'bt.visiting_boat_type_id')
+            ->leftJoin('bill_items as bill_item', 'bill_item.banyera_id', '=', 'bt.banyera_id')
+            ->where('bt.boat_category', 'visiting')
+            ->whereNull('bt.voided_at')
+            ->whereNull('bill_item.banyera_id')
+            ->select([
+                DB::raw("'visitor_banyera' as source_type"),
+                'bt.banyera_id as source_id',
+                DB::raw("'Visiting Boat for Banyera' as transaction"),
+                DB::raw("COALESCE(bt.visiting_boat_name, boat_type.type_name, '-') as type_name"),
+                DB::raw("NULL as official_receipt_no"),
+                'bt.transaction_date as collection_date',
+                'bt.total_fee as cash_received',
+                DB::raw('COALESCE(bt.transaction_date, bt.created_at) as sort_date'),
+                'bt.created_at as sort_created_at',
+            ]);
+        $this->applyFiscalYear($visitorBanyera, $request, 'bt.transaction_date');
+
+        return $payments
+            ->unionAll($tickets)
+            ->unionAll($visitorDockings)
+            ->unionAll($visitorBanyera);
     }
 
     private function transformCollectionRow(object $row): array
@@ -110,6 +151,51 @@ class CollectionController extends Controller
             'date' => $row->collection_date,
             'cash_received' => (float) $row->cash_received,
         ];
+    }
+
+    public function report(Request $request, string $filterType)
+    {
+        if (!in_array($filterType, ['daily', 'monthly', 'yearly'], true)) {
+            abort(404);
+        }
+
+        $query = $this->collectionQuery($request);
+
+        if ($filterType === 'daily') {
+            $date = trim((string) $request->query('date', ''));
+            if (!$date || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                return response()->json(['rows' => [], 'totalCollections' => 0, 'collectionRecords' => 0], 400);
+            }
+            $query->whereDate('collection_date', $date);
+        } elseif ($filterType === 'monthly') {
+            $month = trim((string) $request->query('month', ''));
+            $year = trim((string) $request->query('year', ''));
+            if (!preg_match('/^\d{1,2}$/', $month) || !preg_match('/^\d{4}$/', $year)) {
+                return response()->json(['rows' => [], 'totalCollections' => 0, 'collectionRecords' => 0], 400);
+            }
+            $query->whereYear('collection_date', (int) $year)
+                ->whereMonth('collection_date', (int) $month);
+        } else {
+            $year = trim((string) $request->query('year', ''));
+            if (!preg_match('/^\d{4}$/', $year)) {
+                return response()->json(['rows' => [], 'totalCollections' => 0, 'collectionRecords' => 0], 400);
+            }
+            $query->whereYear('collection_date', (int) $year);
+        }
+
+        $rows = $query
+            ->orderBy('collection_date')
+            ->orderBy('source_type')
+            ->orderBy('source_id')
+            ->get()
+            ->map(fn ($row) => $this->transformCollectionRow($row))
+            ->values();
+
+        return response()->json([
+            'rows' => $rows,
+            'totalCollections' => round((float) $rows->sum('cash_received'), 2),
+            'collectionRecords' => $rows->count(),
+        ]);
     }
 
     private function applyPeriodFilter($query, string $period)

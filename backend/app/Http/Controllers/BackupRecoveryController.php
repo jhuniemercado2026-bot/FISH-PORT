@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\AccountStatusUpdated;
+use App\Events\MasterDataUpdated;
+use App\Models\User;
 use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
@@ -52,6 +55,10 @@ class BackupRecoveryController extends Controller
         ]);
 
         $uploadedFile = $validated['backup_file'];
+        $restoreActor = $request->user();
+        $restoreActorId = (int) ($restoreActor?->user_id ?? 0);
+        $restoreActorName = $restoreActor ? trim($restoreActor->full_name) : null;
+        $restoreActorRole = $restoreActor?->role;
 
         if (strtolower($uploadedFile->getClientOriginalExtension()) !== 'sql') {
             return response()->json([
@@ -77,23 +84,63 @@ class BackupRecoveryController extends Controller
 
         try {
             $this->restoreDatabase($absoluteSqlPath);
+            $loggedOutAccounts = $this->logoutOperationalUsersAfterRestore();
         } catch (\Throwable $error) {
             return $this->databaseProcessError($error, 'Unable to recover the database from the selected file.');
         } finally {
             Storage::delete($storedPath);
         }
 
+        $restoredActor = $restoreActorId > 0 ? User::find($restoreActorId) : null;
+
         app(ActivityLogService::class)->log(
             action: 'RESTORE',
             module: 'Database Recovery',
-            details: 'Recovered database from uploaded SQL file "' . $uploadedFile->getClientOriginalName() . '". Safety backup: "' . basename($preRestoreBackupPath) . '".',
-            user: $request->user()
+            details: 'Recovered database from uploaded SQL file "' . $uploadedFile->getClientOriginalName() . '". Safety backup: "' . basename($preRestoreBackupPath) . '". Logged out ' . $loggedOutAccounts . ' coordinator/inspector account(s).',
+            user: $restoredActor,
+            userName: $restoreActorName,
+            userRole: $restoreActorRole
         );
 
         return response()->json([
             'message' => 'Database recovered successfully.',
             'safety_backup' => basename($preRestoreBackupPath),
+            'logged_out_accounts' => $loggedOutAccounts,
         ]);
+    }
+
+    private function logoutOperationalUsersAfterRestore(): int
+    {
+        $accounts = User::query()
+            ->whereIn('role', ['coordinator', 'inspector'])
+            ->get(['user_id', 'email', 'first_name', 'last_name', 'role', 'status']);
+
+        foreach ($accounts as $account) {
+            $account->tokens()->delete();
+
+            if ($account->status !== 'deactivated') {
+                $account->forceFill(['status' => 'offline'])->save();
+                $account->refresh();
+            }
+
+            broadcast(new AccountStatusUpdated([
+                'user_id' => $account->user_id,
+                'id' => $account->user_id,
+                'email' => $account->email,
+                'name' => $account->full_name ?: $account->email,
+                'role' => $account->role,
+                'status' => $account->status,
+                'presence_status' => 'offline',
+            ]));
+        }
+
+        broadcast(new MasterDataUpdated('database', 'restored', [
+            'reason' => 'backup_restore',
+            'affected_roles' => ['coordinator', 'inspector'],
+            'message' => 'System error, your account will be logged out.',
+        ]));
+
+        return $accounts->count();
     }
 
     private function createDatabaseBackup(string $prefix = 'backup'): string

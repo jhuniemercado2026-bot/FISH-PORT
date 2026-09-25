@@ -9,9 +9,11 @@ use App\Models\User;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 
-class SendFeeChangeInspectorNotifications implements ShouldQueue
+class SendFeeChangeCoordinatorToInspectorNotifications implements ShouldQueue
 {
     use Queueable;
+
+    private const RECIPIENT_ROLES = ['coordinator', 'inspector'];
 
     public function __construct(
         public int $feeId,
@@ -40,14 +42,14 @@ class SendFeeChangeInspectorNotifications implements ShouldQueue
         $message = $feeType . ' fee for ' . $applicableTo . ' has been set to ' . $amount . ', effective ' . $effectivity . '.';
 
         User::query()
-            ->where('role', 'inspector')
+            ->whereIn('role', self::RECIPIENT_ROLES)
             ->select('user_id')
-            ->chunkById(100, function ($inspectors) use ($fee, $title, $message) {
-                foreach ($inspectors as $inspector) {
+            ->chunkById(100, function ($recipients) use ($fee, $title, $message) {
+                foreach ($recipients as $recipient) {
                     Notification::create([
                         'title' => $title,
                         'message' => $message,
-                        'recipient_user_id' => $inspector->user_id,
+                        'recipient_user_id' => $recipient->user_id,
                         'sender_user_id' => $this->senderUserId,
                         'related_type' => 'fee',
                         'related_id' => $fee->fee_id,

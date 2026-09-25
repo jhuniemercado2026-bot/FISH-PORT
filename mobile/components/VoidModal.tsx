@@ -221,6 +221,13 @@ type VoidTransactionModalProps = {
   onConfirm: () => void;
 };
 
+const getBoatDisplayName = (transaction?: Record<string, any> | null) =>
+  transaction?.display_boat_name ||
+  transaction?.visiting_boat_name ||
+  transaction?.boat?.boat_name ||
+  transaction?.boat_name ||
+  "Unknown Boat";
+
 export function VoidTransactionModal({
   visible,
   transactionType,
@@ -249,7 +256,7 @@ export function VoidTransactionModal({
         transaction?.vehicle_type_name ||
         transaction?.vehicleType?.vehicle_type_name ||
         "N/A"
-      : transaction?.boat?.boat_name || transaction?.boat_name || "Unknown Boat";
+      : getBoatDisplayName(transaction);
 
   const dateValue =
     transactionType === "tickets"

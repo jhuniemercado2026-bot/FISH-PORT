@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Events\TransactionUpdated;
 use App\Models\Notification;
+use App\Models\BanyeraTransaction;
+use App\Models\Docking;
 use App\Models\Payment;
 use App\Models\Remittance;
 use App\Models\User;
@@ -264,30 +266,44 @@ class RemittanceController extends Controller
     public function todayCollection(Request $request)
     {
         $date = Carbon::parse($request->query('date', now('Asia/Manila')->toDateString()), 'Asia/Manila')->toDateString();
+        $collectionUserId = $this->collectionUserIdForRemittance($request->user());
+        $summaryOnly = filter_var($request->query('summary', false), FILTER_VALIDATE_BOOLEAN);
+        $includeBreakdown = filter_var($request->query('breakdown', false), FILTER_VALIDATE_BOOLEAN);
         $hasSubmittedRemittance = Remittance::query()
             ->whereDate('date', $date)
             ->where('submitted_by', $request->user()?->user_id)
             ->exists();
 
-        return response()->json([
+        $response = [
             'date' => $date,
             'amount' => $hasSubmittedRemittance
                 ? 0
-                : $this->calculateDateAmount($date, $this->collectionUserIdForRemittance($request->user())),
+                : $this->calculateDateAmount($date, $collectionUserId),
             'has_submitted_remittance' => $hasSubmittedRemittance,
-            'breakdown' => $hasSubmittedRemittance
-                ? []
-                : $this->dateCollectionBreakdown($date, $this->collectionUserIdForRemittance($request->user())),
-            'remittance_progress' => $this->remittanceProgressForDate($date),
-        ]);
+        ];
+
+        if (!$summaryOnly || $includeBreakdown) {
+            $response['breakdown'] = $this->dateCollectionBreakdown($date, $collectionUserId);
+        }
+
+        if (!$summaryOnly) {
+            $response['remittance_progress'] = $this->remittanceProgressForDate($date);
+        }
+
+        return response()->json($response);
     }
 
     public function show($id)
     {
         $remittance = Remittance::with('submittedBy')->findOrFail($id);
+        $payload = $this->remittancePayload($remittance);
+        $payload['breakdown'] = $this->dateCollectionBreakdown(
+            Carbon::parse($remittance->date, 'Asia/Manila')->toDateString(),
+            $this->collectionUserIdForRemittance($remittance->submittedBy)
+        );
 
         return response()->json([
-            'remittance' => $this->remittancePayload($remittance),
+            'remittance' => $payload,
         ]);
     }
 
@@ -595,7 +611,25 @@ class RemittanceController extends Controller
             ->when($createdBy, fn ($query) => $query->where('received_by', $createdBy))
             ->sum('amount_paid');
 
-        return round($ticketsTotal + $paymentsTotal, 2);
+        $visitorDockingsTotal = (float) Docking::query()
+            ->leftJoin('bill_items as bill_item', 'bill_item.docking_id', '=', 'dockings.docking_id')
+            ->where('dockings.boat_category', 'visiting')
+            ->whereDate('dockings.docking_date', $date)
+            ->when($createdBy, fn ($query) => $query->where('dockings.created_by', $createdBy))
+            ->whereNull('dockings.voided_at')
+            ->whereNull('bill_item.docking_id')
+            ->sum('dockings.docking_fee');
+
+        $visitorBanyeraTotal = (float) BanyeraTransaction::query()
+            ->leftJoin('bill_items as bill_item', 'bill_item.banyera_id', '=', 'banyera_transactions.banyera_id')
+            ->where('banyera_transactions.boat_category', 'visiting')
+            ->whereDate('banyera_transactions.transaction_date', $date)
+            ->when($createdBy, fn ($query) => $query->where('banyera_transactions.created_by', $createdBy))
+            ->whereNull('banyera_transactions.voided_at')
+            ->whereNull('bill_item.banyera_id')
+            ->sum('banyera_transactions.total_fee');
+
+        return round($ticketsTotal + $paymentsTotal + $visitorDockingsTotal + $visitorBanyeraTotal, 2);
     }
 
     private function dateCollectionBreakdown(string $date, ?int $createdBy = null): array
@@ -629,8 +663,48 @@ class RemittanceController extends Controller
                 'vt.ticket_id as source_id',
             ]);
 
+        $visitorDockings = DB::table('dockings as d')
+            ->leftJoin('boat_types as boat_type', 'boat_type.boat_type_id', '=', 'd.visiting_boat_type_id')
+            ->leftJoin('bill_items as bill_item', 'bill_item.docking_id', '=', 'd.docking_id')
+            ->where('d.boat_category', 'visiting')
+            ->whereDate('d.docking_date', $date)
+            ->when($createdBy, fn ($query) => $query->where('d.created_by', $createdBy))
+            ->whereNull('d.voided_at')
+            ->whereNull('bill_item.docking_id')
+            ->select([
+                DB::raw("'Visiting Boat for Docking' as transaction"),
+                DB::raw("COALESCE(d.visiting_boat_name, boat_type.type_name, '-') as type_name"),
+                'd.docking_fee as cash_received',
+                DB::raw('COALESCE(d.docking_date, d.created_at) as sort_date'),
+                'd.created_at as sort_created_at',
+                'd.docking_id as source_id',
+            ]);
+
+        $visitorBanyera = DB::table('banyera_transactions as bt')
+            ->leftJoin('boat_types as boat_type', 'boat_type.boat_type_id', '=', 'bt.visiting_boat_type_id')
+            ->leftJoin('bill_items as bill_item', 'bill_item.banyera_id', '=', 'bt.banyera_id')
+            ->where('bt.boat_category', 'visiting')
+            ->whereDate('bt.transaction_date', $date)
+            ->when($createdBy, fn ($query) => $query->where('bt.created_by', $createdBy))
+            ->whereNull('bt.voided_at')
+            ->whereNull('bill_item.banyera_id')
+            ->select([
+                DB::raw("'Visiting Boat for Banyera' as transaction"),
+                DB::raw("COALESCE(bt.visiting_boat_name, boat_type.type_name, '-') as type_name"),
+                'bt.total_fee as cash_received',
+                DB::raw('COALESCE(bt.transaction_date, bt.created_at) as sort_date'),
+                'bt.created_at as sort_created_at',
+                'bt.banyera_id as source_id',
+            ]);
+
         return DB::query()
-            ->fromSub($payments->unionAll($tickets), 'collections')
+            ->fromSub(
+                $payments
+                    ->unionAll($tickets)
+                    ->unionAll($visitorDockings)
+                    ->unionAll($visitorBanyera),
+                'collections'
+            )
             ->orderByDesc('sort_date')
             ->orderByDesc('sort_created_at')
             ->orderByDesc('source_id')
@@ -663,7 +737,39 @@ class RemittanceController extends Controller
             ->filter()
             ->values();
 
-        if ($ticketCreatorIds->isEmpty()) {
+        $visitorDockingCreatorIds = Docking::query()
+            ->leftJoin('bill_items as bill_item', 'bill_item.docking_id', '=', 'dockings.docking_id')
+            ->where('dockings.boat_category', 'visiting')
+            ->whereDate('dockings.docking_date', $date)
+            ->whereNull('dockings.voided_at')
+            ->whereNull('bill_item.docking_id')
+            ->whereNotNull('dockings.created_by')
+            ->distinct()
+            ->pluck('dockings.created_by')
+            ->map(fn ($userId) => (int) $userId)
+            ->filter()
+            ->values();
+
+        $visitorBanyeraCreatorIds = BanyeraTransaction::query()
+            ->leftJoin('bill_items as bill_item', 'bill_item.banyera_id', '=', 'banyera_transactions.banyera_id')
+            ->where('banyera_transactions.boat_category', 'visiting')
+            ->whereDate('banyera_transactions.transaction_date', $date)
+            ->whereNull('banyera_transactions.voided_at')
+            ->whereNull('bill_item.banyera_id')
+            ->whereNotNull('banyera_transactions.created_by')
+            ->distinct()
+            ->pluck('banyera_transactions.created_by')
+            ->map(fn ($userId) => (int) $userId)
+            ->filter()
+            ->values();
+
+        $cashCollectionCreatorIds = $ticketCreatorIds
+            ->merge($visitorDockingCreatorIds)
+            ->merge($visitorBanyeraCreatorIds)
+            ->unique()
+            ->values();
+
+        if ($cashCollectionCreatorIds->isEmpty()) {
             return [
                 'eligible_users' => 0,
                 'remitted_users' => 0,
@@ -674,7 +780,7 @@ class RemittanceController extends Controller
         }
 
         $inspectors = User::query()
-            ->whereIn('user_id', $ticketCreatorIds)
+            ->whereIn('user_id', $cashCollectionCreatorIds)
             ->where('role', 'inspector')
             ->get(['user_id', 'first_name', 'last_name', 'email']);
 

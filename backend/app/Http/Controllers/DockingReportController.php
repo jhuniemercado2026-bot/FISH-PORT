@@ -22,18 +22,27 @@ class DockingReportController extends Controller
         return Docking::query()
             ->select([
                 'dockings.docking_id',
+                'dockings.boat_category',
                 'dockings.boat_id',
+                'dockings.visiting_boat_name',
+                'dockings.visiting_owner_firstname',
+                'dockings.visiting_owner_lastname',
+                'dockings.visiting_owner_address',
+                'dockings.visiting_boat_type_id',
                 'dockings.docking_date',
                 'dockings.docking_fee',
                 'boats.boat_name',
-                'boat_types.type_name',
+                'registered_boat_types.type_name as registered_type_name',
+                'visiting_boat_types.type_name as visiting_type_name',
             ])
             ->with([
                 'boat' => fn ($query) => $query->select(['boat_id', 'boat_name', 'boat_type_id']),
                 'boat.boatType' => fn ($query) => $query->select(['boat_type_id', 'type_name']),
+                'visitingBoatType' => fn ($query) => $query->select(['boat_type_id', 'type_name']),
             ])
-            ->join('boats', 'boats.boat_id', '=', 'dockings.boat_id')
-            ->leftJoin('boat_types', 'boat_types.boat_type_id', '=', 'boats.boat_type_id');
+            ->leftJoin('boats', 'boats.boat_id', '=', 'dockings.boat_id')
+            ->leftJoin('boat_types as registered_boat_types', 'registered_boat_types.boat_type_id', '=', 'boats.boat_type_id')
+            ->leftJoin('boat_types as visiting_boat_types', 'visiting_boat_types.boat_type_id', '=', 'dockings.visiting_boat_type_id');
     }
 
     private function renderReport($query)
@@ -45,6 +54,7 @@ class DockingReportController extends Controller
             ->map(function (Docking $docking) {
                 return [
                     'docking_id' => $docking->docking_id,
+                    'boat_category' => $docking->boat_category ?? 'registered',
                     'docking_date' => $docking->docking_date?->format('Y-m-d H:i:s'),
                     'docking_fee' => (float) $docking->docking_fee,
                     'boat' => $docking->boat ? [
@@ -52,7 +62,17 @@ class DockingReportController extends Controller
                         'boat_type' => $docking->boat->boatType ? [
                             'type_name' => $docking->boat->boatType->type_name,
                         ] : null,
-                    ] : null,
+                    ] : [
+                        'boat_name' => $docking->visiting_boat_name,
+                        'owner_name' => trim(collect([$docking->visiting_owner_firstname, $docking->visiting_owner_lastname])->filter()->implode(' ')),
+                        'owner_address' => $docking->visiting_owner_address,
+                        'boat_type' => $docking->visitingBoatType ? [
+                            'type_name' => $docking->visitingBoatType->type_name,
+                        ] : null,
+                        'boatType' => $docking->visitingBoatType ? [
+                            'type_name' => $docking->visitingBoatType->type_name,
+                        ] : null,
+                    ],
                 ];
             });
 

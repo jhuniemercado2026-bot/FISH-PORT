@@ -48,12 +48,13 @@ import ArchiveModal from "../../components/ArchiveModal";
 import { showAddedToast, showBottomToast, showNoChangesToast, showUpdatedToast } from "../../store/bottomToastStore";
 import { useSidebar } from "../../store/sidebarStore";
 import api from "../../api/axios";
-import { buildTermsAndAgreementPdf } from "../../lib/pdfDocumentTermsAndAgreement";
+import { buildOwnerStatementPdf } from "../../lib/pdfDocumentOwnerStatement";
 import {
   useRegisteredBoatsDataQuery,
   useBoatTypesQuery,
   useBoatOwnersQuery,
 } from "../../hooks/useBoatManagement";
+import { getStatementOfAccountDataQueryOptions } from "../../hooks/useStatementOfAccountDataQuery";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
 import {
   addBoatTypeToDataCache,
@@ -2462,7 +2463,113 @@ const BO_TH = ({ children }) => (
   </th>
 );
 
-const BO_TermsAndAgreementModal = ({ owner, open, onClose }) => {
+const BO_normalizeTransactionLabel = (value) => {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "ticket") return "Vehicle Ticket";
+  if (normalized === "banyera") return "Banyera";
+  if (normalized === "docking") return "Docking";
+  return String(value || "-")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const BO_buildBoatStatementTransactions = (boatDetailRecord) => {
+  if (!boatDetailRecord) return [];
+
+  const transactions = [];
+  const getPaymentDescription = (bill, payment) => {
+    const totalAmount = Number(bill?.total_amount || bill?.balance_due || bill?.amount_due || 0);
+    const amountPaid = Number(payment?.amount_paid || 0);
+    const balanceAfterPayment = Math.max(0, totalAmount - amountPaid);
+
+    return balanceAfterPayment <= 0.009 ? "Full Payment Received" : "Partial Payment Received";
+  };
+
+  (boatDetailRecord.bills || []).forEach((bill) => {
+    (Array.isArray(bill.line_items) ? bill.line_items : [])
+      .filter((item) => ["docking", "banyera", "ticket"].includes(String(item.transaction_type || "").toLowerCase()))
+      .forEach((item, index) => {
+        const transactionType = String(item.transaction_type || "").toLowerCase();
+        const feeLabel = transactionType === "ticket"
+          ? "Vehicle Ticket Fee"
+          : `${BO_normalizeTransactionLabel(transactionType)} Fee`;
+
+        transactions.push({
+          transaction_key: `charge-${bill.bill_id}-${transactionType}-${index}`,
+          date: bill.date_billed,
+          bill_reference: bill.bill_reference,
+          type: "Bill",
+          reference: "-",
+          description: feeLabel,
+          charge: Number(item.amount || 0),
+          payment: 0,
+        });
+      });
+
+    (bill.payments || [])
+      .slice()
+      .sort((a, b) => String(a.payment_date || "").localeCompare(String(b.payment_date || "")))
+      .forEach((payment, index) => {
+        transactions.push({
+          transaction_key: `payment-${bill.bill_id}-${payment.payment_id ?? index}`,
+          date: payment.payment_date,
+          bill_reference: bill.bill_reference,
+          type: "Payment",
+          reference: String(
+            payment.payment_reference_no ||
+            payment.payment_reference ||
+            payment.reference_no ||
+            payment.reference_number ||
+            payment.official_receipt_no ||
+            payment.official_receipt_number ||
+            payment.or_no ||
+            payment.or_number ||
+            payment.receipt_no ||
+            payment.receipt_number ||
+            "-"
+          ),
+          description: getPaymentDescription(bill, payment),
+          charge: 0,
+          payment: Number(payment.amount_paid || 0),
+        });
+      });
+  });
+
+  (boatDetailRecord.unbilled_charges || []).forEach((charge) => {
+    transactions.push(charge);
+  });
+
+  const sortedTransactions = transactions.sort((a, b) => {
+    const dateCompare = String(a.date || "").localeCompare(String(b.date || ""));
+    if (dateCompare !== 0) return dateCompare;
+    if (a.type === b.type) return 0;
+    if (a.type === "Bill") return -1;
+    if (b.type === "Bill") return 1;
+    if (a.type === "Unbilled") return -1;
+    if (b.type === "Unbilled") return 1;
+    return 1;
+  });
+
+  let runningBalance = 0;
+  return sortedTransactions.map((transaction) => {
+    runningBalance += Number(transaction.charge || 0) - Number(transaction.payment || 0);
+    return { ...transaction, running_balance: runningBalance };
+  });
+};
+
+const BO_getBoatStatementPeriod = (transactions) => {
+  if (!transactions.length) return "-";
+  const dates = transactions
+    .map((transaction) => String(transaction.date || "").slice(0, 10))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  if (!dates.length) return "-";
+  if (dates[0] === dates[dates.length - 1]) return BO_formatDate(dates[0]);
+  return `${BO_formatDate(dates[0])} - ${BO_formatDate(dates[dates.length - 1])}`;
+};
+
+const BO_OwnerStatementModal = ({ owner, open, onClose }) => {
+  const queryClient = useQueryClient();
   const [pdfFile, setPdfFile] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -2484,53 +2591,46 @@ const BO_TermsAndAgreementModal = ({ owner, open, onClose }) => {
       return null;
     });
 
-    const generateTermsPdf = async () => {
+    const generateOwnerStatementPdf = async () => {
       setLoading(true);
       try {
-        const hasPermanentSignature = Boolean(owner.owner_signature_data_url);
-        let signatureAudits = [];
-
-        if (owner.owner_id) {
-          try {
-            const response = await api.get(`/boat-owners/${owner.owner_id}/signature-audits`);
-            signatureAudits = Array.isArray(response.data) ? response.data : [];
-          } catch (error) {
-            console.error("Failed to load owner signature audit history", error);
-          }
-        }
-
-        let agreementBoatName = "";
-        if (owner.owner_id) {
-          try {
-            const response = await api.get("/boat-management", {
-              params: {
-                include_boats: 1,
-                include_boat_types: 0,
-                include_owners: 0,
-                boats_paginated: 0,
-                owner: owner.owner_id,
-              },
-            });
-            const boatNames = (response.data?.boats ?? [])
-              .map((boat) => String(boat?.boat_name ?? "").trim())
-              .filter(Boolean);
-            agreementBoatName = Array.from(new Set(boatNames)).join(", ");
-          } catch (error) {
-            console.error("Failed to load owner boats for agreement PDF", error);
-          }
-        }
-
-        const pdfBytes = await buildTermsAndAgreementPdf({
-          owner,
-          ownerName: BO_getFullName(owner),
-          boatName: agreementBoatName,
-          date: hasPermanentSignature ? owner.owner_signature_signed_at || "" : "",
-          signatureDataUrl: hasPermanentSignature ? owner.owner_signature_data_url || "" : "",
-          inspector: hasPermanentSignature
-            ? owner.owner_signature_updated_by_user || owner.ownerSignatureUpdatedByUser || owner.ownerSignatureUpdatedBy || null
-            : null,
-          signatureAudits,
+        const ownerStatementData = await queryClient.fetchQuery({
+          ...getStatementOfAccountDataQueryOptions({
+            statementType: "owners",
+            ownerId: String(owner.owner_id),
+            perPage: BO_PAGE_SIZE,
+          }),
         });
+        const record = ownerStatementData?.ownerRecords?.[0] ?? {
+          owner_key: String(owner.owner_id),
+          owner_id: owner.owner_id,
+          owner_name: BO_getFullName(owner),
+          contact_number: owner.contact_number,
+          address: owner.address,
+          boats: [],
+          total_billed: 0,
+          total_collected: 0,
+          total_receivables: 0,
+        };
+        const boatStatements = await Promise.all(
+          (record?.boats ?? []).map(async (boat) => {
+            const detailData = await queryClient.fetchQuery({
+              ...getStatementOfAccountDataQueryOptions({
+                boat: String(boat?.boat_key ?? boat?.boat_id ?? ""),
+                perPage: 100,
+                selectedOnly: true,
+              }),
+            });
+            const detailRecord = detailData?.selectedBoatRecord ?? boat;
+            const transactions = BO_buildBoatStatementTransactions(detailRecord);
+            return {
+              boat: detailRecord,
+              transactions,
+              periodLabel: BO_getBoatStatementPeriod(transactions),
+            };
+          })
+        );
+        const pdfBytes = await buildOwnerStatementPdf({ record, boatStatements });
 
         if (!isActive) return;
 
@@ -2540,7 +2640,7 @@ const BO_TermsAndAgreementModal = ({ owner, open, onClose }) => {
           .replace(/[^a-z0-9]+/gi, "-")
           .replace(/^-+|-+$/g, "")
           .toLowerCase() || "boat-owner";
-        const filename = `terms-and-agreement-${safeOwnerName}.pdf`;
+        const filename = `owner-statement-${safeOwnerName}.pdf`;
         const file = new File([nextData], filename, {
           type: "application/pdf",
         });
@@ -2548,26 +2648,26 @@ const BO_TermsAndAgreementModal = ({ owner, open, onClose }) => {
         nextUrl = URL.createObjectURL(file);
         setPdfFile({ url: nextUrl, filename });
       } catch (error) {
-        console.error("Failed to generate terms and agreement PDF", error);
+        console.error("Failed to generate owner statement PDF", error);
         if (isActive) setPdfFile(null);
       } finally {
         if (isActive) setLoading(false);
       }
     };
 
-    generateTermsPdf();
+    generateOwnerStatementPdf();
 
     return () => {
       isActive = false;
       if (nextUrl) URL.revokeObjectURL(nextUrl);
     };
-  }, [open, owner]);
+  }, [open, owner, queryClient]);
 
   if (!open) return null;
 
   return (
     <Modal
-      title="Terms and Agreement"
+      title="Owner Statement"
       onClose={onClose}
       closeOnBackdrop
       maxWidth="920px"
@@ -2583,7 +2683,7 @@ const BO_TermsAndAgreementModal = ({ owner, open, onClose }) => {
         ) : pdfFile?.url ? (
           <iframe
             src={pdfFile.url}
-            title={`Terms and Agreement ${BO_getFullName(owner)}`}
+            title={`Owner Statement ${BO_getFullName(owner)}`}
             className="h-full w-full border-0 bg-white"
           />
         ) : (
@@ -2597,7 +2697,7 @@ const BO_TermsAndAgreementModal = ({ owner, open, onClose }) => {
 };
 
 const BO_OwnerDetailsDrawer = ({ owner, open, onClose }) => {
-  const [termsOpen, setTermsOpen] = useState(false);
+  const [ownerStatementOpen, setOwnerStatementOpen] = useState(false);
 
   if (!owner) return null;
 
@@ -2617,13 +2717,13 @@ const BO_OwnerDetailsDrawer = ({ owner, open, onClose }) => {
               type="button"
               onClick={() => {
                 onClose?.();
-                setTermsOpen(true);
+                setOwnerStatementOpen(true);
               }}
               className="inline-flex min-w-[260px] items-center justify-center gap-2 rounded-[10px] border border-[#1a1f36] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#1a1f36] transition-colors hover:bg-slate-50"
               style={{ fontFamily: BO_FONT }}
             >
               <IoDocumentTextOutline className="text-[16px]" />
-              View Terms and Agreement
+              View Owner Statement
             </button>
           </div>
         }
@@ -2653,10 +2753,10 @@ const BO_OwnerDetailsDrawer = ({ owner, open, onClose }) => {
         </DrawerSection>
       </DetailDrawer>
 
-      <BO_TermsAndAgreementModal
+      <BO_OwnerStatementModal
         owner={owner}
-        open={termsOpen}
-        onClose={() => setTermsOpen(false)}
+        open={ownerStatementOpen}
+        onClose={() => setOwnerStatementOpen(false)}
       />
     </>
   );
@@ -3624,25 +3724,35 @@ const BA_AddBoatModal = ({ open, onClose, onSuccess, boatTypes = [], owners = []
 };
 
 const BoatManagement = () => {
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
   const navigate = useNavigate();
-  const resolveBoatTab = useCallback((path) => {
+  const resolveBoatTab = useCallback((path, search = "", state = null) => {
     if (path === "/boat-type") return "/boat-type";
     if (path === "/boat-owners") return "/boat-owners";
-    if (path === "/registered-boats") return getCachedTab(BOAT_MANAGEMENT_TAB_STORAGE_KEY, BOAT_MANAGEMENT_TAB_KEYS, "/registered-boats");
+    if (path === "/registered-boats") {
+      const highlightedResult = state?.universalSearchResult ?? null;
+      const highlight = new URLSearchParams(search).get("highlight") || "";
+
+      if (highlight.startsWith("boat-") || highlightedResult?.group === "Registered Boats") {
+        return "/registered-boats";
+      }
+
+      return getCachedTab(BOAT_MANAGEMENT_TAB_STORAGE_KEY, BOAT_MANAGEMENT_TAB_KEYS, "/registered-boats");
+    }
     return "/registered-boats";
   }, []);
-  const [activeBoatTab, setActiveBoatTab] = useState(() => resolveBoatTab(pathname));
+  const [activeBoatTab, setActiveBoatTab] = useState(() => resolveBoatTab(pathname, location.search, location.state));
 
   useEffect(() => {
-    const nextTab = resolveBoatTab(pathname);
+    const nextTab = resolveBoatTab(pathname, location.search, location.state);
     setActiveBoatTab(nextTab);
     cacheTab(BOAT_MANAGEMENT_TAB_STORAGE_KEY, nextTab, BOAT_MANAGEMENT_TAB_KEYS);
 
     if (pathname === "/registered-boats" && nextTab !== pathname) {
       navigate(nextTab, { replace: true });
     }
-  }, [navigate, pathname, resolveBoatTab]);
+  }, [location.search, location.state, navigate, pathname, resolveBoatTab]);
 
   const handleBoatTabChange = useCallback((nextTab) => {
     setActiveBoatTab(nextTab);

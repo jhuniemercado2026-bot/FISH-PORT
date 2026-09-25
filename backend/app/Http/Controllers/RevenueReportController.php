@@ -93,16 +93,17 @@ class RevenueReportController extends Controller
         $dockingQuery = DB::table('dockings')
             ->select(
                 'dockings.docking_date as date',
-                DB::raw("COALESCE(boats.boat_name, 'Docking') as payorName"),
+                DB::raw("CASE WHEN dockings.boat_category = 'visiting' THEN COALESCE(dockings.visiting_boat_name, visiting_boat_type.type_name, 'Visiting Boat') ELSE COALESCE(boats.boat_name, 'Docking') END as payorName"),
                 DB::raw("COALESCE(docking_ors.orNumbers, '') as orNumber"),
-                DB::raw("'Docking' as description"),
+                DB::raw("CASE WHEN dockings.boat_category = 'visiting' THEN 'Visiting Boat for Docking' ELSE 'Docking' END as description"),
                 'dockings.docking_fee as amount',
                 'dockings.docking_fee as total',
-                DB::raw("COALESCE(docking_receivable.receivable, dockings.docking_fee) as receivable"),
+                DB::raw("CASE WHEN dockings.boat_category = 'visiting' THEN 0 ELSE COALESCE(docking_receivable.receivable, dockings.docking_fee) END as receivable"),
                 DB::raw("1 as quantity"),
-                DB::raw("'docking' as sourceType")
+                DB::raw("CASE WHEN dockings.boat_category = 'visiting' THEN 'visitor_docking' ELSE 'docking' END as sourceType")
             )
             ->leftJoin('boats', 'boats.boat_id', '=', 'dockings.boat_id')
+            ->leftJoin('boat_types as visiting_boat_type', 'visiting_boat_type.boat_type_id', '=', 'dockings.visiting_boat_type_id')
             ->leftJoinSub($dockingOrsSubquery, 'docking_ors', 'docking_ors.docking_id', '=', 'dockings.docking_id')
             ->leftJoinSub($dockingReceivableSubquery, 'docking_receivable', 'docking_receivable.docking_id', '=', 'dockings.docking_id')
             ->where('dockings.docking_fee', '>', 0);
@@ -110,16 +111,17 @@ class RevenueReportController extends Controller
         $banyeraQuery = DB::table('banyera_transactions')
             ->select(
                 'banyera_transactions.transaction_date as date',
-                DB::raw("COALESCE(boats.boat_name, 'Banyera') as payorName"),
+                DB::raw("CASE WHEN banyera_transactions.boat_category = 'visiting' THEN COALESCE(banyera_transactions.visiting_boat_name, visiting_boat_type.type_name, 'Visiting Boat') ELSE COALESCE(boats.boat_name, 'Banyera') END as payorName"),
                 DB::raw("COALESCE(banyera_ors.orNumbers, '') as orNumber"),
-                DB::raw("'Banyera' as description"),
+                DB::raw("CASE WHEN banyera_transactions.boat_category = 'visiting' THEN 'Visiting Boat for Banyera' ELSE 'Banyera' END as description"),
                 'banyera_transactions.total_fee as amount',
                 'banyera_transactions.total_fee as total',
-                DB::raw("COALESCE(banyera_receivable.receivable, banyera_transactions.total_fee) as receivable"),
+                DB::raw("CASE WHEN banyera_transactions.boat_category = 'visiting' THEN 0 ELSE COALESCE(banyera_receivable.receivable, banyera_transactions.total_fee) END as receivable"),
                 DB::raw("1 as quantity"),
-                DB::raw("'banyera' as sourceType")
+                DB::raw("CASE WHEN banyera_transactions.boat_category = 'visiting' THEN 'visitor_banyera' ELSE 'banyera' END as sourceType")
             )
             ->leftJoin('boats', 'boats.boat_id', '=', 'banyera_transactions.boat_id')
+            ->leftJoin('boat_types as visiting_boat_type', 'visiting_boat_type.boat_type_id', '=', 'banyera_transactions.visiting_boat_type_id')
             ->leftJoinSub($banyeraOrsSubquery, 'banyera_ors', 'banyera_ors.banyera_id', '=', 'banyera_transactions.banyera_id')
             ->leftJoinSub($banyeraReceivableSubquery, 'banyera_receivable', 'banyera_receivable.banyera_id', '=', 'banyera_transactions.banyera_id')
             ->where('banyera_transactions.total_fee', '>', 0);
@@ -300,7 +302,7 @@ class RevenueReportController extends Controller
         }
 
         $users = DB::table('users')
-            ->select('user_id', 'first_name', 'last_name', 'email', 'role')
+            ->select('user_id', 'first_name', 'last_name', 'email', 'role', 'status')
             ->whereIn('role', $roles)
             ->orderByRaw("CASE role WHEN 'coordinator' THEN 0 WHEN 'inspector' THEN 1 ELSE 2 END")
             ->orderBy('first_name')
@@ -316,6 +318,7 @@ class RevenueReportController extends Controller
                     'last_name' => $user->last_name,
                     'email' => $user->email,
                     'role' => $user->role,
+                    'status' => $user->status,
                     'full_name' => $fullName !== '' ? $fullName : null,
                 ];
             })

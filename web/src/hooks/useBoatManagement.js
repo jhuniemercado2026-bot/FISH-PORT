@@ -193,6 +193,7 @@ const REGISTERED_BOATS_FILTER_KEYS = [
   "includeBoats",
   "includeBoatTypes",
   "includeOwners",
+  "includeArchivedLookups",
   "boat",
 ];
 
@@ -272,8 +273,9 @@ export const getBoatTypesQueryOptions = ({
   usage = "all",
   all = false,
   highlightBoatTypeId = "",
+  includeArchivedLookups = false,
 } = {}) => ({
-  queryKey: ["boat-types", { page, perPage, search, usage, all, highlightBoatTypeId }],
+  queryKey: ["boat-types", { page, perPage, search, usage, all, highlightBoatTypeId, includeArchivedLookups }],
   queryFn: async () => {
     const params = {
       types: 1,
@@ -286,6 +288,7 @@ export const getBoatTypesQueryOptions = ({
       include_boats: 0,
       include_owners: 0,
       include_boat_types: 1,
+      include_archived_lookups: includeArchivedLookups ? 1 : 0,
     };
 
     if (all) {
@@ -324,8 +327,9 @@ export const getBoatOwnersQueryOptions = ({
   usage = "all",
   all = false,
   highlightOwnerId = "",
+  includeArchivedLookups = false,
 } = {}) => ({
-  queryKey: ["boat-owners", { page, perPage, search, usage, all, highlightOwnerId }],
+  queryKey: ["boat-owners", { page, perPage, search, usage, all, highlightOwnerId, includeArchivedLookups }],
   queryFn: async () => {
     const params = {
       owners: 1,
@@ -338,6 +342,7 @@ export const getBoatOwnersQueryOptions = ({
       include_boats: 0,
       include_owners: 1,
       include_boat_types: 0,
+      include_archived_lookups: includeArchivedLookups ? 1 : 0,
     };
 
     if (all) {
@@ -420,6 +425,47 @@ export const getRegisteredBoatsReportQueryOptions = ({ userId, boatId } = {}) =>
 export const useRegisteredBoatsReportDataQuery = ({ userId, boatId, ...queryOptions } = {}) =>
   useQuery({
     ...getRegisteredBoatsReportQueryOptions({ userId, boatId }),
+    placeholderData: (previousData) => previousData,
+    ...queryOptions,
+  });
+
+const extractVisitingBoatsReport = (payload) => {
+  const visitingBoats = Array.isArray(payload?.visitingBoats)
+    ? payload.visitingBoats
+    : Array.isArray(payload?.data)
+    ? payload.data
+    : [];
+
+  return { visitingBoats };
+};
+
+export const getVisitingBoatsReportQueryOptions = ({ userId, sourceType, sourceId } = {}) => ({
+  queryKey: ["visiting-boats-report", { userId, sourceType, sourceId }],
+  queryFn: async ({ signal }) => {
+    try {
+      const params = {};
+      if (userId && userId !== "all") params.user_id = userId;
+      if (sourceType && sourceType !== "all") params.source_type = sourceType;
+      if (sourceId && sourceId !== "all") params.source_id = sourceId;
+
+      const response = await api.get("/visiting-boats-reports", {
+        params,
+        signal,
+      });
+      return extractVisitingBoatsReport(response.data);
+    } catch (error) {
+      console.error("Error fetching visiting boats report:", error);
+      return extractVisitingBoatsReport(null);
+    }
+  },
+  staleTime: 5 * 60 * 1000,
+  gcTime: 30 * 60 * 1000,
+  refetchOnWindowFocus: false,
+});
+
+export const useVisitingBoatsReportDataQuery = ({ userId, sourceType, sourceId, ...queryOptions } = {}) =>
+  useQuery({
+    ...getVisitingBoatsReportQueryOptions({ userId, sourceType, sourceId }),
     placeholderData: (previousData) => previousData,
     ...queryOptions,
   });

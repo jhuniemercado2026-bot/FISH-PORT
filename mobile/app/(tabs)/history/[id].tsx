@@ -47,6 +47,54 @@ const parseMoneyValue = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const compactText = (...parts: Array<unknown>) =>
+  parts
+    .map((part) => String(part ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+
+const isVisitingBoatRecord = (record: TransactionRecord | null | undefined) =>
+  String(record?.boat_category ?? "").toLowerCase() === "visiting" ||
+  Boolean(record?.visiting_boat_name);
+
+const getDetailBoatName = (record: TransactionRecord | null | undefined) =>
+  String(
+    record?.display_boat_name ||
+      record?.visiting_boat_name ||
+      record?.boat?.boat_name ||
+      record?.boat_name ||
+      "Unknown Boat"
+  );
+
+const getDetailBoatTypeName = (record: TransactionRecord | null | undefined) =>
+  String(
+    record?.display_boat_type_name ||
+      record?.visitingBoatType?.type_name ||
+      record?.visiting_boat_type?.type_name ||
+      record?.boat?.boat_type?.type_name ||
+      record?.boat?.boatType?.type_name ||
+      record?.boat?.boat_type_name ||
+      record?.boat_type_name ||
+      "Unknown Type"
+  );
+
+const getDetailBoatOwnerName = (record: TransactionRecord | null | undefined) => {
+  const visitingOwner = compactText(
+    record?.visiting_owner_firstname,
+    record?.visiting_owner_lastname
+  );
+
+  return String(
+    record?.display_owner_name ||
+      visitingOwner ||
+      record?.boat?.owner?.full_name ||
+      record?.boat?.owner_name ||
+      record?.boat?.boat_owner ||
+      record?.owner_name ||
+      "Unknown Owner"
+  );
+};
+
 const endpointForType = (type: TransactionType) => {
   switch (type) {
     case "docking":
@@ -299,13 +347,7 @@ const isRecordBilled = (record: TransactionRecord | null | undefined) =>
   Boolean(record?.is_billed || record?.billed_at || record?.billing_id || record?.bill_id);
 
 function buildBanyeraReceiptTextFromDetail(record: TransactionRecord) {
-  const boatName = record.boat?.boat_name || record.boat_name || "-";
-  const ownerName =
-    record.boat?.owner?.full_name ||
-    record.boat?.owner_name ||
-    record.boat?.boat_owner ||
-    record.owner_name ||
-    "Unknown Owner";
+  const boatName = getDetailBoatName(record);
   const transactionDate = record.transaction_date || record.created_at;
   const receiptLines = [
     centerPrinterText("OPOL FISH PORT"),
@@ -367,10 +409,25 @@ const createDraftDetail = (draft: OfflineTransactionDraft): TransactionRecord =>
   const metadata = draft.metadata ?? {};
 
   if (draft.type === "docking") {
+    const isVisitingBoat = payload.boat_category === "visiting";
     return {
       __isDraft: true,
       local_id: draft.local_id,
       created_at: draft.created_at,
+      boat_category: payload.boat_category ?? "registered",
+      visiting_boat_name: payload.visiting_boat_name,
+      visiting_owner_firstname: payload.visiting_owner_firstname,
+      visiting_owner_lastname: payload.visiting_owner_lastname,
+      visiting_owner_address: payload.visiting_owner_address,
+      visiting_contact_number: payload.visiting_contact_number,
+      visiting_boat_type_id: payload.visiting_boat_type_id,
+      display_boat_name: isVisitingBoat
+        ? payload.visiting_boat_name
+        : metadata.boat_name,
+      display_boat_type_name: metadata.boat_type_name,
+      display_owner_name: isVisitingBoat
+        ? compactText(payload.visiting_owner_firstname, payload.visiting_owner_lastname)
+        : undefined,
       boat: {
         boat_name: metadata.boat_name || `Boat #${payload.boat_id ?? "-"}`,
         boat_type_name: metadata.boat_type_name,
@@ -384,6 +441,7 @@ const createDraftDetail = (draft: OfflineTransactionDraft): TransactionRecord =>
   }
 
   if (draft.type === "banyera") {
+    const isVisitingBoat = payload.boat_category === "visiting";
     const items = Array.isArray(payload.items) ? payload.items : [];
     const totalFee = items.reduce(
       (sum, item) => sum + parseMoneyValue(item?.subtotal),
@@ -394,6 +452,20 @@ const createDraftDetail = (draft: OfflineTransactionDraft): TransactionRecord =>
       __isDraft: true,
       local_id: draft.local_id,
       created_at: draft.created_at,
+      boat_category: payload.boat_category ?? "registered",
+      visiting_boat_name: payload.visiting_boat_name,
+      visiting_owner_firstname: payload.visiting_owner_firstname,
+      visiting_owner_lastname: payload.visiting_owner_lastname,
+      visiting_owner_address: payload.visiting_owner_address,
+      visiting_contact_number: payload.visiting_contact_number,
+      visiting_boat_type_id: payload.visiting_boat_type_id,
+      display_boat_name: isVisitingBoat
+        ? payload.visiting_boat_name
+        : metadata.boat_name,
+      display_boat_type_name: metadata.boat_type_name,
+      display_owner_name: isVisitingBoat
+        ? compactText(payload.visiting_owner_firstname, payload.visiting_owner_lastname)
+        : undefined,
       boat: {
         boat_name: metadata.boat_name || `Boat #${payload.boat_id ?? "-"}`,
         boat_type_name: metadata.boat_type_name,
@@ -609,6 +681,7 @@ export default function HistoryDetailScreen() {
   const [isBanyeraPrintPreviewOpen, setIsBanyeraPrintPreviewOpen] = useState(false);
   const [transactionLock, setTransactionLock] = useState<TransactionLockState | null>(null);
   const [isOfflineDetailUnavailable, setIsOfflineDetailUnavailable] = useState(false);
+  const [isLoadingBreakdown, setIsLoadingBreakdown] = useState(false);
   const isDraftDetail = Boolean(detail?.__isDraft) || params.draft === "true";
 
   useEffect(() => {
@@ -638,7 +711,7 @@ export default function HistoryDetailScreen() {
       }
 
       try {
-        const lockResourceQuery = parsedType === "tickets" ? "?resource=vehicle-tickets" : "";
+        const lockResourceQuery = parsedType && parsedType !== "remittance" ? "?resource=transactions" : "";
         const response = await fetch(`${getApiBaseUrl()}/transaction-lock${lockResourceQuery}`, {
           headers: buildApiHeaders(authToken),
         });
@@ -682,8 +755,12 @@ export default function HistoryDetailScreen() {
         if (cachedDetail) {
           setDetail(cachedDetail);
           setIsLoading(false);
+          setIsLoadingBreakdown(
+            parsedType === "remittance" && !Array.isArray(cachedDetail.breakdown)
+          );
         } else {
           setIsLoading(true);
+          setIsLoadingBreakdown(parsedType === "remittance");
         }
       } else {
         setIsLoading(true);
@@ -702,6 +779,7 @@ export default function HistoryDetailScreen() {
           setDetail(null);
           setIsOfflineDetailUnavailable(true);
         }
+        setIsLoadingBreakdown(false);
         setIsLoading(false);
         return;
       }
@@ -711,6 +789,7 @@ export default function HistoryDetailScreen() {
 
       if (!authToken || !currentUserId) {
         showToast("error", "Please sign in again.");
+        setIsLoadingBreakdown(false);
         setIsLoading(false);
         return;
       }
@@ -718,6 +797,7 @@ export default function HistoryDetailScreen() {
       const idNumber = Number(id);
       if (!id || Number.isNaN(idNumber)) {
         showToast("error", "Invalid transaction id.");
+        setIsLoadingBreakdown(false);
         setIsLoading(false);
         return;
       }
@@ -763,7 +843,28 @@ export default function HistoryDetailScreen() {
           }
 
           const json = await response.json().catch(() => null);
-          const record = resolveDetailFromResponse(json, null);
+          let record = resolveDetailFromResponse(json, null);
+
+          if (
+            typeToCheck === "remittance" &&
+            record &&
+            (!Array.isArray(record.breakdown) || record.breakdown.length === 0) &&
+            record.date
+          ) {
+            try {
+              const breakdownResponse = await fetch(
+                `${getApiBaseUrl()}/remittances/today-collection?date=${encodeURIComponent(String(record.date).slice(0, 10))}&summary=1&breakdown=1`,
+                { headers: buildApiHeaders(authToken) }
+              );
+              const breakdownPayload = await breakdownResponse.json().catch(() => null);
+
+              if (breakdownResponse.ok && Array.isArray(breakdownPayload?.breakdown)) {
+                record = { ...record, breakdown: breakdownPayload.breakdown };
+              }
+            } catch {
+              // Keep the detail response when the optional breakdown refresh fails.
+            }
+          }
 
           if (record && isOwnedByCurrentUser(record)) {
             found = record;
@@ -786,6 +887,7 @@ export default function HistoryDetailScreen() {
           showToast("error", "Failed to load transaction details.");
         }
       } finally {
+        setIsLoadingBreakdown(false);
         setIsLoading(false);
       }
     }
@@ -813,8 +915,13 @@ export default function HistoryDetailScreen() {
     if (!latestSynced) return;
 
     setType(parsedType);
-    setDetail(latestSynced.data);
-    cacheTransactionDetail(parsedType, id, latestSynced.data);
+    setDetail((current) => {
+      const mergedDetail = current?.breakdown
+        ? { ...latestSynced.data, breakdown: current.breakdown }
+        : latestSynced.data;
+      cacheTransactionDetail(parsedType, id, mergedDetail);
+      return mergedDetail;
+    });
   }, [cacheTransactionDetail, params.draft, params.id, params.type, syncedTransactions]);
 
   const isDetailTransactionLocked = () => {
@@ -1044,7 +1151,7 @@ export default function HistoryDetailScreen() {
             label: "Time",
             value: formatPhilippineTime(banyeraDetailPreviewDate),
           },
-          { label: "Boat", value: detail.boat?.boat_name || detail.boat_name || "-" },
+          { label: "Boat", value: getDetailBoatName(detail) || "-" },
         ]
       : [];
   const banyeraDetailPreviewLines: PrintPreviewLine[] =
@@ -1134,6 +1241,10 @@ export default function HistoryDetailScreen() {
       : 0;
     const ticketDisplayFee =
       parseMoneyValue(detail.total_fee) > 0 ? parseMoneyValue(detail.total_fee) : parseMoneyValue(detail.ticket_fee);
+    const detailBoatName = getDetailBoatName(detail);
+    const detailBoatTypeName = getDetailBoatTypeName(detail);
+    const detailBoatOwnerName = getDetailBoatOwnerName(detail);
+    const isVisitingBoat = isVisitingBoatRecord(detail);
 
     const voidedDetailsBlock = isVoided ? (
       <View className="mb-4 -mx-5 rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-5 py-5 shadow-sm shadow-black/5">
@@ -1205,7 +1316,18 @@ export default function HistoryDetailScreen() {
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                     <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      {detail.boat?.boat_name ?? "Unknown Boat"}
+                      {detailBoatName}
+                    </Text>
+                  </View>
+                </View>
+
+                <View className="mb-4">
+                  <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Boat Category
+                  </Text>
+                  <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      {isVisitingBoat ? "Visiting Boat" : "Registered Boat"}
                     </Text>
                   </View>
                 </View>
@@ -1236,7 +1358,7 @@ export default function HistoryDetailScreen() {
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                     <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      {detail.boat?.boat_type?.type_name || detail.boat?.boat_type_name || "Unknown Type"}
+                      {detailBoatTypeName}
                     </Text>
                   </View>
                 </View>
@@ -1247,10 +1369,36 @@ export default function HistoryDetailScreen() {
                   </Text>
                   <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                     <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                      {detail.boat?.owner?.full_name || detail.boat?.owner_name || detail.boat?.boat_owner || "Unknown Owner"}
+                      {detailBoatOwnerName}
                     </Text>
                   </View>
                 </View>
+
+                {isVisitingBoat ? (
+                  <>
+                    <View className="mb-4">
+                      <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                        Address
+                      </Text>
+                      <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                        <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                          {detail.visiting_owner_address || "-"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View className="mb-4">
+                      <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                        Contact Number
+                      </Text>
+                      <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                        <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                          {detail.visiting_contact_number || "-"}
+                        </Text>
+                      </View>
+                    </View>
+                  </>
+                ) : null}
 
                 <View className="mb-4">
                   <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
@@ -1317,7 +1465,18 @@ export default function HistoryDetailScreen() {
                 </Text>
                 <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                   <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                    {detail.boat?.boat_name ?? "Unknown Boat"}
+                    {detailBoatName}
+                  </Text>
+                </View>
+              </View>
+
+              <View className="mb-4">
+                <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                  Boat Category
+                </Text>
+                <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                  <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    {isVisitingBoat ? "Visiting Boat" : "Registered Boat"}
                   </Text>
                 </View>
               </View>
@@ -1349,7 +1508,7 @@ export default function HistoryDetailScreen() {
                 </Text>
                 <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                   <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                    {detail.boat?.boat_type?.type_name || detail.boat?.boat_type_name || "Unknown Type"}
+                    {detailBoatTypeName}
                   </Text>
                 </View>
               </View>
@@ -1360,10 +1519,36 @@ export default function HistoryDetailScreen() {
                 </Text>
                 <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
                   <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
-                    {detail.boat?.owner?.full_name || detail.boat?.owner_name || detail.boat?.boat_owner || "Unknown Owner"}
+                    {detailBoatOwnerName}
                   </Text>
                 </View>
               </View>
+
+              {isVisitingBoat ? (
+                <>
+                  <View className="mb-4">
+                    <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                      Address
+                    </Text>
+                    <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                      <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                        {detail.visiting_owner_address || "-"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View className="mb-4">
+                    <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                      Contact Number
+                    </Text>
+                    <View className="mt-2 rounded-[10px] border border-[#E8E1E6] bg-white px-4 py-3">
+                      <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                        {detail.visiting_contact_number || "-"}
+                      </Text>
+                    </View>
+                  </View>
+                </>
+              ) : null}
 
               <View className="mb-4">
                 <Text className="text-[11px] uppercase text-[#6F6F82]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
@@ -1521,6 +1706,7 @@ export default function HistoryDetailScreen() {
           )}
 
           {type === "remittance" && (
+            <>
             <View className="mb-4 -mx-5 rounded-[10px] border border-[#E8E1E6] bg-white px-5 py-5 shadow-sm shadow-black/5">
               <View className="flex-row items-center">
                 <View className="h-11 w-11 items-center justify-center rounded-[10px]" style={{ backgroundColor: "rgba(37,99,235,0.08)" }}>
@@ -1639,6 +1825,76 @@ export default function HistoryDetailScreen() {
                 </View>
               </View>
             </View>
+            <View className="mb-4 -mx-5 rounded-[10px] border border-[#E8E1E6] bg-white px-5 py-5 shadow-sm shadow-black/5">
+              <View className="flex-row items-center">
+                <View className="h-11 w-11 items-center justify-center rounded-[10px]" style={{ backgroundColor: "rgba(37,99,235,0.08)" }}>
+                  <Ionicons name="list-outline" size={20} color="#2563EB" />
+                </View>
+                <View className="ml-3 flex-1">
+                  <Text className="text-[16px] leading-[22px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                    Remittance Breakdown
+                  </Text>
+                  <Text className="mt-1 text-[11px] leading-[14px] text-[#8A94A3]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                    Detailed breakdown of collection
+                  </Text>
+                </View>
+              </View>
+
+              <View className="-mx-5 mt-4 mb-5 h-px bg-[#E8E1E6]" />
+
+              {isLoadingBreakdown ? (
+                <View className="items-center justify-center py-6">
+                  <ActivityIndicator color="#2563EB" size="small" />
+                </View>
+              ) : Array.isArray(detail.breakdown) && detail.breakdown.length > 0 ? (
+                <View>
+                  {detail.breakdown.map((row: any, index: number) => {
+                    const typeName =
+                      row?.type_name ||
+                      row?.boat_name ||
+                      row?.boatName ||
+                      row?.boat_type ||
+                      row?.vehicle_type ||
+                      "-";
+
+                    return (
+                      <View key={`${row?.transaction ?? "collection"}-${index}`} className="border-b border-[#F8F1F4] py-3 last:border-b-0">
+                        <View className="flex-row items-start justify-between gap-3">
+                          <Text className="flex-1 text-[13px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_600SemiBold" }}>
+                            {row?.transaction || "-"}
+                          </Text>
+                          <Text className="text-[13px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_600SemiBold", fontVariant: ["tabular-nums"] }}>
+                            ₱{parseMoneyValue(row?.cash_received).toLocaleString("en-PH", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </Text>
+                        </View>
+                        <Text className="text-[12px] text-[#6F6F82]" numberOfLines={2} style={{ fontFamily: "Montserrat_400Regular" }}>
+                          {typeName}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                  <View className="flex-row items-center justify-between border-t border-[#E8E1E6] pt-3">
+                    <Text className="text-[13px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_700Bold" }}>
+                      Total
+                    </Text>
+                    <Text className="text-[14px] text-[#1A1F36]" style={{ fontFamily: "Montserrat_700Bold", fontVariant: ["tabular-nums"] }}>
+                      ₱{parseMoneyValue(detail.amount).toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <Text className="text-[13px] text-[#6F6F82]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                  No collection breakdown available.
+                </Text>
+              )}
+            </View>
+            </>
           )}
 
           {type === "tickets" && (

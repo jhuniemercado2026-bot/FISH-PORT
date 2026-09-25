@@ -74,9 +74,21 @@ export const getBanyeraDataQueryOptions = ({
         ? (clsRes.value.data ?? [])
         : [];
 
-    const boatsRaw =
+    const boatsPayload =
       boatsRes.status === "fulfilled"
         ? (boatsRes.value.data ?? [])
+        : [];
+    const boatsRaw = Array.isArray(boatsPayload)
+      ? boatsPayload
+      : Array.isArray(boatsPayload?.boats)
+        ? boatsPayload.boats
+        : Array.isArray(boatsPayload?.data)
+          ? boatsPayload.data
+          : [];
+    const boatTypes = Array.isArray(boatsPayload?.boatTypes)
+      ? boatsPayload.boatTypes
+      : Array.isArray(boatsPayload?.boat_types)
+        ? boatsPayload.boat_types
         : [];
 
     const fees =
@@ -98,6 +110,7 @@ export const getBanyeraDataQueryOptions = ({
       },
       classifications,
       boats: boatsRaw.filter((boat) => !boat.deleted_at),
+      boatTypes,
       fees,
     };
   },
@@ -126,9 +139,21 @@ export const getBanyeraLookupsQueryOptions = ({ fiscalYear } = {}) => ({
         ? rawClassifications.data
         : [];
 
-    const boatsRaw =
+    const boatsPayload =
       boatsRes.status === "fulfilled"
         ? (boatsRes.value.data ?? [])
+        : [];
+    const boatsRaw = Array.isArray(boatsPayload)
+      ? boatsPayload
+      : Array.isArray(boatsPayload?.boats)
+        ? boatsPayload.boats
+        : Array.isArray(boatsPayload?.data)
+          ? boatsPayload.data
+          : [];
+    const boatTypes = Array.isArray(boatsPayload?.boatTypes)
+      ? boatsPayload.boatTypes
+      : Array.isArray(boatsPayload?.boat_types)
+        ? boatsPayload.boat_types
         : [];
 
     const fees =
@@ -139,6 +164,7 @@ export const getBanyeraLookupsQueryOptions = ({ fiscalYear } = {}) => ({
     return {
       classifications,
       boats: boatsRaw.filter((boat) => !boat.deleted_at),
+      boatTypes,
       fees,
     };
   },
@@ -155,8 +181,9 @@ export const getFishClassificationsDataQueryOptions = ({
   highlightClassificationId = "",
   fiscalYear,
   paginated = true,
+  includeArchivedLookups = false,
 } = {}) => ({
-  queryKey: ["banyera-data", "fish-classifications", { page, perPage, search, status, highlightClassificationId, fiscalYear, paginated }],
+  queryKey: ["banyera-data", "fish-classifications", { page, perPage, search, status, highlightClassificationId, fiscalYear, paginated, includeArchivedLookups }],
   queryFn: async ({ signal }) => {
     const response = await api.get("/fish-classifications", {
       signal,
@@ -168,6 +195,7 @@ export const getFishClassificationsDataQueryOptions = ({
         status,
         highlight_classification_id: highlightClassificationId,
         fiscal_year: fiscalYear,
+        include_archived_lookups: includeArchivedLookups ? 1 : 0,
       },
     });
 
@@ -227,7 +255,7 @@ const looksLikeQueryOptions = (value) =>
   value &&
   typeof value === "object" &&
   Object.keys(value).some((key) => QUERY_OPTION_KEYS.has(key)) &&
-  !["page", "perPage", "search", "status", "period", "fishType", "filters", "sort", "highlightBanyeraId", "paginated", "includeLookups", "skipFiscalYear"].some((key) =>
+  !["page", "perPage", "search", "status", "period", "fishType", "filters", "sort", "highlightBanyeraId", "paginated", "includeLookups", "includeArchivedLookups", "skipFiscalYear"].some((key) =>
     Object.prototype.hasOwnProperty.call(value, key)
   );
 

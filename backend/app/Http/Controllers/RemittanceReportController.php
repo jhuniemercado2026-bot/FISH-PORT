@@ -69,7 +69,55 @@ class RemittanceReportController extends Controller
             $tickets->where('vt.created_by', $userId);
         }
 
-        $query = DB::query()->fromSub($payments->unionAll($tickets), 'collections');
+        $visitorDockings = DB::table('dockings as d')
+            ->leftJoin('boat_types as boat_type', 'boat_type.boat_type_id', '=', 'd.visiting_boat_type_id')
+            ->leftJoin('bill_items as bill_item', 'bill_item.docking_id', '=', 'd.docking_id')
+            ->where('d.boat_category', 'visiting')
+            ->whereNull('d.voided_at')
+            ->whereNull('bill_item.docking_id')
+            ->select([
+                DB::raw("'visitor_docking' as source_type"),
+                'd.docking_id as source_id',
+                DB::raw("'Visiting Boat for Docking' as transaction"),
+                DB::raw("COALESCE(d.visiting_boat_name, boat_type.type_name, '-') as type_name"),
+                DB::raw("NULL as official_receipt_no"),
+                'd.docking_date as collection_date',
+                'd.docking_fee as cash_received',
+                DB::raw('COALESCE(d.docking_date, d.created_at) as sort_date'),
+            ]);
+
+        if ($userId) {
+            $visitorDockings->where('d.created_by', $userId);
+        }
+
+        $visitorBanyera = DB::table('banyera_transactions as bt')
+            ->leftJoin('boat_types as boat_type', 'boat_type.boat_type_id', '=', 'bt.visiting_boat_type_id')
+            ->leftJoin('bill_items as bill_item', 'bill_item.banyera_id', '=', 'bt.banyera_id')
+            ->where('bt.boat_category', 'visiting')
+            ->whereNull('bt.voided_at')
+            ->whereNull('bill_item.banyera_id')
+            ->select([
+                DB::raw("'visitor_banyera' as source_type"),
+                'bt.banyera_id as source_id',
+                DB::raw("'Visiting Boat for Banyera' as transaction"),
+                DB::raw("COALESCE(bt.visiting_boat_name, boat_type.type_name, '-') as type_name"),
+                DB::raw("NULL as official_receipt_no"),
+                'bt.transaction_date as collection_date',
+                'bt.total_fee as cash_received',
+                DB::raw('COALESCE(bt.transaction_date, bt.created_at) as sort_date'),
+            ]);
+
+        if ($userId) {
+            $visitorBanyera->where('bt.created_by', $userId);
+        }
+
+        $query = DB::query()->fromSub(
+            $payments
+                ->unionAll($tickets)
+                ->unionAll($visitorDockings)
+                ->unionAll($visitorBanyera),
+            'collections'
+        );
 
         if ($date) {
             $query->whereDate('collection_date', $date);

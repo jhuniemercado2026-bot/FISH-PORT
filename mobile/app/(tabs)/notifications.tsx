@@ -362,6 +362,7 @@ export default function NotificationsScreen() {
       : statusFilter === "read"
         ? "No read notifications."
         : "No notifications yet";
+  const shouldShowEmptyState = !shouldShowSkeleton && displayedNotifications.length === 0;
 
   return (
     <View className="flex-1 bg-[#FFFDFB]">
@@ -395,13 +396,17 @@ export default function NotificationsScreen() {
 
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: 28, paddingTop: 20 }}
+        contentContainerStyle={{
+          flexGrow: shouldShowEmptyState ? 1 : undefined,
+          paddingBottom: 28,
+          paddingTop: shouldShowEmptyState ? 0 : 20,
+        }}
         showsVerticalScrollIndicator={false}
       >
-        <View className="px-5">
+        <View className={`px-5 ${shouldShowEmptyState ? "flex-1 justify-center" : ""}`}>
           {shouldShowSkeleton ? (
             <>
-              {Array.from({ length: 5 }).map((_, index) => (
+              {Array.from({ length: 8 }).map((_, index) => (
                 <NotificationSkeletonCard key={`notification-skeleton-${index}`} />
               ))}
             </>
@@ -414,16 +419,10 @@ export default function NotificationsScreen() {
               />
             ))
           ) : (
-            <View className="items-center justify-center px-6" style={{ minHeight: 520 }}>
-              <View
-                className="h-12 w-12 items-center justify-center rounded-[16px]"
-                style={{ backgroundColor: "rgba(37,99,235,0.08)" }}
-              >
-                <Ionicons name="notifications-off-outline" size={22} color="#2563EB" />
-              </View>
+            <View className="items-center justify-center">
               <Text
-                className="mt-3 text-center text-[14px] text-[#1A1F36]"
-                style={{ fontFamily: "Montserrat_600SemiBold" }}
+                className="text-center text-[14px] text-[#6F6F82]"
+                style={{ fontFamily: "Montserrat_400Regular" }}
               >
                 {emptyMessage}
               </Text>

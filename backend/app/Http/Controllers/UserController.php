@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Events\AccountStatusUpdated;
 use App\Events\MasterDataUpdated;
+use App\Jobs\SendExistingFeeNotificationsToAccount;
 use App\Models\User;
 use App\Services\ActivityLogService;
 use App\Services\PHPMailerService;
@@ -19,6 +20,59 @@ class UserController extends Controller
     private const PASSWORD_CHANGE_RESEND_COOLDOWN_SECONDS = 59;
     private const PASSWORD_CHANGE_RESEND_DAILY_LIMIT = 3;
     private const VERIFICATION_CODE_LIMIT_MESSAGE = 'You have reached the verification code limit for today. Please use the latest verification code sent to your email. This code expires within this day.';
+
+    private function accountPasswordRules(bool $required = true): array
+    {
+        return [
+            $required ? 'required' : 'nullable',
+            'string',
+            'min:8',
+            'regex:/[A-Z]/',
+            'regex:/[0-9]/',
+            'regex:/[^A-Za-z0-9]/',
+            'confirmed',
+        ];
+    }
+
+    private function accountPasswordMessages(): array
+    {
+        return [
+            'password.regex' => 'Password must include at least 1 uppercase letter, 1 number, and 1 symbol.',
+        ];
+    }
+
+    private function passwordChangeRules(): array
+    {
+        return [
+            'required',
+            'string',
+            'min:8',
+            'regex:/[A-Z]/',
+            'regex:/[0-9]/',
+            'regex:/[^A-Za-z0-9]/',
+            'confirmed',
+        ];
+    }
+
+    private function passwordChangeMessages(): array
+    {
+        return [
+            'new_password.regex' => 'Password must include at least 1 uppercase letter, 1 number, and 1 symbol.',
+        ];
+    }
+
+    private function queueExistingFeeNotificationsForNewAccount(User $user): void
+    {
+        if (! in_array($user->role, ['coordinator', 'inspector'], true)) {
+            return;
+        }
+
+        SendExistingFeeNotificationsToAccount::dispatch(
+            (int) $user->user_id,
+            auth()->id()
+        )->afterResponse();
+    }
+
 
     private function manageableAccountRoles(?User $actor): array
     {
@@ -149,7 +203,7 @@ class UserController extends Controller
 
         $validated = $request->validate([
             'email'          => 'required|email|max:150|unique:users,email',
-            'password'       => 'required|string|min:8|confirmed',
+            'password'       => $this->accountPasswordRules(),
             'role'           => ['required', Rule::in($manageableRoles)],
             'first_name'     => 'required|string|max:100',
             'last_name'      => 'required|string|max:100',
@@ -158,7 +212,7 @@ class UserController extends Controller
             'birthday'       => 'nullable|date',
             'address'        => 'nullable|string',
             'profile_image'  => 'nullable|string|max:255',
-        ]);
+        ], $this->accountPasswordMessages());
 
         $user = User::create([
             ...$validated,
@@ -175,6 +229,7 @@ class UserController extends Controller
         );
 
         broadcast(new MasterDataUpdated('users', 'created', $user->makeHidden('password')->toArray()));
+        $this->queueExistingFeeNotificationsForNewAccount($user);
 
         return response()->json([
             'message' => 'User created successfully.',
@@ -189,7 +244,7 @@ class UserController extends Controller
 
         $validated = $request->validate([
             'email' => 'required|email|max:150|unique:users,email',
-            'password' => 'required|string|min:8|confirmed',
+            'password' => 'required|string|confirmed',
             'role' => ['required', Rule::in($manageableRoles)],
         ]);
 
@@ -214,28 +269,26 @@ class UserController extends Controller
                 $user->role
             );
 
-            if (!$sent) {
-                DB::rollBack();
-
-                return response()->json([
-                    'message' => 'Unable to send the account email. The user was not created.',
-                ], 500);
-            }
-
             DB::commit();
 
             app(ActivityLogService::class)->log(
                 action: 'INSERT',
                 module: 'Manage Accounts',
-                details: 'Created invited account for "' . $user->email . '" and sent login credentials.',
+                details: $sent
+                    ? 'Created invited account for "' . $user->email . '" and sent login credentials.'
+                    : 'Created invited account for "' . $user->email . '", but login credentials email was not sent.',
                 user: auth()->user()
             );
 
             broadcast(new MasterDataUpdated('users', 'created', $user->fresh()->makeHidden('password')->toArray()));
+            $this->queueExistingFeeNotificationsForNewAccount($user);
 
             return response()->json([
-                'message' => 'User created and credentials sent successfully.',
+                'message' => $sent
+                    ? 'User created and credentials sent successfully.'
+                    : 'User created successfully, but the email could not be sent.',
                 'data' => $user->fresh()->makeHidden('password'),
+                'email_sent' => $sent,
             ], 201);
         } catch (\Throwable $e) {
             DB::rollBack();
@@ -267,7 +320,7 @@ class UserController extends Controller
 
         $validated = $request->validate([
             'email'          => 'sometimes|email|max:150|unique:users,email,' . $id . ',user_id',
-            'password'       => 'nullable|string|min:8|confirmed',
+            'password'       => $this->accountPasswordRules(false),
             'role'           => 'sometimes|in:head,coordinator,inspector',
             'status'         => 'sometimes|in:online,offline,deactivated',
             'first_name'     => 'sometimes|string|max:100',
@@ -277,7 +330,7 @@ class UserController extends Controller
             'birthday'       => 'nullable|date',
             'address'        => 'nullable|string',
             'profile_image'  => 'nullable|string|max:255',
-        ]);
+        ], $this->accountPasswordMessages());
 
         if (!empty($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
@@ -324,8 +377,8 @@ class UserController extends Controller
 
         $validated = $request->validate([
             'current_password' => 'required|string',
-            'new_password' => 'required|string|min:8|confirmed',
-        ]);
+            'new_password' => $this->passwordChangeRules(),
+        ], $this->passwordChangeMessages());
 
         if (!Hash::check($validated['current_password'], $user->password)) {
             return response()->json([
@@ -429,9 +482,9 @@ class UserController extends Controller
 
         $validated = $request->validate([
             'current_password' => 'required|string',
-            'new_password' => 'required|string|min:8|confirmed',
+            'new_password' => $this->passwordChangeRules(),
             'verification_code' => 'required|digits:6',
-        ]);
+        ], $this->passwordChangeMessages());
 
         if (!Hash::check($validated['current_password'], $user->password)) {
             return response()->json([

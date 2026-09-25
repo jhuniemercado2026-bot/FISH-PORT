@@ -22,9 +22,21 @@ class DashboardController extends Controller
     {
         return response()->json([
             'boats' => Boat::query()
-                ->select(['boat_id'])
+                ->select(['boat_id', 'boat_name', 'boat_type_id'])
+                ->with(['boatType:boat_type_id,type_name'])
                 ->active()
-                ->get(),
+                ->get()
+                ->map(fn (Boat $boat) => [
+                    'boat_id' => $boat->boat_id,
+                    'boat_name' => $boat->boat_name,
+                    'boat_type_id' => $boat->boat_type_id,
+                    'boat_type' => $boat->boatType ? [
+                        'type_name' => $boat->boatType->type_name,
+                    ] : null,
+                    'boatType' => $boat->boatType ? [
+                        'type_name' => $boat->boatType->type_name,
+                    ] : null,
+                ]),
             'vehicleTickets' => VehicleTicket::query()
                 ->select(['ticket_id', 'ticket_date', 'ticket_fee', 'voided_at', 'created_at'])
                 ->get()
@@ -37,10 +49,11 @@ class DashboardController extends Controller
                     'created_at' => optional($ticket->created_at)->toIso8601String(),
                 ]),
             'banyeraTransactions' => BanyeraTransaction::query()
-                ->select(['banyera_id', 'boat_id', 'transaction_date', 'total_fee', 'voided_at', 'created_at'])
+                ->select(['banyera_id', 'boat_id', 'boat_category', 'visiting_boat_name', 'visiting_owner_firstname', 'visiting_owner_lastname', 'visiting_owner_address', 'visiting_contact_number', 'visiting_boat_type_id', 'transaction_date', 'total_fee', 'voided_at', 'created_at'])
                 ->with([
                     'boat:boat_id,boat_name,boat_type_id',
                     'boat.boatType:boat_type_id,type_name',
+                    'visitingBoatType:boat_type_id,type_name',
                     'items:item_id,banyera_id,classification_id,quantity,subtotal',
                     'items.classification:classification_id,classification_name',
                 ])
@@ -49,7 +62,14 @@ class DashboardController extends Controller
                 ->map(fn (BanyeraTransaction $transaction) => [
                     'banyera_id' => $transaction->banyera_id,
                     'transaction_id' => $transaction->banyera_id,
+                    'boat_category' => $transaction->boat_category ?? 'registered',
                     'boat_id' => $transaction->boat_id,
+                    'visiting_boat_name' => $transaction->visiting_boat_name,
+                    'visiting_owner_firstname' => $transaction->visiting_owner_firstname,
+                    'visiting_owner_lastname' => $transaction->visiting_owner_lastname,
+                    'visiting_owner_address' => $transaction->visiting_owner_address,
+                    'visiting_contact_number' => $transaction->visiting_contact_number,
+                    'visiting_boat_type_id' => $transaction->visiting_boat_type_id,
                     'transaction_date' => optional($transaction->transaction_date)->toDateString(),
                     'total_fee' => (float) $transaction->total_fee,
                     'created_at' => optional($transaction->created_at)->toIso8601String(),
@@ -62,6 +82,20 @@ class DashboardController extends Controller
                         'boatType' => $transaction->boat->boatType ? [
                             'type_name' => $transaction->boat->boatType->type_name,
                         ] : null,
+                    ] : [
+                        'boat_name' => $transaction->visiting_boat_name,
+                        'owner_name' => trim(collect([$transaction->visiting_owner_firstname, $transaction->visiting_owner_lastname])->filter()->implode(' ')),
+                        'owner_address' => $transaction->visiting_owner_address,
+                        'boat_type' => $transaction->visitingBoatType ? [
+                            'type_name' => $transaction->visitingBoatType->type_name,
+                        ] : null,
+                        'boatType' => $transaction->visitingBoatType ? [
+                            'type_name' => $transaction->visitingBoatType->type_name,
+                        ] : null,
+                    ],
+                    'display_boat_name' => $transaction->boat?->boat_name ?? $transaction->visiting_boat_name,
+                    'visiting_boat_type' => $transaction->visitingBoatType ? [
+                        'type_name' => $transaction->visitingBoatType->type_name,
                     ] : null,
                     'items' => $transaction->items->map(fn ($item) => [
                         'quantity' => (float) $item->quantity,
@@ -108,12 +142,13 @@ class DashboardController extends Controller
                     'created_at' => optional($remittance->created_at)->toIso8601String(),
                 ]),
             'dockings' => Docking::query()
-                ->select(['docking_id', 'boat_id', 'docking_date', 'docking_fee', 'voided_at', 'created_at'])
-                ->with(['boat:boat_id,boat_name,boat_type_id', 'boat.boatType:boat_type_id,type_name'])
+                ->select(['docking_id', 'boat_category', 'boat_id', 'visiting_boat_name', 'visiting_owner_firstname', 'visiting_owner_lastname', 'visiting_owner_address', 'visiting_boat_type_id', 'docking_date', 'docking_fee', 'voided_at', 'created_at'])
+                ->with(['boat:boat_id,boat_name,boat_type_id', 'boat.boatType:boat_type_id,type_name', 'visitingBoatType:boat_type_id,type_name'])
                 ->whereNull('voided_at')
                 ->get()
                 ->map(fn (Docking $docking) => [
                     'docking_id' => $docking->docking_id,
+                    'boat_category' => $docking->boat_category ?? 'registered',
                     'boat_id' => $docking->boat_id,
                     'docking_date' => optional($docking->docking_date)->toDateString(),
                     'docking_fee' => (float) $docking->docking_fee,
@@ -127,7 +162,17 @@ class DashboardController extends Controller
                         'boatType' => $docking->boat->boatType ? [
                             'type_name' => $docking->boat->boatType->type_name,
                         ] : null,
-                    ] : null,
+                    ] : [
+                        'boat_name' => $docking->visiting_boat_name,
+                        'owner_name' => trim(collect([$docking->visiting_owner_firstname, $docking->visiting_owner_lastname])->filter()->implode(' ')),
+                        'owner_address' => $docking->visiting_owner_address,
+                        'boat_type' => $docking->visitingBoatType ? [
+                            'type_name' => $docking->visitingBoatType->type_name,
+                        ] : null,
+                        'boatType' => $docking->visitingBoatType ? [
+                            'type_name' => $docking->visitingBoatType->type_name,
+                        ] : null,
+                    ],
                 ]),
             'users' => User::query()
                 ->select(['user_id'])

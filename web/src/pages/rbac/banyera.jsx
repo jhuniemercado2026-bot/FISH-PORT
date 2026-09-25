@@ -13,6 +13,7 @@ import {
   IoArchiveOutline,
   IoCreateOutline,
   IoListOutline, IoPersonOutline,
+  IoLocationOutline, IoCallOutline,
   IoWarningOutline, IoCashOutline,
   IoLayersOutline, IoReloadOutline,
   IoEyeOutline, IoAlertCircleOutline,
@@ -106,6 +107,7 @@ const STATUS_OPTIONS = [
   { value: "all", label: "All Status" },
   { value: "active", label: "Active" },
   { value: "voided", label: "Voided" },
+  { value: "visitor", label: "Visitor" },
 ];
 
 const BANYERA_STATUS_LEGEND = [
@@ -199,8 +201,23 @@ const applyTimeValueToBanyeraForm = (current, timeValue) => {
 };
 
 // Data shape helpers
-const getBoatName  = (tx) => tx?.boat?.boat_name  || "-";
-const getOwnerName = (tx) => tx?.boat?.owner?.full_name || tx?.boat?.owner_name || "-";
+const isVisitingBanyera = (tx) =>
+  String(tx?.boat_category ?? "").toLowerCase() === "visiting" || Boolean(tx?.visiting_boat_name);
+
+const getBoatName  = (tx) => tx?.display_boat_name || tx?.boat?.boat_name || tx?.visiting_boat_name || "-";
+const getOwnerName = (tx) =>
+  tx?.display_owner_name ||
+  tx?.boat?.owner?.full_name ||
+  tx?.boat?.owner_name ||
+  [tx?.visiting_owner_firstname, tx?.visiting_owner_lastname].filter(Boolean).join(" ") ||
+  "-";
+const getBanyeraBoatTypeLabel = (tx) =>
+  tx?.display_boat_type ||
+  tx?.boat?.boat_type?.type_name ||
+  tx?.boat?.boatType?.type_name ||
+  tx?.visiting_boat_type?.type_name ||
+  tx?.visitingBoatType?.type_name ||
+  "-";
 const getCreatedBy = (tx) => {
   const createdByName = String(tx?.created_by_name || "").trim();
   if (createdByName) {
@@ -661,6 +678,53 @@ const DrawerField = ({ label, required, error, children }) => (
   </div>
 );
 
+const BoatCategoryCardSelect = ({ value, onChange }) => (
+  <div>
+    <label className="mb-2 block text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>
+      Boat Category<span className="ml-0.5 text-red-500">*</span>
+    </label>
+    <div className="grid grid-cols-2 gap-3">
+      {[
+        { value: "registered", label: "Registered Boat", icon: IoBoatOutline },
+        { value: "visiting", label: "Visiting Boat", icon: IoLocationOutline },
+      ].map((option) => {
+        const selected = value === option.value;
+        const Icon = option.icon;
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className="flex h-[46px] cursor-pointer items-center justify-center gap-2 rounded-[10px] border px-4 text-[13px] font-normal transition-colors"
+            style={{
+              borderColor: selected ? "#1a1f36" : "#e2e8f0",
+              backgroundColor: selected ? "#1a1f36" : "#ffffff",
+              color: selected ? "#ffffff" : "#1a1f36",
+              fontFamily: FONT,
+            }}
+          >
+            <Icon className="text-[16px] flex-shrink-0" />
+            <span className="truncate">{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
+
+const ADD_BANYERA_BOAT_CATEGORY_SESSION_KEY = "opol:add-banyera:boat-category";
+const getStoredAddBanyeraBoatCategory = () => {
+  if (typeof window === "undefined") return "registered";
+  const value = window.sessionStorage.getItem(ADD_BANYERA_BOAT_CATEGORY_SESSION_KEY);
+  return value === "visiting" || value === "registered" ? value : "registered";
+};
+const setStoredAddBanyeraBoatCategory = (value) => {
+  if (typeof window === "undefined") return;
+  if (value !== "visiting" && value !== "registered") return;
+  window.sessionStorage.setItem(ADD_BANYERA_BOAT_CATEGORY_SESSION_KEY, value);
+};
+
 const VoidBanyeraModal = ({
   open,
   tx,
@@ -745,7 +809,7 @@ const VoidBanyeraModal = ({
 
 
 // AddBanyeraModal
-const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [], classifications = [], isLookupsLoading = false }) => {
+const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], boatTypes = [], fees = [], classifications = [], isLookupsLoading = false }) => {
   const todayStr = getManilaDateString();
   const hasManualTimeRef = useRef(false);
   const buildInitialFormState = useCallback(() => {
@@ -753,7 +817,14 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
     const sourceTimeParts = getTimePartsFromTwentyFourHourValue(getManilaTimeString());
 
     return {
+      boat_category: getStoredAddBanyeraBoatCategory(),
       boat_id: "",
+      visiting_boat_name: "",
+      visiting_boat_type_id: "",
+      visiting_owner_firstname: "",
+      visiting_owner_lastname: "",
+      visiting_owner_address: "",
+      visiting_contact_number: "",
       fee_id: "",
       banyera_date: sourceDate,
       banyera_date_month: sourceDate.slice(5, 7),
@@ -771,7 +842,14 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
     const sourceDate = todayStr;
     const sourceTimeParts = getTimePartsFromTwentyFourHourValue(getManilaTimeString());
     return {
+      boat_category: getStoredAddBanyeraBoatCategory(),
       boat_id: "",
+      visiting_boat_name: "",
+      visiting_boat_type_id: "",
+      visiting_owner_firstname: "",
+      visiting_owner_lastname: "",
+      visiting_owner_address: "",
+      visiting_contact_number: "",
       fee_id: "",
       banyera_date: sourceDate,
       banyera_date_month: sourceDate.slice(5, 7),
@@ -784,16 +862,43 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
   });
   const [items, setItems]   = useState([{ classification_id: "", quantity: "", daug: "" }]);
   const [errors, setErrors] = useState({});
+  const isVisitingBoat = form.boat_category === "visiting";
   const selectedBoat        = activeBoats.find((b) => String(b.boat_id) === String(form.boat_id));
   const safeFees = Array.isArray(fees) ? fees : [];
 
-  const selectedBoatTypeId = selectedBoat ? getBoatTypeId(selectedBoat) : "";
+  const selectedBoatTypeId = isVisitingBoat ? String(form.visiting_boat_type_id || "") : selectedBoat ? getBoatTypeId(selectedBoat) : "";
+  const boatTypeOptions = useMemo(() => {
+    const optionsById = new Map();
+    (Array.isArray(boatTypes) ? boatTypes : []).forEach((boatType) => {
+      const typeId = String(boatType?.boat_type_id ?? "");
+      const label = boatType?.type_name || "";
+      if (typeId && label && !optionsById.has(typeId)) {
+        optionsById.set(typeId, { value: typeId, label });
+      }
+    });
+    activeBoats.forEach((boat) => {
+      const typeId = getBoatTypeId(boat);
+      const label = boat?.boat_type?.type_name || boat?.boatType?.type_name || "";
+      if (typeId && label && !optionsById.has(typeId)) {
+        optionsById.set(typeId, { value: typeId, label });
+      }
+    });
+    safeFees.forEach((fee) => {
+      if (!isBanyeraFee(fee) || !fee?.boat_type_id) return;
+      const typeId = String(fee.boat_type_id);
+      const label = fee?.boat_type?.type_name || fee?.boatType?.type_name || `Boat Type #${typeId}`;
+      if (!optionsById.has(typeId)) {
+        optionsById.set(typeId, { value: typeId, label });
+      }
+    });
+    return Array.from(optionsById.values()).sort((left, right) => left.label.localeCompare(right.label));
+  }, [boatTypes, activeBoats, safeFees]);
   const banyeraFees = useMemo(() => safeFees.filter((fee) => {
     if (!isBanyeraFee(fee)) return false;
     if (!isFeeActive(fee)) return false;
-    if (!selectedBoat) return false;
+    if (!selectedBoatTypeId) return false;
     return String(fee.boat_type_id || "") === selectedBoatTypeId;
-  }), [safeFees, selectedBoat, selectedBoatTypeId]);
+  }), [safeFees, selectedBoatTypeId]);
   const selectedApplicableFee = banyeraFees.find((fee) => String(fee.fee_id) === String(form.fee_id));
   const safeClassifications = Array.isArray(classifications) ? classifications : [];
 
@@ -835,7 +940,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
   }, [open]);
 
   useEffect(() => {
-    if (!selectedBoat) {
+    if (!selectedBoatTypeId) {
       if (!form.fee_id) return;
       setForm((current) => ({ ...current, fee_id: "" }));
       return;
@@ -855,7 +960,7 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
       ...current,
       fee_id: nextFeeId,
     }));
-  }, [selectedBoat, banyeraFees, form.fee_id]);
+  }, [selectedBoatTypeId, banyeraFees, form.fee_id]);
 
   const totalFee = items.reduce((sum, it) => {
     const qty = parseInt(it.quantity) || 0;
@@ -878,7 +983,18 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
   const validate = () => {
     const e = {};
     const builtDate = `${form.banyera_date_year}-${form.banyera_date_month}-${form.banyera_date_day}`;
-    if (!form.boat_id)          e.boat_id          = "Please select a boat";
+    if (isVisitingBoat) {
+      if (!form.visiting_boat_name.trim()) e.visiting_boat_name = "Boat name is required.";
+      if (!form.visiting_boat_type_id) e.visiting_boat_type_id = "Please select a boat type.";
+      if (!form.visiting_owner_firstname.trim()) e.visiting_owner_firstname = "First name is required.";
+      if (!form.visiting_owner_lastname.trim()) e.visiting_owner_lastname = "Last name is required.";
+      if (!form.visiting_owner_address.trim()) e.visiting_owner_address = "Address is required.";
+      if (form.visiting_contact_number.trim() && !/^\d{11}$/.test(form.visiting_contact_number.trim())) {
+        e.visiting_contact_number = "Contact number must be exactly 11 digits.";
+      }
+    } else if (!form.boat_id) {
+      e.boat_id = "Please select a boat";
+    }
     if (!form.fee_id)           e.fee_id           = "Fee is required";
     if (!form.banyera_date_month || !form.banyera_date_day || !form.banyera_date_year) {
       e.banyera_date = "Banyera date is required";
@@ -922,7 +1038,14 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
 
     onSave({
       payload: {
-        boat_id: parseInt(form.boat_id),
+        boat_category: form.boat_category,
+        boat_id: isVisitingBoat ? null : parseInt(form.boat_id),
+        visiting_boat_name: isVisitingBoat ? form.visiting_boat_name.trim() : null,
+        visiting_owner_firstname: isVisitingBoat ? form.visiting_owner_firstname.trim() : null,
+        visiting_owner_lastname: isVisitingBoat ? form.visiting_owner_lastname.trim() : null,
+        visiting_owner_address: isVisitingBoat ? form.visiting_owner_address.trim() : null,
+        visiting_contact_number: isVisitingBoat ? form.visiting_contact_number.trim() : null,
+        visiting_boat_type_id: isVisitingBoat ? form.visiting_boat_type_id : null,
         transaction_date: builtDateTime,
         items: newItems,
       },
@@ -943,62 +1066,198 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], fees = [],
       showSavingSpinner
     >
       <div className="flex flex-col gap-5">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Field label="Boat Name" required error={errors.boat_id}>
-            <FilterSelect
-              width="100%"
-              height={46}
-              showSearch
-              loading={isLookupsLoading}
-              placeholder="Select boat name"
-              optionFilterProp="label"
-              optionLabelProp="label"
-              getPopupContainer={() => document.body}
-              placement="bottomLeft"
-              value={form.boat_id || undefined}
-              onChange={(value) => {
-                setForm((f) => ({ ...f, boat_id: value ?? "", fee_id: "" }));
-                setErrors((current) => ({ ...current, boat_id: "", fee_id: "" }));
-              }}
-              options={activeBoats.map((boat) => ({
-                value: String(boat.boat_id),
-                label: `${boat.boat_name}`,
-              }))}
+        <BoatCategoryCardSelect
+          value={form.boat_category}
+          onChange={(value) => {
+            setStoredAddBanyeraBoatCategory(value);
+            setForm((current) => ({
+              ...current,
+              boat_category: value,
+              boat_id: value === "registered" ? current.boat_id : "",
+              visiting_boat_type_id: value === "visiting" ? current.visiting_boat_type_id : "",
+              fee_id: "",
+            }));
+            setErrors((current) => ({
+              ...current,
+              boat_id: "",
+              visiting_boat_name: "",
+              visiting_boat_type_id: "",
+              visiting_owner_firstname: "",
+              visiting_owner_lastname: "",
+              visiting_owner_address: "",
+              visiting_contact_number: "",
+              fee_id: "",
+            }));
+          }}
+        />
+
+        {!isVisitingBoat ? (
+          <>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Boat Name" required error={errors.boat_id}>
+                <FilterSelect
+                  width="100%"
+                  height={46}
+                  showSearch
+                  loading={isLookupsLoading}
+                  placeholder="Select boat name"
+                  optionFilterProp="label"
+                  optionLabelProp="label"
+                  getPopupContainer={() => document.body}
+                  placement="bottomLeft"
+                  value={form.boat_id || undefined}
+                  onChange={(value) => {
+                    setForm((f) => ({ ...f, boat_id: value ?? "", fee_id: "" }));
+                    setErrors((current) => ({ ...current, boat_id: "", fee_id: "" }));
+                  }}
+                  options={activeBoats.map((boat) => ({
+                    value: String(boat.boat_id),
+                    label: `${boat.boat_name}`,
+                  }))}
+                />
+              </Field>
+
+              <ModalInput
+                label="Boat Type"
+                icon={IoLayersOutline}
+                readOnly
+                value={selectedBoat?.boat_type?.type_name || selectedBoat?.boatType?.type_name || ""}
+                placeholder="Auto-filled after selecting a boat"
+                wrapperClassName="!bg-slate-100"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <ModalInput
+                label="Boat Owner"
+                icon={IoPersonOutline}
+                readOnly
+                value={selectedBoat?.owner?.full_name || selectedBoat?.owner_name || ""}
+                placeholder="Auto-filled after selecting a boat"
+                wrapperClassName="!bg-slate-100"
+              />
+
+              <ModalInput
+                label="Applicable Fee"
+                icon={IoCashOutline}
+                required
+                readOnly
+                value={selectedApplicableFee ? formatMoney(getFeeAmount(selectedApplicableFee)) : ""}
+                placeholder={selectedBoatTypeId ? "No matching banyera fee" : "₱0.00"}
+                error={errors.fee_id}
+                wrapperClassName="!bg-slate-100"
+                inputStyle={{ color: selectedApplicableFee ? "#0d1117" : "#94a3b8" }}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <ModalInput
+                label="Boat Name"
+                icon={IoBoatOutline}
+                required
+                error={errors.visiting_boat_name}
+                value={form.visiting_boat_name}
+                onChange={(event) => {
+                  setForm((current) => ({ ...current, visiting_boat_name: event.target.value }));
+                  setErrors((current) => ({ ...current, visiting_boat_name: "" }));
+                }}
+                placeholder="Enter visiting boat name"
+              />
+
+              <Field label="Boat Type" required error={errors.visiting_boat_type_id}>
+                <FilterSelect
+                  width="100%"
+                  height={46}
+                  showSearch
+                  loading={isLookupsLoading}
+                  placeholder="Select boat type"
+                  optionFilterProp="label"
+                  optionLabelProp="label"
+                  getPopupContainer={() => document.body}
+                  placement="bottomLeft"
+                  value={form.visiting_boat_type_id || undefined}
+                  onChange={(value) => {
+                    setForm((current) => ({ ...current, visiting_boat_type_id: value ?? "", fee_id: "" }));
+                    setErrors((current) => ({ ...current, visiting_boat_type_id: "", fee_id: "" }));
+                  }}
+                  options={boatTypeOptions}
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <ModalInput
+                label="First Name"
+                icon={IoPersonOutline}
+                required
+                error={errors.visiting_owner_firstname}
+                value={form.visiting_owner_firstname}
+                onChange={(event) => {
+                  setForm((current) => ({ ...current, visiting_owner_firstname: event.target.value }));
+                  setErrors((current) => ({ ...current, visiting_owner_firstname: "" }));
+                }}
+                placeholder="Enter owner first name"
+              />
+
+              <ModalInput
+                label="Last Name"
+                icon={IoPersonOutline}
+                required
+                error={errors.visiting_owner_lastname}
+                value={form.visiting_owner_lastname}
+                onChange={(event) => {
+                  setForm((current) => ({ ...current, visiting_owner_lastname: event.target.value }));
+                  setErrors((current) => ({ ...current, visiting_owner_lastname: "" }));
+                }}
+                placeholder="Enter owner last name"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <ModalInput
+                label="Address"
+                icon={IoLocationOutline}
+                required
+                error={errors.visiting_owner_address}
+                value={form.visiting_owner_address}
+                onChange={(event) => {
+                  setForm((current) => ({ ...current, visiting_owner_address: event.target.value }));
+                  setErrors((current) => ({ ...current, visiting_owner_address: "" }));
+                }}
+                placeholder="Enter owner address"
+              />
+
+              <ModalInput
+                label="Contact Number (Optional)"
+                icon={IoCallOutline}
+                error={errors.visiting_contact_number}
+                value={form.visiting_contact_number}
+                onChange={(event) => {
+                  const value = event.target.value.replace(/\D/g, "").slice(0, 11);
+                  setForm((current) => ({ ...current, visiting_contact_number: value }));
+                  setErrors((current) => ({ ...current, visiting_contact_number: "" }));
+                }}
+                inputMode="numeric"
+                maxLength={11}
+                placeholder="Enter the contact number"
+              />
+            </div>
+
+            <ModalInput
+              label="Applicable Fee"
+              icon={IoCashOutline}
+              required
+              readOnly
+              value={selectedApplicableFee ? formatMoney(getFeeAmount(selectedApplicableFee)) : ""}
+              placeholder={selectedBoatTypeId ? "No matching banyera fee" : "₱0.00"}
+              error={errors.fee_id}
+              wrapperClassName="!bg-slate-100"
+              inputStyle={{ color: selectedApplicableFee ? "#0d1117" : "#94a3b8" }}
             />
-          </Field>
-
-          <ModalInput
-            label="Boat Type"
-            icon={IoLayersOutline}
-            readOnly
-            value={selectedBoat?.boat_type?.type_name || selectedBoat?.boatType?.type_name || ""}
-            placeholder="Auto-filled after selecting a boat"
-            wrapperClassName="!bg-slate-100"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <ModalInput
-            label="Boat Owner"
-            icon={IoPersonOutline}
-            readOnly
-            value={selectedBoat?.owner?.full_name || selectedBoat?.owner_name || ""}
-            placeholder="Auto-filled after selecting a boat"
-            wrapperClassName="!bg-slate-100"
-          />
-
-          <ModalInput
-            label="Applicable Fee"
-            icon={IoCashOutline}
-            required
-            readOnly
-            value={selectedApplicableFee ? formatMoney(getFeeAmount(selectedApplicableFee)) : ""}
-            placeholder={selectedBoat ? "No matching banyera fee" : "₱0.00"}
-            error={errors.fee_id}
-            wrapperClassName="!bg-slate-100"
-            inputStyle={{ color: selectedApplicableFee ? "#0d1117" : "#94a3b8" }}
-          />
-        </div>
+          </>
+        )}
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field label="Banyera Date" required error={errors.banyera_date}>
@@ -1343,10 +1602,16 @@ const SuperBanyera = () => {
   const highlightedBanyeraId = dismissedBanyeraHighlightToken === banyeraHighlightToken ? "" : rawHighlightedBanyeraId;
   const highlightedClassificationId =
     dismissedClassificationHighlightToken === classificationHighlightToken ? "" : rawHighlightedClassificationId;
+  const shouldForceTransactionsTab =
+    rawHighlightedBanyeraId ||
+    highlightedSearchResult?.group === "Banyera" ||
+    new URLSearchParams(location.search).get("highlight")?.startsWith("banyera-");
   const activeTab = location.pathname === "/fish-classification" || queryTab === "classifications"
     ? "classifications"
     : location.pathname === "/banyera"
-      ? getCachedTab(BANYERA_TAB_STORAGE_KEY, BANYERA_TAB_KEYS, "transactions")
+      ? shouldForceTransactionsTab
+        ? "transactions"
+        : getCachedTab(BANYERA_TAB_STORAGE_KEY, BANYERA_TAB_KEYS, "transactions")
       : "transactions";
   const getBanyeraTabPath = (key) => (key === "classifications" ? "/fish-classification" : "/banyera");
   const getBanyeraBreadcrumbLabel = (tab) => (tab === "classifications" ? "Fish Classifications" : "Banyera");
@@ -1430,7 +1695,7 @@ const SuperBanyera = () => {
   const [voidReasonCustom, setVoidReasonCustom] = useState("");
   const [voidReasonError, setVoidReasonError] = useState("");
   const didRunTransactionFilterResetRef = useRef(false);
-  const transactionLockResource = activeTab === "classifications" ? "fish-classifications" : null;
+  const transactionLockResource = activeTab === "classifications" ? "fish-classifications" : "transactions";
   const { transactionLock, isTransactionLocked, transactionLockMessage } = useTransactionLockQuery(transactionLockResource);
   const isHeadViewOnly = isHeadRole();
   const debouncedSearch = useDebouncedValue(search, 350);
@@ -1537,6 +1802,11 @@ const SuperBanyera = () => {
     ? lookupData.boats
     : Array.isArray(data?.boats)
       ? data.boats
+      : [];
+  const boatTypes = Array.isArray(lookupData?.boatTypes)
+    ? lookupData.boatTypes
+    : Array.isArray(data?.boatTypes)
+      ? data.boatTypes
       : [];
   const fees = Array.isArray(lookupData?.fees)
     ? lookupData.fees
@@ -2253,6 +2523,7 @@ const SuperBanyera = () => {
                             const isLocked = isDateLocked(tx.transaction_date);
                             const isBusy = voidingTxId === tx.banyera_id;
                             const isTodayRecord = getManilaDateFromValue(tx.transaction_date) === todayStr;
+                            const isVisitor = isVisitingBanyera(tx);
                             const voidDisabled = isVoided
                               ? (isBusy || isTransactionLocked || isLocked || tx.is_billed || !isTodayRecord)
                               : (isBusy || isTransactionLocked || isLocked || tx.is_billed || !isTodayRecord);
@@ -2282,12 +2553,20 @@ const SuperBanyera = () => {
                                         style={{ backgroundColor: isVoided ? "#f59e0b" : "#16a34a" }}
                                       />
                                       <p className="m-0 text-[13px] font-medium text-[#1a1f36]">{getBoatName(tx)}</p>
+                                      {isVisitor ? (
+                                        <span
+                                          className="inline-flex flex-shrink-0 items-center rounded-[6px] px-2 py-0.5 text-[10px] font-bold uppercase tracking-normal"
+                                          style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}
+                                        >
+                                          Visitor
+                                        </span>
+                                      ) : null}
                                     </div>
                                   </button>
                                 </td>
                                 <td className="px-4 py-3">
                                   <span className="text-[13px]" style={{ color: "#1a1f36" }}>
-                                    {tx?.boat?.boat_type?.type_name || tx?.boat?.boatType?.type_name || "-"}
+                                    {getBanyeraBoatTypeLabel(tx)}
                                   </span>
                                 </td>
                                 <td className="px-4 py-3">
@@ -2602,6 +2881,7 @@ const SuperBanyera = () => {
         onSave={(payload) => createMutation.mutate(payload)}
         saving={createMutation.isPending}
         boats={boats}
+        boatTypes={boatTypes}
         fees={fees}
         classifications={classifications}
         isLookupsLoading={isLookupsLoading}
@@ -2982,21 +3262,32 @@ const BanyeraDetailDrawer = ({ tx, open, onClose }) => {
   const totalQty = (tx.items ?? []).reduce((sum, item) => sum + Number(item.quantity ?? 0), 0);
   const feePerBanyera = getTransactionFeePerBanyera(tx);
   const banyeraStatus = isBanyeraVoided(tx) ? "voided" : "active";
+  const isVisitor = isVisitingBanyera(tx);
   const detailPairs = [
-    { label: "Boat Name", value: getBoatName(tx) },
     {
       label: "Status",
       value: banyeraStatus === "voided" ? "Voided" : "Active",
       indicatorColor: BANYERA_STATUS_LEGEND.find((item) => item.key === banyeraStatus)?.color,
     },
-    { label: "Boat Type", value: tx?.boat?.boat_type?.type_name || tx?.boat?.boatType?.type_name || "-" },
-    { label: "Boat Owner", value: getOwnerName(tx) },
     { label: "Banyera Date", value: formatDate(tx.transaction_date) },
     { label: "Banyera Time", value: formatTime(tx.transaction_date) },
     { label: "Total Quantity", value: String(totalQty) },
+    { label: "Applicable Fee", value: `${PESO}${formatAmount(feePerBanyera)}` },
     { label: "Total Fee", value: `${PESO}${formatAmount(getTransactionTotalFee(tx)).replace(PESO, "")}` },
-    { label: "Inspector", value: getCreatedBy(tx), className: "col-span-2" },
   ];
+  const boatInfoCards = isVisitor
+    ? [
+        { label: "Boat Name", value: getBoatName(tx) },
+        { label: "Boat Type", value: getBanyeraBoatTypeLabel(tx) },
+        { label: "Boat Owner", value: getOwnerName(tx), className: "col-span-2" },
+        { label: "Address", value: tx?.visiting_owner_address || "-", className: "col-span-2" },
+        { label: "Contact Number", value: tx?.visiting_contact_number || "-", className: "col-span-2" },
+      ]
+    : [
+        { label: "Boat Name", value: getBoatName(tx) },
+        { label: "Boat Type", value: getBanyeraBoatTypeLabel(tx) },
+        { label: "Boat Owner", value: getOwnerName(tx), className: "col-span-2" },
+      ];
 
   return (
     <DetailDrawer
@@ -3010,7 +3301,7 @@ const BanyeraDetailDrawer = ({ tx, open, onClose }) => {
     >
       <DrawerSection
         icon={IoDocumentTextOutline}
-        title="Transaction Information"
+        title="Banyera Information"
         subtitle="Recorded details for this banyera entry"
         fontFamily={FONT}
       >
@@ -3019,6 +3310,28 @@ const BanyeraDetailDrawer = ({ tx, open, onClose }) => {
             <DrawerInfoCard key={label} label={label} value={value} className={className} indicatorColor={indicatorColor} />
           ))}
         </div>
+      </DrawerSection>
+
+      <DrawerSection
+        icon={IoBoatOutline}
+        title="Boat Info"
+        subtitle={isVisitor ? "Manual visitor boat details" : "Registered boat details"}
+        fontFamily={FONT}
+      >
+        <div className="grid grid-cols-2 gap-3">
+          {boatInfoCards.map(({ label, value, className, indicatorColor }) => (
+            <DrawerInfoCard key={label} label={label} value={value} className={className} indicatorColor={indicatorColor} />
+          ))}
+        </div>
+      </DrawerSection>
+
+      <DrawerSection
+        icon={IoPersonOutline}
+        title="Banyera Personnel"
+        subtitle="Inspector information for this record"
+        fontFamily={FONT}
+      >
+        <DrawerInfoCard label="Inspector" value={getCreatedBy(tx)} />
       </DrawerSection>
 
       <DrawerSection

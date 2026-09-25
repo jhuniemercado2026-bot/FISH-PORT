@@ -5,13 +5,13 @@ import { Montserrat_600SemiBold } from "@expo-google-fonts/montserrat/600SemiBol
 import { Montserrat_800ExtraBold } from "@expo-google-fonts/montserrat/800ExtraBold";
 import { Stack, router } from "expo-router";
 import { useFonts } from "expo-font";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { GlobalToast } from "../components/toast";
 import OfflineSyncModal from "../components/OfflineSyncModal";
+import FirstLoginCompletionModal from "../components/FirstLoginCompletionModal";
 import {
   startOfflineTransactionSync,
 } from "../utils/offlineTransactionQueue";
-import type { OfflineSyncProgress } from "../utils/offlineTransactionQueue";
 import { getAuthSession, setAuthSession } from "../api/auth";
 import { useHistoryStore } from "../store/historyStore";
 import { useMasterDataStore } from "../store/masterDataStore";
@@ -35,6 +35,10 @@ export default function RootLayout() {
   const triggerHistoryRefresh = useHistoryStore((state) => state.triggerRefresh);
   const addSyncedTransactions = useHistoryStore((state) => state.addSyncedTransactions);
   const removeQueuedDrafts = useHistoryStore((state) => state.removeQueuedDrafts);
+  const syncProgress = useHistoryStore((state) => state.offlineSyncProgress);
+  const syncModalVisible = useHistoryStore((state) => state.offlineSyncModalVisible);
+  const setSyncProgress = useHistoryStore((state) => state.setOfflineSyncProgress);
+  const setSyncModalVisible = useHistoryStore((state) => state.setOfflineSyncModalVisible);
   const setTransactionLock = useHistoryStore((state) => state.setTransactionLock);
   const triggerMasterDataRefresh = useMasterDataStore((state) => state.triggerRefresh);
   const dismissedSyncIdRef = useRef<string | null>(null);
@@ -46,8 +50,6 @@ export default function RootLayout() {
     triggerHistoryRefresh,
     triggerMasterDataRefresh,
   });
-  const [syncProgress, setSyncProgress] = useState<OfflineSyncProgress | null>(null);
-  const [syncModalVisible, setSyncModalVisible] = useState(false);
   const [fontsLoaded] = useFonts({
     ...AntDesign.font,
     Montserrat_400Regular,
@@ -87,18 +89,25 @@ export default function RootLayout() {
           }, 350);
         }
       },
-      onSynced: (count, transactions) => {
+      onSyncedDraft: (transaction) => {
         const {
           addSyncedTransactions,
+          removeQueuedDrafts,
+        } = callbacksRef.current;
+
+        addSyncedTransactions([transaction]);
+        removeQueuedDrafts([transaction.local_id]);
+      },
+      onSynced: (count, transactions) => {
+        const {
           showToast,
           triggerHistoryRefresh,
         } = callbacksRef.current;
 
-        if (transactions.length > 0) {
-          addSyncedTransactions(transactions);
-        } else {
+        if (transactions.length === 0) {
           triggerHistoryRefresh();
         }
+
         setTimeout(() => {
           showToast(
             "success",
@@ -244,11 +253,13 @@ export default function RootLayout() {
         percentage={syncProgress?.percentage ?? 0}
         processed={syncProgress?.processed ?? 0}
         total={syncProgress?.total ?? 0}
+        status={syncProgress?.status}
         onSkip={() => {
           dismissedSyncIdRef.current = syncProgress?.syncId ?? null;
           setSyncModalVisible(false);
         }}
       />
+      <FirstLoginCompletionModal />
       <GlobalToast />
     </Provider>
   );

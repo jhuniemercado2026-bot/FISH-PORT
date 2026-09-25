@@ -41,7 +41,7 @@ class TransactionLockService
             }
         }
 
-        if ($resource !== 'vehicle-tickets') {
+        if (!in_array($resource, ['vehicle-tickets', 'transactions'], true)) {
             return null;
         }
 
@@ -117,7 +117,7 @@ class TransactionLockService
             'is_locked' => true,
             'lock_type' => 'remittance',
             'lock_scope' => $isCoordinatorRemittance ? 'global' : 'user',
-            'applies_to' => $isCoordinatorRemittance ? 'transactions' : 'vehicle-tickets',
+            'applies_to' => 'transactions',
             'remittance_id' => $remittance->remittance_id,
             'remittance_reference_no' => $remittance->remittance_reference_no,
             'submitted_by' => $remittance->submitted_by,
@@ -130,7 +130,7 @@ class TransactionLockService
             'unlock_time' => $unlockAt->format('H:i:s'),
             'message' => $isCoordinatorRemittance
                 ? 'Transactions are view-only until ' . $unlockAt->format('F j, Y \a\t g:i A') . '.'
-                : 'Daily vehicle tickets are view-only until ' . $unlockAt->format('F j, Y \a\t g:i A') . '.',
+                : 'Transactions are view-only until ' . $unlockAt->format('F j, Y \a\t g:i A') . '.',
         ];
     }
 

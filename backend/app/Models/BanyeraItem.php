@@ -31,7 +31,7 @@ class BanyeraItem extends Model
 
     public function classification()
     {
-        return $this->belongsTo(FishClassification::class, 'classification_id', 'classification_id');
+        return $this->belongsTo(FishClassification::class, 'classification_id', 'classification_id')->withTrashed();
     }
 
     public function fee()

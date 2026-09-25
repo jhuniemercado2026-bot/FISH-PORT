@@ -39,7 +39,7 @@ const MOBILE_BREAKPOINT = 900;
 
 // ── Logout Modal ──────────────────────────────────────────────────────────────
 const LogoutModal = ({ onConfirm, onCancel, isLoading }) => (
-  <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm">
     <div className="rounded-2xl p-8 flex flex-col items-center gap-5 mx-4 w-full max-w-sm bg-white shadow-2xl">
       <div className="w-16 h-16 rounded-full flex items-center justify-center bg-[#1a1f36]">
         <IoLogOutOutline className="text-3xl text-white" />

@@ -6,6 +6,8 @@ import {
   IoAlertCircleOutline,
   IoArrowBackOutline,
   IoBoatOutline,
+  IoCheckmarkOutline,
+  IoCloseOutline,
   IoEyeOffOutline,
   IoEyeOutline,
   IoHeadsetOutline,
@@ -30,6 +32,31 @@ const FORCED_LOGOUT_MESSAGE_KEY = "forcedLogoutMessage";
 const FORGOT_PASSWORD_EMAIL_KEY = "forgotPasswordEmail";
 const FORGOT_PASSWORD_RESEND_COUNT_KEY = "forgotPasswordResendCount";
 const FORGOT_PASSWORD_CODE_ERROR_KEY = "forgotPasswordCodeError";
+const PASSWORD_RULE_LABELS = [
+  { key: "length", label: "At least 8 characters" },
+  { key: "uppercase", label: "One uppercase letter" },
+  { key: "number", label: "One number" },
+  { key: "symbol", label: "One symbol" },
+];
+
+const getPasswordRuleStatus = (password = "") => ({
+  length: password.length >= 8,
+  uppercase: /[A-Z]/.test(password),
+  number: /\d/.test(password),
+  symbol: /[^A-Za-z0-9]/.test(password),
+});
+
+const getPasswordErrorMessage = (password = "") => {
+  const status = getPasswordRuleStatus(password);
+
+  if (!password.trim()) return "New password is required.";
+  if (!status.length) return "New password must be at least 8 characters.";
+  if (!status.uppercase) return "Password must include at least 1 uppercase letter.";
+  if (!status.number) return "Password must include at least 1 number.";
+  if (!status.symbol) return "Password must include at least 1 symbol.";
+
+  return "";
+};
 
 const normalizeProfileImageUrl = (user) => {
   if (!user) return user;
@@ -63,6 +90,17 @@ const LoginFieldError = ({ message }) => (
   ) : null
 );
 
+const LoginFieldSuccess = ({ message }) => (
+  message ? (
+    <div className="mt-2 flex items-center gap-2 rounded-xl border border-green-100 bg-green-50 px-3 py-2 font-normal">
+      <IoCheckmarkOutline className="flex-shrink-0 text-[14px] text-green-500" />
+      <p className="m-0 text-[12px] font-normal text-green-700" style={{ fontFamily: "'Montserrat', sans-serif" }}>
+        {message}
+      </p>
+    </div>
+  ) : null
+);
+
 const FORGOT_PASSWORD_RESEND_DAILY_LIMIT = 3;
 const FORGOT_PASSWORD_RESEND_COOLDOWN_SECONDS = 59;
 const VERIFICATION_CODE_LIMIT_MESSAGE =
@@ -85,6 +123,7 @@ const Login = () => {
   const [forgotEmailError, setForgotEmailError] = useState("");
   const [forgotEmailVerified, setForgotEmailVerified] = useState(false);
   const [forgotCodeVerified, setForgotCodeVerified] = useState(false);
+  const [forgotFirstLoginBlocked, setForgotFirstLoginBlocked] = useState(false);
   const [isCheckingForgotEmail, setIsCheckingForgotEmail] = useState(false);
   const [isVerifyingForgotCode, setIsVerifyingForgotCode] = useState(false);
   const [isResettingForgotPassword, setIsResettingForgotPassword] = useState(false);
@@ -94,6 +133,7 @@ const Login = () => {
   const [forgotNewPassword, setForgotNewPassword] = useState("");
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
   const [forgotPasswordErrors, setForgotPasswordErrors] = useState({});
+  const [forgotPasswordTouched, setForgotPasswordTouched] = useState({ password: false, password_confirmation: false });
   const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
   const [showForgotConfirmPassword, setShowForgotConfirmPassword] = useState(false);
   const [resetCode, setResetCode] = useState(["", "", "", "", "", ""]);
@@ -104,6 +144,21 @@ const Login = () => {
   const isLoading = loginMutation.isPending;
   const isResetCodeComplete = resetCode.every((digit) => String(digit || "").trim() !== "");
   const forgotStep = forgotCodeVerified ? 3 : forgotEmailVerified ? 2 : 1;
+  const forgotPasswordRuleStatus = getPasswordRuleStatus(forgotNewPassword);
+  const forgotNewPasswordError = forgotPasswordErrors.password || (
+    forgotPasswordTouched.password ? getPasswordErrorMessage(forgotNewPassword) : ""
+  );
+  const forgotConfirmPasswordError = forgotPasswordErrors.password_confirmation || (
+    forgotPasswordTouched.password_confirmation
+      ? !forgotConfirmPassword.trim()
+        ? "Confirm password is required."
+        : forgotConfirmPassword !== forgotNewPassword
+          ? "Passwords do not match."
+          : ""
+      : ""
+  );
+  const forgotNewPasswordSuccess = forgotPasswordTouched.password && !forgotNewPasswordError && forgotNewPassword !== "";
+  const forgotConfirmPasswordSuccess = forgotPasswordTouched.password_confirmation && !forgotConfirmPasswordError && forgotConfirmPassword !== "";
 
   const saveForgotResendCount = (count) => {
     const normalizedCount = Math.max(0, Number(count) || 0);
@@ -256,12 +311,14 @@ const Login = () => {
     setForgotEmailError("");
     setForgotEmailVerified(false);
     setForgotCodeVerified(false);
+    setForgotFirstLoginBlocked(false);
     setForgotResendCountdown(0);
     saveForgotResendCount(0);
     saveForgotCodeError("");
     setForgotNewPassword("");
     setForgotConfirmPassword("");
     setForgotPasswordErrors({});
+    setForgotPasswordTouched({ password: false, password_confirmation: false });
     setShowForgotNewPassword(false);
     setShowForgotConfirmPassword(false);
     setResetCode(["", "", "", "", "", ""]);
@@ -281,6 +338,7 @@ const Login = () => {
     setForgotEmailError("");
     setForgotEmailVerified(false);
     setForgotCodeVerified(false);
+    setForgotFirstLoginBlocked(false);
     setIsCheckingForgotEmail(false);
     setIsVerifyingForgotCode(false);
     setIsResettingForgotPassword(false);
@@ -290,6 +348,7 @@ const Login = () => {
     setForgotNewPassword("");
     setForgotConfirmPassword("");
     setForgotPasswordErrors({});
+    setForgotPasswordTouched({ password: false, password_confirmation: false });
     setShowForgotNewPassword(false);
     setShowForgotConfirmPassword(false);
     setResetCode(["", "", "", "", "", ""]);
@@ -326,6 +385,7 @@ const Login = () => {
 
     setForgotEmailError("");
     saveForgotCodeError("");
+    setForgotFirstLoginBlocked(false);
     setForgotEmailVerified(false);
     setForgotCodeVerified(false);
     setResetCode(["", "", "", "", "", ""]);
@@ -350,6 +410,12 @@ const Login = () => {
         codeInputRefs.current[0]?.focus();
       });
     } catch (error) {
+      if (error?.response?.data?.requires_first_login) {
+        setForgotFirstLoginBlocked(true);
+        setForgotEmailError("");
+        return;
+      }
+
       const remainingResends = error?.response?.data?.remaining_resends;
       if (typeof remainingResends === "number") {
         saveForgotResendCount(FORGOT_PASSWORD_RESEND_DAILY_LIMIT - remainingResends);
@@ -438,6 +504,7 @@ const Login = () => {
       });
       setForgotCodeVerified(true);
       setForgotPasswordErrors({});
+      setForgotPasswordTouched({ password: false, password_confirmation: false });
       navigateForgotStep("reset");
     } catch (error) {
       saveForgotCodeError(
@@ -453,12 +520,10 @@ const Login = () => {
   const handleForgotResetPassword = async () => {
     const verificationCode = resetCode.join("");
     const nextErrors = {};
+    setForgotPasswordTouched({ password: true, password_confirmation: true });
 
-    if (!forgotNewPassword.trim()) {
-      nextErrors.password = "New password is required.";
-    } else if (forgotNewPassword.length < 8) {
-      nextErrors.password = "New password must be at least 8 characters.";
-    }
+    const passwordError = getPasswordErrorMessage(forgotNewPassword);
+    if (passwordError) nextErrors.password = passwordError;
 
     if (!forgotConfirmPassword.trim()) {
       nextErrors.password_confirmation = "Confirm password is required.";
@@ -694,7 +759,7 @@ const Login = () => {
                         setEmail(e.target.value);
                         clearFieldError("email");
                       }}
-                      placeholder="you@gmail.com"
+                      placeholder="Enter your email"
                       disabled={isLoading}
                       style={{ fontFamily: "'Montserrat', sans-serif" }}
                       className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-4 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] ${
@@ -721,7 +786,7 @@ const Login = () => {
                         setPassword(e.target.value);
                         clearFieldError("password");
                       }}
-                      placeholder="•••••••••••"
+                      placeholder="Enter your password"
                       disabled={isLoading}
                       style={{ fontFamily: "'Montserrat', sans-serif" }}
                       className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-12 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] ${
@@ -803,12 +868,14 @@ const Login = () => {
                     <IoHeadsetOutline className="text-base text-slate-400" />
                     Need Help? Contact the
                   </span>
-                  <button
-                    type="button"
+                  <a
+                    href="https://www.facebook.com/profile.php?id=61573333256180"
+                    target="_blank"
+                    rel="noreferrer"
                     className="login-help-contact-admin block w-full text-center font-medium text-[#2563eb] hover:underline"
                   >
                     System Administrator
-                  </button>
+                  </a>
                 </div>
                 </form>
               </div>
@@ -864,7 +931,7 @@ const Login = () => {
                                   setForgotEmailError("");
                                   setResetCode(["", "", "", "", "", ""]);
                                 }}
-                                placeholder="you@gmail.com"
+                                placeholder="Enter your email"
                                 disabled={isCheckingForgotEmail}
                                 className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-4 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] lg:text-sm ${
                                   forgotEmailError
@@ -874,6 +941,14 @@ const Login = () => {
                               />
                             </div>
                             <LoginFieldError message={forgotEmailError} />
+                            {forgotFirstLoginBlocked ? (
+                              <div className="mt-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-left">
+                                <IoAlertCircleOutline className="mt-0.5 flex-shrink-0 text-[16px] text-amber-600" />
+                                <p className="m-0 flex-1 text-[12px] leading-4 text-amber-800">
+                                  This is a new account. Please sign in first with your temporary password to complete your account before using Forgot Password.
+                                </p>
+                              </div>
+                            ) : null}
                             <button
                               type="button"
                               onClick={handleForgotEmailCheck}
@@ -965,12 +1040,14 @@ const Login = () => {
                                   value={forgotNewPassword}
                                   onChange={(event) => {
                                     setForgotNewPassword(event.target.value);
-                                    setForgotPasswordErrors((current) => ({ ...current, password: "" }));
+                                    setForgotPasswordTouched((current) => ({ ...current, password: true, ...(forgotConfirmPassword ? { password_confirmation: true } : {}) }));
+                                    setForgotPasswordErrors((current) => ({ ...current, password: "", password_confirmation: "" }));
                                   }}
+                                  onBlur={() => setForgotPasswordTouched((current) => ({ ...current, password: true }))}
                                   placeholder="Enter new password"
                                   disabled={isResettingForgotPassword}
                                   className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-12 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] lg:text-sm ${
-                                    forgotPasswordErrors.password
+                                    forgotNewPasswordError
                                       ? "border-red-300 focus:border-red-300 focus:ring-0"
                                       : "border-[#F2E6EB] focus:ring-1 focus:ring-[#2563eb]/90 lg:border-slate-200"
                                   }`}
@@ -984,7 +1061,27 @@ const Login = () => {
                                   {showForgotNewPassword ? <IoEyeOffOutline className="text-xl" /> : <IoEyeOutline className="text-xl" />}
                                 </button>
                               </div>
-                              <LoginFieldError message={forgotPasswordErrors.password} />
+                              <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                                {PASSWORD_RULE_LABELS.map((rule) => {
+                                  const passed = forgotPasswordRuleStatus[rule.key];
+                                  const active = forgotPasswordTouched.password || forgotNewPassword !== "";
+
+                                  return (
+                                    <div key={rule.key} className="flex items-center gap-2">
+                                      {passed ? (
+                                        <IoCheckmarkOutline className="flex-shrink-0 text-[13px] text-green-500" />
+                                      ) : (
+                                        <IoCloseOutline className={`flex-shrink-0 text-[13px] ${active ? "text-red-400" : "text-slate-300"}`} />
+                                      )}
+                                      <span className={`text-[11px] ${passed ? "text-green-700" : active ? "text-red-500" : "text-slate-400"}`}>
+                                        {rule.label}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <LoginFieldError message={forgotNewPasswordError} />
+                              <LoginFieldSuccess message={forgotNewPasswordSuccess ? "Password is strong." : ""} />
                             </div>
 
                             <div>
@@ -998,12 +1095,14 @@ const Login = () => {
                                   value={forgotConfirmPassword}
                                   onChange={(event) => {
                                     setForgotConfirmPassword(event.target.value);
+                                    setForgotPasswordTouched((current) => ({ ...current, password_confirmation: true }));
                                     setForgotPasswordErrors((current) => ({ ...current, password_confirmation: "" }));
                                   }}
+                                  onBlur={() => setForgotPasswordTouched((current) => ({ ...current, password_confirmation: true }))}
                                   placeholder="Confirm new password"
                                   disabled={isResettingForgotPassword}
                                   className={`h-14 w-full rounded-xl border bg-white py-3.5 pl-12 pr-12 text-base text-[#1A1F36] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:h-auto lg:bg-[#f8fbff] lg:text-sm ${
-                                    forgotPasswordErrors.password_confirmation
+                                    forgotConfirmPasswordError
                                       ? "border-red-300 focus:border-red-300 focus:ring-0"
                                       : "border-[#F2E6EB] focus:ring-1 focus:ring-[#2563eb]/90 lg:border-slate-200"
                                   }`}
@@ -1017,7 +1116,8 @@ const Login = () => {
                                   {showForgotConfirmPassword ? <IoEyeOffOutline className="text-xl" /> : <IoEyeOutline className="text-xl" />}
                                 </button>
                               </div>
-                              <LoginFieldError message={forgotPasswordErrors.password_confirmation} />
+                              <LoginFieldError message={forgotConfirmPasswordError} />
+                              <LoginFieldSuccess message={forgotConfirmPasswordSuccess ? "Passwords match." : ""} />
                             </div>
 
                             <LoginFieldError message={forgotPasswordErrors.verification_code} />

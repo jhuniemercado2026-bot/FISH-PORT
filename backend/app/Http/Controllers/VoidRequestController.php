@@ -55,7 +55,7 @@ class VoidRequestController extends Controller
         $sender = Auth::user();
         $label = $this->recordLabel($transactionType, $record);
         $title = 'Void Request';
-        $message = $this->notificationMessage($transactionType, $record, $reason);
+        $message = $this->notificationMessage($transactionType, $record, $reason, $sender);
         $relatedType = $this->notificationRelatedType($transactionType, $record);
 
         $notifications = $coordinators->map(function (User $coordinator) use ($title, $message, $sender, $relatedType, $transactionId) {
@@ -140,22 +140,38 @@ class VoidRequestController extends Controller
             . ($vehicleType ? ' (' . $vehicleType . ')' : '');
     }
 
-    private function notificationMessage(string $transactionType, Model $record, string $reason): string
+    private function notificationMessage(string $transactionType, Model $record, string $reason, ?User $sender): string
     {
+        $inspectorName = trim(implode(' ', array_filter([
+            $sender?->first_name,
+            $sender?->last_name,
+        ]))) ?: ($sender?->email ?: 'Unknown inspector');
+        $prefix = 'Inspector ' . $inspectorName . ', ';
+
         if ($transactionType === 'docking') {
-            $boatName = $record->getRelation('boat')?->boat_name ?: 'Unknown boat';
+            $isVisitingBoat = strtolower((string) $record->getAttribute('boat_category')) === 'visiting'
+                || trim((string) $record->getAttribute('visiting_boat_name')) !== '';
+            $boatName = $isVisitingBoat
+                ? ($record->getAttribute('visiting_boat_name') ?: 'Unknown boat')
+                : ($record->getRelation('boat')?->boat_name ?: 'Unknown boat');
+            $boatLabel = $isVisitingBoat ? 'visiting boat' : 'boat';
             $fee = $this->formatMoney($record->getAttribute('docking_fee'));
             $dateTime = $this->formatDateTime($record->getAttribute('docking_date'));
 
-            return 'Requested to void docking record, boat "' . $boatName . '" in ' . $dateTime . ' with fee "' . $fee . '". Reason: ' . $reason;
+            return $prefix . 'requested to void docking record, ' . $boatLabel . ' "' . $boatName . '" in ' . $dateTime . ' with fee "' . $fee . '". Reason: ' . $reason;
         }
 
         if ($transactionType === 'banyera') {
-            $boatName = $record->getRelation('boat')?->boat_name ?: 'Unknown boat';
+            $isVisitingBoat = strtolower((string) $record->getAttribute('boat_category')) === 'visiting'
+                || trim((string) $record->getAttribute('visiting_boat_name')) !== '';
+            $boatName = $isVisitingBoat
+                ? ($record->getAttribute('visiting_boat_name') ?: 'Unknown boat')
+                : ($record->getRelation('boat')?->boat_name ?: 'Unknown boat');
+            $boatLabel = $isVisitingBoat ? 'visiting boat' : 'boat';
             $fee = $this->formatMoney($record->getAttribute('total_fee'));
             $dateTime = $this->formatDateTime($record->getAttribute('transaction_date'));
 
-            return 'Requested to void banyera transaction, boat "' . $boatName . '" in ' . $dateTime . ' with fee "' . $fee . '". Reason: ' . $reason;
+            return $prefix . 'requested to void banyera transaction, ' . $boatLabel . ' "' . $boatName . '" in ' . $dateTime . ' with fee "' . $fee . '". Reason: ' . $reason;
         }
 
         if ($transactionType === 'tickets') {
@@ -163,7 +179,7 @@ class VoidRequestController extends Controller
             $ticketDate = $this->formatDateTime($record->getAttribute('ticket_date'));
             $ticketFee = $this->formatMoney($record->getAttribute('ticket_fee'));
 
-            return 'Requested to void vehicle ticket, ' . $vehicleType . ' in ' . $ticketDate . ' with ' . $ticketFee . '. Reason: ' . $reason;
+            return $prefix . 'requested to void vehicle ticket, ' . $vehicleType . ' in ' . $ticketDate . ' with ' . $ticketFee . '. Reason: ' . $reason;
         }
 
         return 'Requested to void ' . $this->recordLabel($transactionType, $record) . '. Reason: ' . $reason;

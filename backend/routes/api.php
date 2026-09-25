@@ -31,6 +31,7 @@ use App\Http\Controllers\BanyeraReportController;
 use App\Http\Controllers\BfarReportController;
 use App\Http\Controllers\VehicleTicketReportController;
 use App\Http\Controllers\RegisteredBoatsReportController;
+use App\Http\Controllers\VisitingBoatsReportController;
 use App\Http\Controllers\OwnerInfoReportController;
 use App\Http\Controllers\BoatTypesReportController;
 use App\Http\Controllers\DockingReportController;
@@ -181,6 +182,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('{id}', [PaymentController::class, 'update'])->middleware('transactions.unlocked');
     });
     Route::get('collections', [CollectionController::class, 'index']);
+    Route::get('collections/reports/{filterType}', [CollectionController::class, 'report']);
 
     Route::prefix('remittances')->group(function () {
         Route::get('today-collection', [RemittanceController::class, 'todayCollection']);
@@ -233,6 +235,9 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::prefix('registered-boats-reports')->group(function () {
         Route::get('/', [RegisteredBoatsReportController::class, 'index']);
+    });
+    Route::prefix('visiting-boats-reports')->group(function () {
+        Route::get('/', [VisitingBoatsReportController::class, 'index']);
     });
     Route::prefix('owner-info-reports')->group(function () {
         Route::get('/', [OwnerInfoReportController::class, 'index']);

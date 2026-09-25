@@ -6,6 +6,7 @@ type OfflineSyncModalProps = {
   percentage: number;
   processed: number;
   total: number;
+  status?: "started" | "progress" | "paused" | "finished";
   onSkip: () => void;
 };
 
@@ -14,9 +15,11 @@ export default function OfflineSyncModal({
   percentage,
   processed,
   total,
+  status = "progress",
   onSkip,
 }: OfflineSyncModalProps) {
   const boundedPercentage = Math.max(0, Math.min(100, percentage));
+  const isPaused = status === "paused";
 
   return (
     <NativeModal
@@ -43,16 +46,22 @@ export default function OfflineSyncModal({
                 className="text-[15px] text-[#1A1F36]"
                 style={{ fontFamily: "Montserrat_600SemiBold" }}
               >
-                Syncing drafts
+                {isPaused ? "Sync paused" : "Syncing drafts"}
               </Text>
               <Text
                 className="mt-1 text-[12px] text-[#6F6F82]"
                 style={{ fontFamily: "Montserrat_400Regular" }}
               >
-                {processed} of {total} drafts
+                {isPaused
+                  ? "Waiting to retry when connection is stable"
+                  : `${processed} of ${total} drafts`}
               </Text>
             </View>
-            <ActivityIndicator size="small" color="#2563EB" />
+            {isPaused ? (
+              <Ionicons name="cloud-offline-outline" size={20} color="#D97706" />
+            ) : (
+              <ActivityIndicator size="small" color="#2563EB" />
+            )}
           </View>
 
           <View className="mt-5">

@@ -149,8 +149,9 @@ export const getVehicleTypesDataQueryOptions = ({
   status = "all",
   highlightVehicleTypeId = "",
   fiscalYear,
+  includeArchivedLookups = false,
 } = {}) => ({
-  queryKey: ["vehicle-tickets-data", "vehicle-types", { page, perPage, search, status, highlightVehicleTypeId, fiscalYear }],
+  queryKey: ["vehicle-tickets-data", "vehicle-types", { page, perPage, search, status, highlightVehicleTypeId, fiscalYear, includeArchivedLookups }],
   queryFn: async ({ signal }) => {
     const response = await api.get("/vehicle-types", {
       signal,
@@ -162,6 +163,7 @@ export const getVehicleTypesDataQueryOptions = ({
         status,
         highlight_vehicle_type_id: highlightVehicleTypeId,
         fiscal_year: fiscalYear,
+        include_archived_lookups: includeArchivedLookups ? 1 : 0,
       },
     });
 
@@ -213,7 +215,7 @@ const looksLikeQueryOptions = (value) =>
   value &&
   typeof value === "object" &&
   Object.keys(value).some((key) => QUERY_OPTION_KEYS.has(key)) &&
-  !["page", "perPage", "search", "status", "period", "vehicleType", "ticketType", "highlightTicketId", "filters", "sort", "paginated", "includeStats", "includeLookups", "skipFiscalYear"].some((key) =>
+  !["page", "perPage", "search", "status", "period", "vehicleType", "ticketType", "highlightTicketId", "filters", "sort", "paginated", "includeStats", "includeLookups", "includeArchivedLookups", "skipFiscalYear"].some((key) =>
     Object.prototype.hasOwnProperty.call(value, key)
   );
 

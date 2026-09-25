@@ -60,7 +60,8 @@ export const getDockingsDataQueryOptions = ({
         logged_today: 0,
         total_fee_today: 0,
       },
-      boats: boatsRes.data,
+      boats: boatsRes.data?.boats ?? boatsRes.data?.data ?? boatsRes.data ?? [],
+      boatTypes: boatsRes.data?.boatTypes ?? boatsRes.data?.boat_types ?? [],
       users: [],
       fees: feesRes.data,
     };
@@ -111,7 +112,8 @@ export const getDockingLookupsQueryOptions = () => ({
     ]);
 
     return {
-      boats: boatsRes.data ?? [],
+      boats: boatsRes.data?.boats ?? boatsRes.data?.data ?? boatsRes.data ?? [],
+      boatTypes: boatsRes.data?.boatTypes ?? boatsRes.data?.boat_types ?? [],
       users: [],
       fees: feesRes.data ?? [],
     };

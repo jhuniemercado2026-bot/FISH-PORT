@@ -9,8 +9,11 @@ import {
   IoLocationOutline,
   IoAlertCircleOutline,
   IoCloudUploadOutline,
+  IoCheckmarkOutline,
+  IoDownloadOutline,
   IoEyeOutline,
   IoEyeOffOutline,
+  IoCloseOutline,
   IoChevronDownOutline,
   IoChevronUpOutline,
 } from "react-icons/io5";
@@ -52,6 +55,12 @@ const PASSWORD_CODE_RESEND_COOLDOWN_SECONDS = 59;
 const PASSWORD_CODE_RESEND_DAILY_LIMIT = 3;
 const VERIFICATION_CODE_LIMIT_MESSAGE =
   "You have reached the verification code limit for today. Please use the latest verification code sent to your email. This code expires within this day.";
+const PASSWORD_RULE_LABELS = [
+  { key: "length", label: "At least 8 characters" },
+  { key: "uppercase", label: "One uppercase letter" },
+  { key: "number", label: "One number" },
+  { key: "symbol", label: "One symbol" },
+];
 const EMPTY_PERSONAL_ERRORS = {
   first_name: "",
   last_name: "",
@@ -60,6 +69,25 @@ const EMPTY_PERSONAL_ERRORS = {
   contact_number: "",
   birthday: "",
   address: "",
+};
+
+const getPasswordRuleStatus = (password = "") => ({
+  length: password.length >= 8,
+  uppercase: /[A-Z]/.test(password),
+  number: /\d/.test(password),
+  symbol: /[^A-Za-z0-9]/.test(password),
+});
+
+const getPasswordErrorMessage = (password = "") => {
+  const status = getPasswordRuleStatus(password);
+
+  if (!password) return "New password is required.";
+  if (!status.length) return "Password must be at least 8 characters.";
+  if (!status.uppercase) return "Password must include at least 1 uppercase letter.";
+  if (!status.number) return "Password must include at least 1 number.";
+  if (!status.symbol) return "Password must include at least 1 symbol.";
+
+  return "";
 };
 
 // -- Info Row ---------------------------------------------------------
@@ -76,6 +104,13 @@ const RequiredLabel = ({ children }) => (
     <span className="text-red-500 ml-0.5"> *</span>
   </>
 );
+
+const FieldSuccess = ({ message }) => message ? (
+  <div className="mt-2 flex items-center gap-2 rounded-xl border border-green-100 bg-green-50 px-3 py-2">
+    <IoCheckmarkOutline className="flex-shrink-0 text-[14px] text-green-500" />
+    <p className="m-0 text-[12px] font-normal text-green-700" style={{ fontFamily: FONT }}>{message}</p>
+  </div>
+) : null;
 
 const PersonalGenderCardSelect = ({ value, onChange, error = "" }) => (
   <div>
@@ -273,6 +308,8 @@ const UserProfileTab = ({ showToast }) => {
   const [pwResendCount, setPwResendCount] = useState(0);
   const [resendingPwCode, setResendingPwCode] = useState(false);
   const [showPwFields, setShowPwFields] = useState({ current: false, new_pass: false, confirm: false });
+  const [pwTouched, setPwTouched] = useState({ current: false, new_pass: false, confirm: false });
+  const [backupDownloading, setBackupDownloading] = useState(false);
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [pendingRecoveryFile, setPendingRecoveryFile] = useState(null);
   const selectedFiscalYear = useFiscalYearStore((state) => state.fiscalYear);
@@ -327,6 +364,20 @@ const UserProfileTab = ({ showToast }) => {
     : "";
   const normalizedProfileRole = String(profile?.role || getStoredUserRole()).trim().toLowerCase();
   const canRecoverDatabase = normalizedProfileRole === "head";
+  const changePasswordRuleStatus = getPasswordRuleStatus(tmpPw.new_pass);
+  const changePasswordError = getPasswordErrorMessage(tmpPw.new_pass);
+  const visibleNewPasswordError = pwFieldErrors.new_pass || (pwTouched.new_pass ? changePasswordError : "");
+  const visibleConfirmPasswordError = pwFieldErrors.confirm || (
+    pwTouched.confirm
+      ? !tmpPw.confirm
+        ? "Please confirm your new password."
+        : tmpPw.confirm !== tmpPw.new_pass
+          ? "Passwords do not match."
+          : ""
+      : ""
+  );
+  const newPasswordSuccess = pwTouched.new_pass && !visibleNewPasswordError && tmpPw.new_pass !== "";
+  const confirmPasswordSuccess = pwTouched.confirm && !visibleConfirmPasswordError && tmpPw.confirm !== "";
 
   const handleRecoveryFileChange = (event) => {
     const file = event.target.files?.[0] ?? null;
@@ -361,6 +412,35 @@ const UserProfileTab = ({ showToast }) => {
       showToast("error", "Recovery Failed", await getRequestErrorMessage(err, "Unable to recover the database from the selected file."));
     } finally {
       setRecoveryLoading(false);
+    }
+  };
+
+  const handleDownloadSqlBackup = async () => {
+    if (backupDownloading) return;
+
+    setBackupDownloading(true);
+    try {
+      const response = await api.get("/database/backup", {
+        responseType: "blob",
+      });
+      const disposition = response.headers?.["content-disposition"] || "";
+      const filenameMatch = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i);
+      const filename = filenameMatch
+        ? decodeURIComponent(filenameMatch[1])
+        : `opol_fish_port_${new Date().toISOString().slice(0, 10)}.sql`;
+      const url = window.URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      showToast("success", "Download Started", "The SQL backup is being downloaded.");
+    } catch (err) {
+      showToast("error", "Download Failed", await getRequestErrorMessage(err, "Unable to download the SQL backup."));
+    } finally {
+      setBackupDownloading(false);
     }
   };
 
@@ -470,10 +550,10 @@ const UserProfileTab = ({ showToast }) => {
     }
     const nextErrors = { ...EMPTY_PASSWORD_ERRORS };
     setPwErr("");
+    setPwTouched({ current: true, new_pass: true, confirm: true });
     if (!tmpPw.current.trim()) nextErrors.current = "Current password is required.";
-    if (!tmpPw.new_pass) nextErrors.new_pass = "New password is required.";
-    else if (tmpPw.new_pass.length < 8) nextErrors.new_pass = "Password must be at least 8 characters.";
-    else if (tmpPw.new_pass === tmpPw.current) nextErrors.new_pass = "New password must be different from your current password.";
+    nextErrors.new_pass = getPasswordErrorMessage(tmpPw.new_pass);
+    if (!nextErrors.new_pass && tmpPw.new_pass === tmpPw.current) nextErrors.new_pass = "New password must be different from your current password.";
     if (!tmpPw.confirm) nextErrors.confirm = "Please confirm your new password.";
     else if (tmpPw.new_pass !== tmpPw.confirm) nextErrors.confirm = "Passwords do not match.";
     setPwFieldErrors(nextErrors);
@@ -495,6 +575,7 @@ const UserProfileTab = ({ showToast }) => {
       setPwResendCount(PASSWORD_CODE_RESEND_DAILY_LIMIT - Number(res.data?.remaining_resends ?? PASSWORD_CODE_RESEND_DAILY_LIMIT));
       setShowPwModal(false);
       setShowPwFields({ current: false, new_pass: false, confirm: false });
+      setPwTouched({ current: false, new_pass: false, confirm: false });
       setShowPwCodeModal(true);
     } catch (err) {
       const backendErrors = err.response?.data?.errors || {};
@@ -517,10 +598,15 @@ const UserProfileTab = ({ showToast }) => {
         setPwResendCount(PASSWORD_CODE_RESEND_DAILY_LIMIT);
         setShowPwModal(false);
         setShowPwFields({ current: false, new_pass: false, confirm: false });
+        setPwTouched({ current: false, new_pass: false, confirm: false });
         setShowPwCodeModal(true);
         return;
       }
-      setPwErr(err.response?.data?.message || "Failed to send the verification code.");
+      setPwErr(
+        backendErrors.current_password || backendErrors.new_password || backendErrors.new_password_confirmation
+          ? ""
+          : err.response?.data?.message || "Failed to send the verification code."
+      );
     } finally {
       setSaving(false);
     }
@@ -606,6 +692,7 @@ const UserProfileTab = ({ showToast }) => {
       setShowPwCodeModal(false);
       setTmpPw(EMPTY_PASSWORD_FORM);
       setPwFieldErrors(EMPTY_PASSWORD_ERRORS);
+      setPwTouched({ current: false, new_pass: false, confirm: false });
       setPwErr("");
       setPwCode([...EMPTY_VERIFICATION_CODE]);
       setPwCodeErr("");
@@ -791,7 +878,7 @@ const UserProfileTab = ({ showToast }) => {
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 gap-5 mb-5 ${canRecoverDatabase ? "lg:grid-cols-2" : ""}`}>
+      <div className={`grid grid-cols-1 gap-5 mb-5 ${canRecoverDatabase ? "lg:grid-cols-3" : ""}`}>
         {/* -- Security Card -- */}
         <div className="bg-white rounded-[10px] border border-slate-200 shadow-sm overflow-hidden">
           <div className="flex min-h-[92px] items-center justify-between gap-4 px-6 py-4">
@@ -800,7 +887,7 @@ const UserProfileTab = ({ showToast }) => {
               <p className="m-0 text-[12px] mt-0.5 text-slate-700">Manage your account password</p>
             </div>
             <button
-              onClick={() => { if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; } setPwErr(""); setPwCode([...EMPTY_VERIFICATION_CODE]); setPwCodeErr(""); setPwFieldErrors(EMPTY_PASSWORD_ERRORS); setTmpPw(EMPTY_PASSWORD_FORM); setShowPwCodeModal(false); setShowPwFields({ current: false, new_pass: false, confirm: false }); setShowPwModal(true); }}
+              onClick={() => { if (isTransactionLocked) { showToast("error", "Transactions Locked", transactionLockMessage); return; } setPwErr(""); setPwCode([...EMPTY_VERIFICATION_CODE]); setPwCodeErr(""); setPwFieldErrors(EMPTY_PASSWORD_ERRORS); setPwTouched({ current: false, new_pass: false, confirm: false }); setTmpPw(EMPTY_PASSWORD_FORM); setShowPwCodeModal(false); setShowPwFields({ current: false, new_pass: false, confirm: false }); setShowPwModal(true); }}
               disabled={isTransactionLocked}
               className="cursor-pointer rounded-[10px] bg-white px-6 py-2 text-[14px] font-medium transition-colors inline-flex items-center gap-2"
               style={{ border: "2px solid #1a1f36", color: "#1a1f36", fontFamily: FONT, opacity: isTransactionLocked ? 0.5 : 1 }}
@@ -810,6 +897,20 @@ const UserProfileTab = ({ showToast }) => {
             </button>
           </div>
         </div>
+
+        {canRecoverDatabase && (
+          <DataActionCard
+            icon={IoDownloadOutline}
+            title="Download SQL"
+            description="Manually download a full SQL database backup."
+            actionLabel="Download"
+            actionIcon={IoDownloadOutline}
+            loading={backupDownloading}
+            disabled={false}
+            onAction={handleDownloadSqlBackup}
+            showIcon={false}
+          />
+        )}
 
         {canRecoverDatabase && (
           <DataActionCard
@@ -914,43 +1015,77 @@ const UserProfileTab = ({ showToast }) => {
 
       {/* -- Password Modal -- */}
       {showPwModal && (
-        <Modal title="Change Password" onClose={() => { setShowPwModal(false); setShowPwFields({ current: false, new_pass: false, confirm: false }); }} onSave={savePw} saving={saving}>
+        <Modal title="Change Password" onClose={() => { setShowPwModal(false); setShowPwFields({ current: false, new_pass: false, confirm: false }); setPwTouched({ current: false, new_pass: false, confirm: false }); }} onSave={savePw} saving={saving}>
           {[{ label: "Current Password", key: "current", placeholder: "Enter current password" },
-            { label: "New Password",     key: "new_pass", placeholder: "Minimum 8 characters" },
+            { label: "New Password",     key: "new_pass", placeholder: "Enter password" },
             { label: "Confirm Password", key: "confirm",  placeholder: "Re-enter new password" }
           ].map(({ label, key, placeholder }) => (
-            <ModalTextInput
-              key={key}
-              label={<RequiredLabel>{label}</RequiredLabel>}
-              error={pwFieldErrors[key]}
-              type={showPwFields[key] ? "text" : "password"}
-              autoComplete="new-password"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              data-lpignore="true"
-              data-form-type="other"
-              name={`settings-${key}`}
-              value={tmpPw[key]}
-              onChange={e => {
-                const { value } = e.target;
-                setTmpPw(p => ({ ...p, [key]: value }));
-                setPwErr("");
-                setPwFieldErrors((current) => ({ ...current, [key]: "" }));
-              }}
-              placeholder={placeholder}
-              icon={IoShieldCheckmarkOutline}
-              rightAdornment={
-                <button
-                  type="button"
-                  onClick={() => setShowPwFields((current) => ({ ...current, [key]: !current[key] }))}
-                  className="flex items-center justify-center border-none bg-transparent cursor-pointer p-0 text-slate-400 hover:text-slate-600 transition-colors"
-                  aria-label={showPwFields[key] ? `Hide ${label}` : `Show ${label}`}
-                >
-                  {showPwFields[key] ? <IoEyeOffOutline className="text-[18px]" /> : <IoEyeOutline className="text-[18px]" />}
-                </button>
-              }
-            />
+            <div key={key}>
+              <ModalTextInput
+                label={<RequiredLabel>{label}</RequiredLabel>}
+                error={key === "new_pass" ? visibleNewPasswordError : key === "confirm" ? visibleConfirmPasswordError : pwFieldErrors[key]}
+                type={showPwFields[key] ? "text" : "password"}
+                autoComplete="new-password"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                data-lpignore="true"
+                data-form-type="other"
+                name={`settings-${key}`}
+                value={tmpPw[key]}
+                onBlur={() => setPwTouched((current) => ({ ...current, [key]: true }))}
+                onChange={e => {
+                  const { value } = e.target;
+                  setTmpPw(p => ({ ...p, [key]: value }));
+                  setPwTouched((current) => ({
+                    ...current,
+                    [key]: true,
+                    ...(key === "new_pass" && tmpPw.confirm ? { confirm: true } : {}),
+                  }));
+                  setPwErr("");
+                  setPwFieldErrors((current) => ({ ...current, [key]: "", ...(key === "new_pass" ? { confirm: "" } : {}) }));
+                }}
+                placeholder={placeholder}
+                icon={IoShieldCheckmarkOutline}
+                rightAdornment={
+                  <button
+                    type="button"
+                    onClick={() => setShowPwFields((current) => ({ ...current, [key]: !current[key] }))}
+                    className="flex items-center justify-center border-none bg-transparent cursor-pointer p-0 text-slate-400 hover:text-slate-600 transition-colors"
+                    aria-label={showPwFields[key] ? `Hide ${label}` : `Show ${label}`}
+                  >
+                    {showPwFields[key] ? <IoEyeOffOutline className="text-[18px]" /> : <IoEyeOutline className="text-[18px]" />}
+                  </button>
+                }
+              />
+              {key === "new_pass" && (
+                <>
+                  <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                    {PASSWORD_RULE_LABELS.map((rule) => {
+                      const passed = changePasswordRuleStatus[rule.key];
+                      const active = pwTouched.new_pass || tmpPw.new_pass !== "";
+
+                      return (
+                        <div key={rule.key} className="flex items-center gap-2">
+                          {passed ? (
+                            <IoCheckmarkOutline className="flex-shrink-0 text-[13px] text-green-500" />
+                          ) : (
+                            <IoCloseOutline className={`flex-shrink-0 text-[13px] ${active ? "text-red-400" : "text-slate-300"}`} />
+                          )}
+                          <span className={`text-[11px] ${passed ? "text-green-700" : active ? "text-red-500" : "text-slate-400"}`}>
+                            {rule.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <FieldSuccess message={newPasswordSuccess ? "Password is strong." : ""} />
+                </>
+              )}
+              {key === "confirm" && (
+                <FieldSuccess message={confirmPasswordSuccess ? "Passwords match." : ""} />
+              )}
+            </div>
           ))}
           {pwErr && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 border border-red-100">

@@ -22,9 +22,31 @@ class OwnerInfoReportController extends Controller
         }
 
         $query = BoatOwner::withTrashed()
+            ->with([
+                'ownerSignatureUpdatedByUser:user_id,first_name,last_name,email',
+                'signatureAudits' => function ($auditQuery) {
+                    $auditQuery
+                        ->with(['inspector:user_id,first_name,last_name,email'])
+                        ->orderByDesc('signed_at')
+                        ->orderByDesc('signature_audit_id');
+                },
+                'boats:boat_id,owner_id,boat_name',
+            ])
             ->orderBy('owner_lastname')
             ->orderBy('owner_firstname')
-            ->select(['owner_id', 'owner_firstname', 'owner_lastname', 'address', 'contact_number', 'created_by', 'deleted_at']);
+            ->select([
+                'owner_id',
+                'owner_firstname',
+                'owner_lastname',
+                'address',
+                'contact_number',
+                'owner_signature_data_url',
+                'owner_signature_public_id',
+                'owner_signature_signed_at',
+                'owner_signature_updated_by',
+                'created_by',
+                'deleted_at',
+            ]);
 
         if ($userId !== null && $userId !== '' && $userId !== 'all') {
             $query->where('created_by', (int) $userId);

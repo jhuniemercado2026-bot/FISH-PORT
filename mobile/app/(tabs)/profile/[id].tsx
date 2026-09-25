@@ -34,6 +34,31 @@ const PASSWORD_CODE_RESEND_COOLDOWN_SECONDS = 59;
 const PASSWORD_CODE_RESEND_DAILY_LIMIT = 3;
 const VERIFICATION_CODE_LIMIT_MESSAGE =
   "You have reached the verification code limit for today. Please use the latest verification code sent to your email. This code expires within this day.";
+const PASSWORD_RULES = [
+  { key: "length", label: "At least 8 characters" },
+  { key: "uppercase", label: "One uppercase letter" },
+  { key: "number", label: "One number" },
+  { key: "symbol", label: "One symbol" },
+] as const;
+
+const getPasswordStatus = (password = "") => ({
+  length: password.length >= 8,
+  uppercase: /[A-Z]/.test(password),
+  number: /\d/.test(password),
+  symbol: /[^A-Za-z0-9]/.test(password),
+});
+
+const getPasswordRuleError = (password = "") => {
+  const status = getPasswordStatus(password);
+
+  if (!password) return "New password is required.";
+  if (!status.length) return "Password must be at least 8 characters.";
+  if (!status.uppercase) return "Password must include at least 1 uppercase letter.";
+  if (!status.number) return "Password must include at least 1 number.";
+  if (!status.symbol) return "Password must include at least 1 symbol.";
+
+  return "";
+};
 
 export default function PersonalDetailsScreen() {
   const router = useRouter();
@@ -289,9 +314,36 @@ export default function PersonalDetailsScreen() {
   };
 
   const updatePasswordField = (key: keyof typeof EMPTY_PASSWORD_FORM, value: string) => {
-    setPasswordForm((current) => ({ ...current, [key]: value }));
+    setPasswordForm((current) => {
+      const nextForm = { ...current, [key]: value };
+      setPasswordErrors((errors) => {
+        const nextErrors = { ...errors, [key]: "" };
+
+        if (key === "new_pass") {
+          nextErrors.new_pass = value
+            ? getPasswordRuleError(value)
+            : "New password is required.";
+          if (value && value === current.current) {
+            nextErrors.new_pass = "New password must be different from your current password.";
+          }
+          if (current.confirm) {
+            nextErrors.confirm = value === current.confirm ? "" : "Passwords do not match.";
+          }
+        }
+
+        if (key === "confirm") {
+          nextErrors.confirm = value
+            ? value === current.new_pass
+              ? ""
+              : "Passwords do not match."
+            : "Please confirm your new password.";
+        }
+
+        return nextErrors;
+      });
+      return nextForm;
+    });
     setPasswordError("");
-    setPasswordErrors((current) => ({ ...current, [key]: "" }));
   };
 
   const validatePasswordFields = () => {
@@ -303,8 +355,8 @@ export default function PersonalDetailsScreen() {
 
     if (!passwordForm.new_pass) {
       nextErrors.new_pass = "New password is required.";
-    } else if (passwordForm.new_pass.length < 8) {
-      nextErrors.new_pass = "Password must be at least 8 characters.";
+    } else if (getPasswordRuleError(passwordForm.new_pass)) {
+      nextErrors.new_pass = getPasswordRuleError(passwordForm.new_pass);
     } else if (passwordForm.new_pass === passwordForm.current) {
       nextErrors.new_pass = "New password must be different from your current password.";
     }
@@ -594,7 +646,11 @@ export default function PersonalDetailsScreen() {
                       </Text>
                       <View
                         className={`h-14 flex-row items-center rounded-[10px] border bg-white px-4 ${
-                          passwordErrors[key] ? "border-[#DC2626]" : "border-[#E8E1E6]"
+                          passwordErrors[key]
+                            ? "border-[#DC2626]"
+                            : key !== "current" && passwordForm[key]
+                              ? "border-[#22C55E]"
+                              : "border-[#E8E1E6]"
                         }`}
                       >
                         <TextInput
@@ -608,6 +664,9 @@ export default function PersonalDetailsScreen() {
                           className="flex-1 text-[14px] text-[#1A1F36]"
                           style={{ fontFamily: "Montserrat_400Regular" }}
                         />
+                        {key !== "current" && passwordForm[key] && !passwordErrors[key] ? (
+                          <Ionicons name="checkmark-outline" size={19} color="#22C55E" />
+                        ) : null}
                         <Pressable
                           onPress={() =>
                             setShowPasswordFields((current) => ({
@@ -624,6 +683,33 @@ export default function PersonalDetailsScreen() {
                           />
                         </Pressable>
                       </View>
+                      {key === "new_pass" ? (
+                        <View className="mt-2 gap-1.5">
+                          {PASSWORD_RULES.map((rule) => {
+                            const passed = getPasswordStatus(passwordForm.new_pass)[rule.key];
+                            const active = Boolean(passwordForm.new_pass);
+
+                            return (
+                              <View key={rule.key} className="flex-row items-center gap-2">
+                                <Ionicons
+                                  name={passed ? "checkmark-outline" : "close-outline"}
+                                  size={14}
+                                  color={passed ? "#22C55E" : active ? "#F87171" : "#CBD5E1"}
+                                />
+                                <Text
+                                  className="text-[11px]"
+                                  style={{
+                                    color: passed ? "#15803D" : active ? "#B91C1C" : "#94A3B8",
+                                    fontFamily: "Montserrat_400Regular",
+                                  }}
+                                >
+                                  {rule.label}
+                                </Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      ) : null}
                       {renderErrorCard(passwordErrors[key])}
                     </View>
                   ))}

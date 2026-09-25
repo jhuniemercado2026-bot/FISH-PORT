@@ -20,6 +20,8 @@ const invalidateActiveTransactionQueries = (queryClient, queryKeys) => {
   queryKeys.forEach((queryKey) => {
     void queryClient.invalidateQueries({ queryKey, refetchType: "active" });
   });
+
+  void queryClient.invalidateQueries({ queryKey: ["universal-search"], refetchType: "active" });
 };
 
 const hasDockingInCache = (queryClient, docking) => {
@@ -72,6 +74,9 @@ const invalidateDockingQueries = (queryClient) => {
     ["dockings-calendar"],
     ["docking-lookups"],
     ["docking-report"],
+    ["collections-data"],
+    ["collections-report"],
+    ["today-collection"],
     ["dashboard-data"],
     ["daily-report"],
     ["monthly-report"],
@@ -89,6 +94,9 @@ const invalidateBanyeraQueries = (queryClient) => {
     ["banyera-data"],
     ["banyera-report"],
     ["bfar-report"],
+    ["collections-data"],
+    ["collections-report"],
+    ["today-collection"],
     ["dashboard-data"],
     ["daily-report"],
     ["monthly-report"],
@@ -110,6 +118,8 @@ const invalidateBillingQueries = (queryClient) => {
     ["billing-report"],
     ["payments-form-lookups"],
     ["payments-data"],
+    ["collections-data"],
+    ["collections-report"],
     ["dashboard-data"],
     ["daily-report"],
     ["monthly-report"],
@@ -118,6 +128,7 @@ const invalidateBillingQueries = (queryClient) => {
     ["owner-statement-data"],
     ["boat-statement-data"],
     ["billing-report"],
+    ["today-collection"],
   ]);
 };
 
@@ -127,6 +138,7 @@ const invalidateVehicleTicketQueries = (queryClient) => {
     ["vehicle-tickets-lookups"],
     ["vehicle-ticket-report"],
     ["collections-data"],
+    ["collections-report"],
     ["today-collection"],
     ["dashboard-data"],
     ["daily-report"],
@@ -165,13 +177,21 @@ const invalidateBoatManagementQueries = (queryClient) => {
 const invalidateFeeDependentLookups = (queryClient) => {
   invalidateActiveTransactionQueries(queryClient, [
     ["docking-lookups"],
+    ["banyera-data", "lookups"],
     ["dockings-data"],
     ["banyera-data"],
     ["vehicle-tickets-lookups"],
     ["vehicle-tickets-data"],
+    ["billing-form-lookups"],
+    ["payments-form-lookups"],
     ["fees-lookups"],
     ["fees-data"],
     ["fee-report"],
+    ["dashboard-data"],
+    ["daily-report"],
+    ["monthly-report"],
+    ["yearly-report"],
+    ["revenue-report"],
   ]);
 };
 
@@ -228,6 +248,7 @@ export default function TransactionsRealtimeBridge() {
       if (type === "payment") {
         invalidateActiveTransactionQueries(queryClient, [
           ["collections-data"],
+          ["collections-report"],
           ["payments-data"],
           ["billing-payments"],
           ["payments-form-lookups"],
@@ -289,9 +310,12 @@ export default function TransactionsRealtimeBridge() {
 
       if (type === "payment") {
         invalidateActiveTransactionQueries(queryClient, [
+          ["collections-data"],
+          ["collections-report"],
           ["billing-data"],
           ["billing-payments"],
           ["payments-form-lookups"],
+          ["today-collection"],
           ["owner-statement-data"],
           ["boat-statement-data"],
         ]);
@@ -304,6 +328,7 @@ export default function TransactionsRealtimeBridge() {
 
     masterDataChannel.listen(".updated", (payload) => {
       const resource = String(payload?.resource || "");
+      void queryClient.invalidateQueries({ queryKey: ["universal-search"], refetchType: "active" });
 
       if (["boats", "boat_types", "boat_owners"].includes(resource)) {
         invalidateBoatManagementQueries(queryClient);

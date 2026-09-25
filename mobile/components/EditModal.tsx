@@ -12,6 +12,13 @@ type EditModalProps = {
   onSave: (updatedItems: BanyeraItem[]) => void;
 };
 
+const getBoatDisplayName = (transaction?: Record<string, any> | null) =>
+  transaction?.display_boat_name ||
+  transaction?.visiting_boat_name ||
+  transaction?.boat?.boat_name ||
+  transaction?.boat_name ||
+  "Unknown Boat";
+
 const parseLocalDateTime = (value?: string | null) => {
   if (!value) return "N/A";
   const raw = String(value).trim();
@@ -135,8 +142,7 @@ export default function EditModal({
     setItems(transactionItems);
   }, [transaction, visible]);
 
-  const boatName =
-    transaction?.boat?.boat_name || transaction?.boat_name || "Unknown Boat";
+  const boatName = getBoatDisplayName(transaction);
   const dateValue = transaction?.transaction_date || null;
   const dateText = formatDateTime(dateValue);
   const totalFee = Number(transaction?.total_fee || 0);

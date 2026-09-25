@@ -126,7 +126,11 @@ class BoatManagementController extends Controller
         }
 
         $boatsQuery = $includeBoats
-            ? Boat::forManagementIndex()
+            ? ($includeArchivedLookups
+                ? Boat::withTrashed()
+                    ->select('boat_id', 'boat_name', 'owner_id', 'boat_type_id', 'image_path', 'image_public_id', 'status', 'created_at', 'created_by')
+                    ->with(Boat::managementRelations())
+                : Boat::forManagementIndex())
                 ->managementFilters(
                     $request->query('boats_search', ''),
                     $request->query('boats_status', 'all'),
@@ -137,7 +141,7 @@ class BoatManagementController extends Controller
                 ->orderByDesc('created_at')
                 ->orderByDesc('boat_id')
             : null;
-        $boatTypesQuery = $includeBoatTypes ? ($includeArchivedLookups && ! $typesOnly
+        $boatTypesQuery = $includeBoatTypes ? ($includeArchivedLookups
             ? BoatType::withTrashed()
                 ->with('createdBy:user_id,first_name,last_name,email')
                 ->withCount('activeBoats as boats_count')
@@ -148,9 +152,12 @@ class BoatManagementController extends Controller
             )
             ->orderByDesc('created_at')
             ->orderByDesc('boat_type_id') : null;
-        $ownersQuery = $includeOwners ? ($includeArchivedLookups && ! $ownersOnly
+        $ownersQuery = $includeOwners ? ($includeArchivedLookups
             ? BoatOwner::withTrashed()
-                ->with('createdBy:user_id,first_name,last_name,email')
+                ->with([
+                    'createdBy:user_id,first_name,last_name,email',
+                    'ownerSignatureUpdatedByUser:user_id,first_name,last_name,email',
+                ])
                 ->withCount('activeBoats as boats_count')
             : BoatOwner::forManagementIndex())
             ->managementFilters(

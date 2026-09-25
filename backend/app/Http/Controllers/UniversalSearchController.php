@@ -21,16 +21,19 @@ use Illuminate\Support\Collection;
 
 class UniversalSearchController extends Controller
 {
+    private const DEFAULT_RESULT_LIMIT = 120;
+    private const MAX_RESULT_LIMIT = 200;
+
     public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'q' => ['nullable', 'string', 'max:255'],
-            'limit' => ['nullable', 'integer', 'min:1', 'max:60'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_RESULT_LIMIT],
             'fiscal_year' => ['nullable', 'regex:/^\d{4}$/'],
         ]);
 
         $query = trim((string) ($validated['q'] ?? ''));
-        $limit = (int) ($validated['limit'] ?? 30);
+        $limit = min((int) ($validated['limit'] ?? self::DEFAULT_RESULT_LIMIT), self::MAX_RESULT_LIMIT);
         $fiscalYear = $this->fiscalYear($request);
 
         if (mb_strlen($query) < 1) {
@@ -39,23 +42,23 @@ class UniversalSearchController extends Controller
 
         $isHead = strtolower((string) $request->user()?->role) === 'head';
         $results = collect()
-            ->merge($this->boats($query, $fiscalYear))
-            ->merge($this->boatTypes($query, $fiscalYear))
-            ->merge($this->boatOwners($query, $fiscalYear))
-            ->merge($this->bills($query, $fiscalYear))
-            ->merge($this->payments($query, $fiscalYear))
-            ->merge($this->dockings($query, $fiscalYear))
-            ->merge($this->banyera($query, $fiscalYear))
-            ->merge($this->fishClassifications($query, $fiscalYear))
-            ->merge($this->vehicleTypes($query, $fiscalYear))
-            ->merge($this->vehicleTickets($query, $fiscalYear))
-            ->merge($this->remittances($query, $fiscalYear))
-            ->merge($this->statements($query, $fiscalYear));
+            ->merge($this->boats($query, $fiscalYear, $limit))
+            ->merge($this->boatTypes($query, $fiscalYear, $limit))
+            ->merge($this->boatOwners($query, $fiscalYear, $limit))
+            ->merge($this->bills($query, $fiscalYear, $limit))
+            ->merge($this->payments($query, $fiscalYear, $limit))
+            ->merge($this->dockings($query, $fiscalYear, $limit))
+            ->merge($this->banyera($query, $fiscalYear, $limit))
+            ->merge($this->fishClassifications($query, $fiscalYear, $limit))
+            ->merge($this->vehicleTypes($query, $fiscalYear, $limit))
+            ->merge($this->vehicleTickets($query, $fiscalYear, $limit))
+            ->merge($this->remittances($query, $fiscalYear, $limit))
+            ->merge($this->statements($query, $fiscalYear, $limit));
 
         if ($isHead) {
             $results = $results
-                ->merge($this->users($query, $request->user()?->user_id, $fiscalYear))
-                ->merge($this->fees($query, $fiscalYear));
+                ->merge($this->users($query, $request->user()?->user_id, $fiscalYear, $limit))
+                ->merge($this->fees($query, $fiscalYear, $limit));
         }
 
         $ranked = $results
@@ -71,7 +74,7 @@ class UniversalSearchController extends Controller
         return response()->json(['results' => $ranked]);
     }
 
-    private function boats(string $search, ?int $fiscalYear): Collection
+    private function boats(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = Boat::forManagementIndex()
             ->managementFilters($search)
@@ -81,7 +84,7 @@ class UniversalSearchController extends Controller
             $query->whereYear('created_at', $fiscalYear);
         }
 
-        return $query->limit(8)
+        return $query->limit($limit)
             ->get()
             ->map(function (Boat $boat) {
                 $ownerName = trim(($boat->owner?->owner_firstname ?? '') . ' ' . ($boat->owner?->owner_lastname ?? '')) ?: '-';
@@ -93,7 +96,7 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function boatTypes(string $search, ?int $fiscalYear): Collection
+    private function boatTypes(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = BoatType::forManagementIndex()
             ->managementFilters($search)
@@ -103,7 +106,7 @@ class UniversalSearchController extends Controller
             $query->whereYear('created_at', $fiscalYear);
         }
 
-        return $query->limit(6)
+        return $query->limit($limit)
             ->get()
             ->map(function (BoatType $type) {
                 $title = $type->type_name ?: "Boat Type #{$type->boat_type_id}";
@@ -119,7 +122,7 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function boatOwners(string $search, ?int $fiscalYear): Collection
+    private function boatOwners(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = BoatOwner::forManagementIndex()
             ->managementFilters($search)
@@ -129,7 +132,7 @@ class UniversalSearchController extends Controller
             $query->whereYear('created_at', $fiscalYear);
         }
 
-        return $query->limit(6)
+        return $query->limit($limit)
             ->get()
             ->map(function (BoatOwner $owner) {
                 $title = trim(($owner->owner_firstname ?? '') . ' ' . ($owner->owner_lastname ?? '')) ?: "Boat Owner #{$owner->owner_id}";
@@ -145,7 +148,7 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function bills(string $search, ?int $fiscalYear): Collection
+    private function bills(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = Bill::query()
             ->with(['boat:boat_id,boat_name,boat_type_id', 'boat.boatType:boat_type_id,type_name'])
@@ -161,7 +164,7 @@ class UniversalSearchController extends Controller
         }
 
         return $query->latest('bill_id')
-            ->limit(8)
+            ->limit($limit)
             ->get()
             ->map(function (Bill $bill) {
                 $title = $this->formatReference($bill->bill_reference_no) ?: "Bill #{$bill->bill_id}";
@@ -173,7 +176,7 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function payments(string $search, ?int $fiscalYear): Collection
+    private function payments(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = Payment::query()
             ->leftJoin('bills as b', 'b.bill_id', '=', 'payments.bill_id')
@@ -194,7 +197,7 @@ class UniversalSearchController extends Controller
 
         return $query->select('payments.*', 'boat.boat_name')
             ->latest('payments.payment_id')
-            ->limit(8)
+            ->limit($limit)
             ->get()
             ->map(function ($payment) {
                 $title = $payment->payment_reference_no ?: "Payment #{$payment->payment_id}";
@@ -208,7 +211,7 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function dockings(string $search, ?int $fiscalYear): Collection
+    private function dockings(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = Docking::forTableIndex()
             ->searchTable($search)
@@ -223,16 +226,31 @@ class UniversalSearchController extends Controller
             });
         }
 
-        return $query->limit(8)
+        return $query->limit($limit)
             ->get()
             ->map(function (Docking $docking) {
-                $title = $docking->boat?->boat_name ?: "Docking #{$docking->docking_id}";
-                $subtitle = $this->join([$docking->boat?->boatType?->type_name ?: '-', $this->date($docking->docking_date), $this->money($docking->docking_fee)]);
-                return $this->result("docking-{$docking->docking_id}", $title, $subtitle, 'Docking', "/docking?highlight=docking-{$docking->docking_id}", [$title, $subtitle]);
+                $isVisitor = $this->isVisitorRecord($docking->boat_category, $docking->visiting_boat_name);
+                $title = $isVisitor
+                    ? ($docking->visiting_boat_name ?: "Docking #{$docking->docking_id}")
+                    : ($docking->boat?->boat_name ?: "Docking #{$docking->docking_id}");
+                $boatType = $isVisitor
+                    ? ($docking->visitingBoatType?->type_name ?: '-')
+                    : ($docking->boat?->boatType?->type_name ?: '-');
+                $subtitle = $this->join([$boatType, $this->date($docking->docking_date), $this->money($docking->docking_fee)]);
+
+                return $this->result(
+                    "docking-{$docking->docking_id}",
+                    $title,
+                    $subtitle,
+                    'Docking',
+                    "/docking?highlight=docking-{$docking->docking_id}",
+                    [$title, $subtitle, $docking->visiting_contact_number],
+                    ['is_visitor' => $isVisitor]
+                );
             });
     }
 
-    private function banyera(string $search, ?int $fiscalYear): Collection
+    private function banyera(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = BanyeraTransaction::forTableIndex(true)
             ->searchTable($search)
@@ -247,18 +265,32 @@ class UniversalSearchController extends Controller
             });
         }
 
-        return $query->limit(8)
+        return $query->limit($limit)
             ->get()
             ->map(function (BanyeraTransaction $transaction) {
                 $reference = 'BNY-' . str_pad((string) $transaction->banyera_id, 4, '0', STR_PAD_LEFT);
-                $title = $transaction->boat?->boat_name ?: $reference;
-                $subtitle = $this->join([$transaction->boat?->boatType?->type_name ?: '-', $this->date($transaction->transaction_date), $this->money($transaction->total_fee)]);
+                $isVisitor = $this->isVisitorRecord($transaction->boat_category, $transaction->visiting_boat_name);
+                $title = $isVisitor
+                    ? ($transaction->visiting_boat_name ?: $reference)
+                    : ($transaction->boat?->boat_name ?: $reference);
+                $boatType = $isVisitor
+                    ? ($transaction->visitingBoatType?->type_name ?: '-')
+                    : ($transaction->boat?->boatType?->type_name ?: '-');
+                $subtitle = $this->join([$boatType, $this->date($transaction->transaction_date), $this->money($transaction->total_fee)]);
 
-                return $this->result("banyera-{$transaction->banyera_id}", $title, $subtitle, 'Banyera', "/banyera?highlight=banyera-{$transaction->banyera_id}", [$title, $subtitle]);
+                return $this->result(
+                    "banyera-{$transaction->banyera_id}",
+                    $title,
+                    $subtitle,
+                    'Banyera',
+                    "/banyera?highlight=banyera-{$transaction->banyera_id}",
+                    [$title, $subtitle, $transaction->visiting_contact_number],
+                    ['is_visitor' => $isVisitor]
+                );
             });
     }
 
-    private function fishClassifications(string $search, ?int $fiscalYear): Collection
+    private function fishClassifications(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = FishClassification::query()
             ->whereNull('deleted_at')
@@ -270,7 +302,7 @@ class UniversalSearchController extends Controller
             $query->whereYear('created_at', $fiscalYear);
         }
 
-        return $query->limit(8)
+        return $query->limit($limit)
             ->get()
             ->map(function (FishClassification $classification) {
                 $title = $classification->classification_name ?: "Fish Classification #{$classification->classification_id}";
@@ -286,7 +318,7 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function vehicleTypes(string $search, ?int $fiscalYear): Collection
+    private function vehicleTypes(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = VehicleType::query()
             ->whereNull('deleted_at')
@@ -298,7 +330,7 @@ class UniversalSearchController extends Controller
             $query->whereYear('created_at', $fiscalYear);
         }
 
-        return $query->limit(6)
+        return $query->limit($limit)
             ->get()
             ->map(function (VehicleType $type) {
                 $title = $type->type_name ?: "Vehicle Type #{$type->vehicle_type_id}";
@@ -314,7 +346,7 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function vehicleTickets(string $search, ?int $fiscalYear): Collection
+    private function vehicleTickets(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $mapTicket = function (VehicleTicket $ticket) {
             $title = $ticket->vehicleType?->type_name ?: "Ticket #{$ticket->ticket_id}";
@@ -357,7 +389,7 @@ class UniversalSearchController extends Controller
         }
 
         $dailyTickets = $dailyTickets->latest('ticket_id')
-            ->limit(8)
+            ->limit($limit)
             ->get()
             ->map($mapTicket);
 
@@ -381,7 +413,7 @@ class UniversalSearchController extends Controller
         }
 
         $annualTickets = $annualTickets->latest('ticket_id')
-            ->limit(8)
+            ->limit($limit)
             ->get()
             ->map($mapTicket);
 
@@ -390,7 +422,7 @@ class UniversalSearchController extends Controller
             ->merge($annualTickets);
     }
 
-    private function remittances(string $search, ?int $fiscalYear): Collection
+    private function remittances(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = Remittance::query()
             ->where(function ($query) use ($search) {
@@ -410,7 +442,7 @@ class UniversalSearchController extends Controller
         }
 
         return $query->latest('remittance_id')
-            ->limit(6)
+            ->limit($limit)
             ->get()
             ->map(fn (Remittance $remittance) => $this->result(
                 "remittance-{$remittance->remittance_id}",
@@ -422,7 +454,7 @@ class UniversalSearchController extends Controller
             ));
     }
 
-    private function users(string $search, ?int $currentUserId, ?int $fiscalYear): Collection
+    private function users(string $search, ?int $currentUserId, ?int $fiscalYear, int $limit): Collection
     {
         $query = User::query()
             ->where('user_id', '!=', $currentUserId)
@@ -433,7 +465,7 @@ class UniversalSearchController extends Controller
             $query->whereYear('created_at', $fiscalYear);
         }
 
-        return $query->limit(6)
+        return $query->limit($limit)
             ->get()
             ->map(function (User $user) {
                 return $this->result(
@@ -447,7 +479,7 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function statements(string $search, ?int $fiscalYear): Collection
+    private function statements(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $boatResults = Boat::query()
             ->where('boat_name', 'like', "%{$search}%")
@@ -457,7 +489,7 @@ class UniversalSearchController extends Controller
             $boatResults->whereYear('created_at', $fiscalYear);
         }
 
-        $boatResults = $boatResults->limit(6)
+        $boatResults = $boatResults->limit($limit)
             ->get()
             ->map(function (Boat $boat) {
                 $title = $boat->boat_name ?: "Boat #{$boat->boat_id}";
@@ -480,7 +512,7 @@ class UniversalSearchController extends Controller
             $ownerResults->whereYear('created_at', $fiscalYear);
         }
 
-        $ownerResults = $ownerResults->limit(6)
+        $ownerResults = $ownerResults->limit($limit)
             ->get()
             ->map(function (BoatOwner $owner) {
                 $title = trim(($owner->owner_firstname ?? '') . ' ' . ($owner->owner_lastname ?? '')) ?: "Owner #{$owner->owner_id}";
@@ -498,7 +530,7 @@ class UniversalSearchController extends Controller
         return collect($boatResults)->merge($ownerResults);
     }
 
-    private function fees(string $search, ?int $fiscalYear): Collection
+    private function fees(string $search, ?int $fiscalYear, int $limit): Collection
     {
         $query = Fee::query()
             ->with(['boatType:boat_type_id,type_name', 'vehicleType:vehicle_type_id,type_name'])
@@ -514,7 +546,7 @@ class UniversalSearchController extends Controller
         }
 
         return $query->latest('fee_id')
-            ->limit(6)
+            ->limit($limit)
             ->get()
             ->map(function (Fee $fee) {
                 $title = (string) ($fee->fee_name ?: $fee->fee_type_name ?: "Fee #{$fee->fee_id}");
@@ -524,16 +556,29 @@ class UniversalSearchController extends Controller
             });
     }
 
-    private function result(string $id, string $title, string $subtitle, string $group, string $path, array $searchValues): array
+    private function result(
+        string $id,
+        string $title,
+        string $subtitle,
+        string $group,
+        string $path,
+        array $searchValues,
+        array $extra = []
+    ): array
     {
-        return [
+        return array_merge([
             'id' => $id,
             'title' => $title,
             'subtitle' => $subtitle,
             'group' => $group,
             'path' => $path,
             'searchText' => implode(' ', array_filter($searchValues, fn ($value) => trim((string) $value) !== '')),
-        ];
+        ], $extra);
+    }
+
+    private function isVisitorRecord(?string $boatCategory, ?string $visitingBoatName): bool
+    {
+        return strtolower((string) $boatCategory) === 'visiting' || trim((string) $visitingBoatName) !== '';
     }
 
     private function score(array $item, string $query): int

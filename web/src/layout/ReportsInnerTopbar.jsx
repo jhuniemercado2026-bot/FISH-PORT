@@ -39,6 +39,8 @@ const ReportsInnerTopbar = ({
   onBanyeraFilterTypeChange,
   remittanceFilterType,
   onRemittanceFilterTypeChange,
+  collectionFilterType,
+  onCollectionFilterTypeChange,
   billingFilterType,
   onBillingFilterTypeChange,
   vehicleDailyFilterType,
@@ -66,15 +68,19 @@ const ReportsInnerTopbar = ({
   const isRevenueReport = activeReport === "revenue";
   const isDailyReport = activeReport === "daily";
   const isRemittanceReport = activeReport === "remittance";
+  const isCollectionsReport = activeReport === "collections";
   const isBillingReport = activeReport === "billing";
   const isMonthlyReport = activeReport === "monthly";
   const isYearlyReport = activeReport === "yearly";
 
   const isRegisteredBoatsReport = activeReport === "registered-boats";
+  const isVisitingBoatsReport = activeReport === "visiting-boats";
   const isBoatTypesReport = activeReport === "boat-types";
   const isOwnerInfoReport = activeReport === "owner-info";
+  const isOwnerSignatureReport = activeReport === "owner-signature";
   const isBoatStatementReport = activeReport === "boat-statement-report";
   const isOwnerStatementReport = activeReport === "owner-statement-report";
+  const isReceivablesReport = activeReport === "receivables";
   const isVehicleTypesReport = activeReport === "vehicle-types";
   const isBfarReport = activeReport === "fisheries-bfar";
 
@@ -89,10 +95,12 @@ const ReportsInnerTopbar = ({
     isDockingReport ||
     isBanyeraReport ||
     isBfarReport ||
+    isCollectionsReport ||
     isRemittanceReport ||
     isBillingReport ||
     isBoatStatementReport ||
     isOwnerStatementReport ||
+    isReceivablesReport ||
     isDailyVehicleTicketReport ||
     isVehicleTicketReport ||
     isVehicleTypesReport ||
@@ -113,9 +121,11 @@ const ReportsInnerTopbar = ({
       ? banyeraFilterType
       : isBfarReport
       ? banyeraFilterType
+      : isCollectionsReport
+      ? collectionFilterType
       : isDailyVehicleTicketReport
       ? vehicleDailyFilterType
-      : isBoatStatementReport || isOwnerStatementReport
+      : isBoatStatementReport || isOwnerStatementReport || isReceivablesReport
       ? billingFilterType
       : isBillingReport
       ? billingFilterType
@@ -130,9 +140,11 @@ const ReportsInnerTopbar = ({
       ? onDockingFilterTypeChange
       : isBanyeraReport || isBfarReport
       ? onBanyeraFilterTypeChange
+      : isCollectionsReport
+      ? onCollectionFilterTypeChange
       : isDailyVehicleTicketReport
       ? onVehicleDailyFilterTypeChange
-      : isBoatStatementReport || isOwnerStatementReport
+      : isBoatStatementReport || isOwnerStatementReport || isReceivablesReport
       ? onBillingFilterTypeChange
       : isBillingReport
       ? onBillingFilterTypeChange
@@ -147,7 +159,9 @@ const ReportsInnerTopbar = ({
 
   const isReadonlyInputStyleReport =
     isRegisteredBoatsReport ||
+    isVisitingBoatsReport ||
     isOwnerInfoReport ||
+    isOwnerSignatureReport ||
     isFeesReport;
   // NOTE: isFeesReport added here
 
@@ -333,8 +347,12 @@ const ReportsInnerTopbar = ({
                 {title ||
                   (isRegisteredBoatsReport
                     ? "Registered Boats"
+                    : isVisitingBoatsReport
+                    ? "Visiting Boats"
                     : isOwnerInfoReport
                     ? "Boat Owner"
+                    : isOwnerSignatureReport
+                    ? "Terms and Agreement"
                     : isVehicleTypesReport
                     ? "Vehicle Types"
                     : isFeesReport
@@ -378,16 +396,17 @@ const ReportsInnerTopbar = ({
               Generate PDF
             </button>
 
-            {/* EXPORT */}
-            <button
-              type="button"
-              onClick={onExportExcel}
-              disabled={isExportDisabled}
-              className={`${REPORT_ACTION_BUTTON_CLASS} bg-green-600 text-white`}
-            >
-              <IoDocumentTextOutline size={18} />
-              Export Excel
-            </button>
+            {!isOwnerSignatureReport && (
+              <button
+                type="button"
+                onClick={onExportExcel}
+                disabled={isExportDisabled}
+                className={`${REPORT_ACTION_BUTTON_CLASS} bg-green-600 text-white`}
+              >
+                <IoDocumentTextOutline size={18} />
+                Export Excel
+              </button>
+            )}
           </div>
         </div>
 

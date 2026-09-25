@@ -82,8 +82,9 @@ export default function SearchFilter({
   const selectedOption =
     options.find((option) => String(option.value) === String(value)) ?? null;
 
-  const resolvedSearchText =
-    typeof searchText === "string" ? searchText : internalSearchText;
+  const isSearchTextControlled =
+    typeof searchText === "string" && typeof onSearchTextChange === "function";
+  const resolvedSearchText = isSearchTextControlled ? searchText : internalSearchText;
 
   const normalizedQuery = resolvedSearchText.trim().toLowerCase();
 
@@ -196,7 +197,7 @@ export default function SearchFilter({
   }, [isKeyboardVisible, listHeight, maxDropdownHeight]);
 
   const setSearchText = (nextValue: string) => {
-    if (onSearchTextChange) {
+    if (isSearchTextControlled) {
       onSearchTextChange(nextValue);
       return;
     }
@@ -205,7 +206,7 @@ export default function SearchFilter({
   };
 
   const clearLocalSearchText = () => {
-    if (typeof searchText !== "string") {
+    if (!isSearchTextControlled) {
       setInternalSearchText("");
     }
   };

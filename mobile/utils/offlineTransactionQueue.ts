@@ -22,6 +22,7 @@ export type SyncedOfflineTransaction = {
 };
 
 const OFFLINE_TRANSACTION_QUEUE_KEY = "opol_fish_port.offline_transaction_queue";
+const OFFLINE_DRAFT_SYNC_TIMEOUT_MS = 60000;
 
 function isOfflineNetworkState(state: Awaited<ReturnType<typeof NetInfo.fetch>> | null) {
   return Boolean(
@@ -37,7 +38,18 @@ export type OfflineSyncProgress = {
   synced: number;
   remaining: number;
   percentage: number;
-  status: "started" | "progress" | "finished";
+  status: "started" | "progress" | "paused" | "finished";
+};
+
+type OfflineSyncResult = {
+  synced: number;
+  remaining: number;
+  transactions: SyncedOfflineTransaction[];
+  lockedDiscarded: number;
+  lockedDraftIds: string[];
+  duplicateDiscarded: number;
+  duplicateDraftIds: string[];
+  skippedOffline: boolean;
 };
 
 async function responseJson(response: Response) {
@@ -87,6 +99,17 @@ async function writeQueue(queue: OfflineTransactionDraft[]) {
   await AsyncStorage.setItem(OFFLINE_TRANSACTION_QUEUE_KEY, JSON.stringify(queue));
 }
 
+async function removeDraftFromQueue(localId: string) {
+  const queue = await readQueue();
+  const nextQueue = queue.filter((draft) => draft.local_id !== localId);
+
+  if (nextQueue.length !== queue.length) {
+    await writeQueue(nextQueue);
+  }
+
+  return nextQueue.length;
+}
+
 export async function queueOfflineTransaction({
   type,
   endpoint,
@@ -116,15 +139,26 @@ export async function queueOfflineTransaction({
 }
 
 async function postDraft(draft: OfflineTransactionDraft, token: string) {
-  return fetch(`${getApiBaseUrl()}${draft.endpoint}`, {
-    method: "POST",
-    headers: buildApiHeaders(token),
-    body: JSON.stringify(draft.payload),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, OFFLINE_DRAFT_SYNC_TIMEOUT_MS);
+
+  try {
+    return await fetch(`${getApiBaseUrl()}${draft.endpoint}`, {
+      method: "POST",
+      headers: buildApiHeaders(token),
+      body: JSON.stringify(draft.payload),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function syncOfflineTransactions(
-  onProgress?: (progress: OfflineSyncProgress) => void
+  onProgress?: (progress: OfflineSyncProgress) => void,
+  onSyncedDraft?: (transaction: SyncedOfflineTransaction) => void
 ) {
   const token = getAuthToken();
   if (!token) {
@@ -136,6 +170,7 @@ export async function syncOfflineTransactions(
       lockedDraftIds: [] as string[],
       duplicateDiscarded: 0,
       duplicateDraftIds: [] as string[],
+      skippedOffline: false,
     };
   }
 
@@ -150,16 +185,17 @@ export async function syncOfflineTransactions(
       lockedDraftIds: [] as string[],
       duplicateDiscarded: 0,
       duplicateDraftIds: [] as string[],
+      skippedOffline: true,
     };
   }
 
   const queue = await readQueue();
   const syncId = `sync-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const total = queue.length;
-  const remaining: OfflineTransactionDraft[] = [];
   const transactions: SyncedOfflineTransaction[] = [];
   const lockedDraftIds: string[] = [];
   const duplicateDraftIds: string[] = [];
+  const pendingInitialDraftIds = new Set(queue.map((draft) => draft.local_id));
   let synced = 0;
 
   if (total === 0) {
@@ -171,6 +207,7 @@ export async function syncOfflineTransactions(
       lockedDraftIds,
       duplicateDiscarded: 0,
       duplicateDraftIds,
+      skippedOffline: false,
     };
   }
 
@@ -184,55 +221,83 @@ export async function syncOfflineTransactions(
     status: "started",
   });
 
-  for (const [index, draft] of queue.entries()) {
+  let processed = 0;
+
+  for (const draft of queue) {
+    let shouldStopSync = false;
+
     try {
       const response = await postDraft(draft, token);
 
       if (response.ok) {
         const data = await responseJson(response);
         synced += 1;
+
+        await removeDraftFromQueue(draft.local_id);
+        pendingInitialDraftIds.delete(draft.local_id);
+
         if (data) {
-          transactions.push({
+          const transaction = {
             local_id: draft.local_id,
             type: draft.type,
             data,
-          });
+          };
+          transactions.push(transaction);
+          try {
+            onSyncedDraft?.(transaction);
+          } catch {
+            // UI callbacks must not interrupt the queue drain.
+          }
         }
       } else if (response.status === 423) {
         lockedDraftIds.push(draft.local_id);
+        await removeDraftFromQueue(draft.local_id);
+        pendingInitialDraftIds.delete(draft.local_id);
       } else {
         const data = await responseJson(response);
         if (isDuplicateDraftResponse(draft, response, data)) {
           duplicateDraftIds.push(draft.local_id);
+          await removeDraftFromQueue(draft.local_id);
+          pendingInitialDraftIds.delete(draft.local_id);
         } else {
-          remaining.push(draft);
+          shouldStopSync = true;
         }
       }
     } catch {
-      remaining.push(draft);
+      shouldStopSync = true;
     }
 
-    const processed = index + 1;
+    processed = total - pendingInitialDraftIds.size;
     onProgress?.({
       syncId,
       total,
       processed,
       synced,
-      remaining: total - processed,
+      remaining: pendingInitialDraftIds.size,
       percentage: Math.round((processed / total) * 100),
-      status: processed === total ? "finished" : "progress",
+      status: shouldStopSync
+        ? "paused"
+        : processed === total
+          ? "finished"
+          : "progress",
     });
+
+    if (shouldStopSync) {
+      break;
+    }
   }
 
-  await writeQueue(remaining);
+  const latestQueue = await readQueue();
+
   return {
     synced,
-    remaining: remaining.length,
+    remaining: latestQueue.length,
     transactions,
     lockedDiscarded: lockedDraftIds.length,
     lockedDraftIds,
     duplicateDiscarded: duplicateDraftIds.length,
     duplicateDraftIds,
+    skippedOffline: false,
   };
 }
 
@@ -278,11 +343,13 @@ export async function submitOrQueueOfflineTransaction({
 
 export function startOfflineTransactionSync({
   onProgress,
+  onSyncedDraft,
   onSynced,
   onLockedDraftsDiscarded,
   onDuplicateDraftsDiscarded,
 }: {
   onProgress?: (progress: OfflineSyncProgress) => void;
+  onSyncedDraft?: (transaction: SyncedOfflineTransaction) => void;
   onSynced?: (count: number, transactions: SyncedOfflineTransaction[]) => void;
   onLockedDraftsDiscarded?: (count: number, draftIds: string[]) => void;
   onDuplicateDraftsDiscarded?: (count: number, draftIds: string[]) => void;
@@ -290,13 +357,16 @@ export function startOfflineTransactionSync({
   let syncing = false;
   let nextRetryAt = 0;
 
-  const runSync = async () => {
+  const runSync = async (options: { force?: boolean } = {}) => {
     if (syncing) return;
-    if (Date.now() < nextRetryAt) return;
+    if (!options.force && Date.now() < nextRetryAt) return;
 
     syncing = true;
     try {
-      const result = await syncOfflineTransactions(onProgress);
+      const result: OfflineSyncResult = await syncOfflineTransactions(
+        onProgress,
+        onSyncedDraft
+      );
       if (result.synced > 0) {
         nextRetryAt = 0;
         onSynced?.(result.synced, result.transactions);
@@ -312,8 +382,10 @@ export function startOfflineTransactionSync({
         onDuplicateDraftsDiscarded?.(result.duplicateDiscarded, result.duplicateDraftIds);
       }
 
-      if (result.synced === 0 && result.lockedDiscarded === 0 && result.duplicateDiscarded === 0 && result.remaining > 0) {
-        nextRetryAt = Date.now() + 120000;
+      if (result.skippedOffline) {
+        nextRetryAt = 0;
+      } else if (result.synced === 0 && result.lockedDiscarded === 0 && result.duplicateDiscarded === 0 && result.remaining > 0) {
+        nextRetryAt = Date.now() + 10000;
       }
     } finally {
       syncing = false;
@@ -324,7 +396,8 @@ export function startOfflineTransactionSync({
 
   const unsubscribe = NetInfo.addEventListener((state) => {
     if (state.isConnected && state.isInternetReachable !== false) {
-      void runSync();
+      nextRetryAt = 0;
+      void runSync({ force: true });
     }
   });
 

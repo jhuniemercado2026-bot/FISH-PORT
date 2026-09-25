@@ -57,3 +57,44 @@ export const useCollectionsDataQuery = (filters = {}, queryOptions = {}) => {
     ...queryOptions,
   });
 };
+
+const extractCollectionsReport = (payload) => ({
+  rows: Array.isArray(payload?.rows) ? payload.rows : [],
+  totalCollections: Number(payload?.totalCollections || 0),
+  collectionRecords: Number(payload?.collectionRecords || 0),
+});
+
+export const getCollectionsReportQueryOptions = ({
+  filterType = "daily",
+  date = undefined,
+  month = undefined,
+  year = undefined,
+} = {}) => ({
+  queryKey: ["collections-report", { filterType, date, month, year }],
+  queryFn: async ({ signal }) => {
+    let params = {};
+
+    if (filterType === "monthly" && month && year) {
+      params = { month, year };
+    } else if (filterType === "yearly" && year) {
+      params = { year };
+    } else if (filterType === "daily" && date) {
+      params = { date };
+    } else {
+      return { rows: [], totalCollections: 0, collectionRecords: 0 };
+    }
+
+    const response = await api.get(`/collections/reports/${filterType}`, { params, signal });
+    return extractCollectionsReport(response.data);
+  },
+  staleTime: 5 * 60 * 1000,
+  gcTime: 30 * 60 * 1000,
+  refetchOnWindowFocus: false,
+});
+
+export const useCollectionsReportDataQuery = (filters = {}, queryOptions = {}) =>
+  useQuery({
+    ...getCollectionsReportQueryOptions(filters),
+    placeholderData: (previousData) => previousData,
+    ...queryOptions,
+  });

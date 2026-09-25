@@ -104,6 +104,11 @@ class User extends Authenticatable
 
     // ── Accessors (auto-appended) ─────────────────────────────────────────────
 
+    public function setEmailAttribute(?string $value): void
+    {
+        $this->attributes['email'] = strtolower(trim((string) $value));
+    }
+
     // Returns the full public URL of the profile image, or null
     public function getProfileImageUrlAttribute(): ?string
     {

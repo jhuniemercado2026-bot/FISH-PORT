@@ -12,6 +12,7 @@ import HomePage from "./pages/landing_page/home";
 import AboutPage from "./pages/landing_page/about";
 import ContactPage from "./pages/landing_page/contact";
 import BottomToast from "./components/BottomToast";
+import FirstLoginCompletionModal from "./components/FirstLoginCompletionModal";
 import { useSidebarStore } from "./store/sidebarStore";
 import {
   clearStoredAuth,
@@ -629,6 +630,7 @@ const App = () => {
         <Route path="/super_settings" element={<Navigate to="/settings" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <FirstLoginCompletionModal />
       <BottomToast />
     </Router>
   );

@@ -12,7 +12,14 @@ class Docking extends Model
     protected $primaryKey = 'docking_id';
 
     protected $fillable = [
+        'boat_category',
         'boat_id',
+        'visiting_boat_name',
+        'visiting_owner_firstname',
+        'visiting_owner_lastname',
+        'visiting_owner_address',
+        'visiting_contact_number',
+        'visiting_boat_type_id',
         'fee_id',
         'docking_date',
         'docking_fee',
@@ -44,6 +51,11 @@ class Docking extends Model
     public function fee()
     {
         return $this->belongsTo(Fee::class, 'fee_id', 'fee_id');
+    }
+
+    public function visitingBoatType()
+    {
+        return $this->belongsTo(BoatType::class, 'visiting_boat_type_id', 'boat_type_id')->withTrashed();
     }
 
     public function createdBy()
@@ -92,6 +104,15 @@ class Docking extends Model
             );
         }
 
+        if (!$this->hasJoinedAlias($query, 'docking_search_visiting_boat_types')) {
+            $query->leftJoin(
+                'boat_types as docking_search_visiting_boat_types',
+                'dockings.visiting_boat_type_id',
+                '=',
+                'docking_search_visiting_boat_types.boat_type_id'
+            );
+        }
+
         return $query;
     }
 
@@ -105,6 +126,9 @@ class Docking extends Model
                 ->withTrashed()
                 ->select('owner_id', 'owner_firstname', 'owner_lastname'),
             'boat.boatType' => fn ($typeQuery) => $typeQuery
+                ->withTrashed()
+                ->select('boat_type_id', 'type_name'),
+            'visitingBoatType' => fn ($typeQuery) => $typeQuery
                 ->withTrashed()
                 ->select('boat_type_id', 'type_name'),
             'createdBy:user_id,first_name,last_name,email',
@@ -124,6 +148,9 @@ class Docking extends Model
             'boat.boatType' => fn ($typeQuery) => $typeQuery
                 ->withTrashed()
                 ->select('boat_type_id', 'type_name'),
+            'visitingBoatType' => fn ($typeQuery) => $typeQuery
+                ->withTrashed()
+                ->select('boat_type_id', 'type_name'),
             'createdBy:user_id,first_name,last_name,email',
             'voidedBy:user_id,first_name,last_name,email',
         ];
@@ -134,7 +161,14 @@ class Docking extends Model
         return $query
             ->select([
                 'dockings.docking_id',
+                'dockings.boat_category',
                 'dockings.boat_id',
+                'dockings.visiting_boat_name',
+                'dockings.visiting_owner_firstname',
+                'dockings.visiting_owner_lastname',
+                'dockings.visiting_owner_address',
+                'dockings.visiting_contact_number',
+                'dockings.visiting_boat_type_id',
                 'dockings.fee_id',
                 'dockings.docking_date',
                 'dockings.docking_fee',
@@ -159,7 +193,14 @@ class Docking extends Model
         return $query
             ->select([
                 'docking_id',
+                'boat_category',
                 'boat_id',
+                'visiting_boat_name',
+                'visiting_owner_firstname',
+                'visiting_owner_lastname',
+                'visiting_owner_address',
+                'visiting_contact_number',
+                'visiting_boat_type_id',
                 'docking_date',
                 'docking_fee',
                 'created_by',
@@ -198,7 +239,12 @@ class Docking extends Model
             $inner
                 ->where('dockings.docking_fee', 'like', "{$search}%")
                 ->orWhere('docking_search_boats.boat_name', 'like', "{$search}%")
-                ->orWhere('docking_search_boat_types.type_name', 'like', "{$search}%");
+                ->orWhere('docking_search_boat_types.type_name', 'like', "{$search}%")
+                ->orWhere('dockings.visiting_boat_name', 'like', "{$search}%")
+                ->orWhere('dockings.visiting_owner_firstname', 'like', "{$search}%")
+                ->orWhere('dockings.visiting_owner_lastname', 'like', "{$search}%")
+                ->orWhere('dockings.visiting_owner_address', 'like', "{$search}%")
+                ->orWhere('docking_search_visiting_boat_types.type_name', 'like', "{$search}%");
 
             if ($dateStart && $dateEnd) {
                 $inner->orWhere(function (Builder $dateQuery) use ($dateStart, $dateEnd) {
@@ -228,9 +274,14 @@ class Docking extends Model
             ->searchTable($search)
             ->when($status === 'active', fn (Builder $filtered) => $filtered->whereNull('dockings.voided_at'))
             ->when($status === 'voided', fn (Builder $filtered) => $filtered->whereNotNull('dockings.voided_at'))
+            ->when($status === 'visitor', fn (Builder $filtered) => $filtered->where('dockings.boat_category', 'visiting'))
             ->when($boatType !== null && $boatType !== '' && $boatType !== 'all', function (Builder $filtered) use ($boatType) {
                 $this->joinSearchRelations($filtered);
-                $filtered->where('docking_search_boats.boat_type_id', $boatType);
+                $filtered->where(function (Builder $typeQuery) use ($boatType) {
+                    $typeQuery
+                        ->where('docking_search_boats.boat_type_id', $boatType)
+                        ->orWhere('dockings.visiting_boat_type_id', $boatType);
+                });
             })
             ->when($period === 'today', fn (Builder $filtered) => $filtered->whereBetween('dockings.docking_date', [
                 $now->copy()->startOfDay(),

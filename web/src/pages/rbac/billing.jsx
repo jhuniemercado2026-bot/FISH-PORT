@@ -86,12 +86,17 @@ const BILLING_TABS = new Set(["records", "payments"]);
 const BILLING_TAB_KEYS = Array.from(BILLING_TABS);
 const BILLING_TAB_STORAGE_KEY = "opol:billing:active-tab";
 const getBillingTabPath = (tab) => BILLING_PATH_TABS[tab] ? tab : BILLING_TAB_PATHS[tab] ?? BILLING_TAB_PATHS.records;
-const getBillingTabFromLocation = ({ pathname, search }) => {
+const getBillingTabFromLocation = ({ pathname, search, state = null }) => {
   const tab = new URLSearchParams(search).get("tab");
   if (BILLING_TABS.has(tab)) return getBillingTabPath(tab);
 
   if (BILLING_PATH_TABS[pathname]) {
     if (pathname === BILLING_TAB_PATHS.records) {
+      const highlight = new URLSearchParams(search).get("highlight") || "";
+      if (highlight.startsWith("bill-") || state?.universalSearchResult?.group === "Bills") {
+        return BILLING_TAB_PATHS.records;
+      }
+
       const cachedTab = getCachedTab(BILLING_TAB_STORAGE_KEY, BILLING_TAB_KEYS, "records");
       return getBillingTabPath(cachedTab);
     }
@@ -1834,7 +1839,7 @@ const SuperBilling = () => {
     window.innerWidth >= 900 ? 256 : 0,
   );
   const [activeItem, setActiveItem] = useState("Bills");
-  const activeTab = getBillingTabFromLocation({ pathname: location.pathname, search: location.search });
+  const activeTab = getBillingTabFromLocation({ pathname: location.pathname, search: location.search, state: location.state });
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 350);
   const [requestedPage, setRequestedPage] = useState(1);

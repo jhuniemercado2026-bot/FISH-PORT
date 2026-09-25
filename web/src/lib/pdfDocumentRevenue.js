@@ -45,6 +45,33 @@ const sanitizeText = (value) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const wrapText = (font, text, fontSize, maxWidth) => {
+  const words = sanitizeText(text).split(" ").filter(Boolean);
+  if (!words.length) return ["-"];
+
+  const lines = [];
+  let currentLine = "";
+
+  words.forEach((word) => {
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+    if (font.widthOfTextAtSize(nextLine, fontSize) <= maxWidth) {
+      currentLine = nextLine;
+      return;
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+      return;
+    }
+
+    lines.push(word);
+  });
+
+  if (currentLine) lines.push(currentLine);
+  return lines;
+};
+
 const formatMoneyValue = (value) =>
   Number(value || 0).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
@@ -443,9 +470,23 @@ const getCellValue = (row, key) => {
 };
 
 const drawDataRows = (composer, columns, rows) => {
-  const detailRowHeight = 24;
-
   rows.forEach((row) => {
+    const textLinesByKey = columns.reduce((acc, column) => {
+      if (!["receivable", "fee", "total", "quantity"].includes(column.key)) {
+        acc[column.key] = wrapText(
+          composer.regularFont,
+          getCellValue(row, column.key),
+          8,
+          Math.max(20, column.width - 12),
+        );
+      }
+      return acc;
+    }, {});
+    const detailRowHeight = Math.max(
+      24,
+      ...Object.values(textLinesByKey).map((lines) => lines.length * 9 + 10),
+    );
+
     if (composer.cursorY - detailRowHeight < MARGIN_Y + 36) {
       composer.addPage();
       drawTableHeader(composer, columns);
@@ -478,9 +519,11 @@ const drawDataRows = (composer, columns, rows) => {
       } else if (column.key === "quantity") {
         drawRightAlignedText(composer, String(row.quantity ?? 0), x, column.width, composer.cursorY - 15);
       } else {
-        composer.drawText(String(getCellValue(row, column.key)), x + 6, composer.cursorY - 15, {
-          fontSize: 8,
-          color: COLORS.black,
+        (textLinesByKey[column.key] || ["-"]).forEach((line, lineIndex) => {
+          composer.drawText(line, x + 6, composer.cursorY - 14 - lineIndex * 9, {
+            fontSize: 8,
+            color: COLORS.black,
+          });
         });
       }
 

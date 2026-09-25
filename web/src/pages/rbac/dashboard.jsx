@@ -43,6 +43,13 @@ const fmtN = (value, decimals = false) => {
   return num.toLocaleString("en-PH");
 };
 
+const fmtCompactMoney = (value) => {
+  const amount = Number(value || 0);
+  if (amount >= 1000000) return `${(amount / 1000000).toFixed(amount % 1000000 === 0 ? 0 : 1)}M`;
+  if (amount >= 1000) return `${Math.round(amount / 1000)}K`;
+  return fmtN(amount);
+};
+
 const STATS = [
   {
     key: "revenue",
@@ -86,7 +93,15 @@ const STATS = [
   },
   {
     key: "boats",
-    label: "Boats Registered",
+    label: "Registered Boats",
+    icon: IoBoatSharp,
+    iconBg: "bg-blue-100",
+    iconColor: "text-blue-500",
+    valuePrefix: "",
+  },
+  {
+    key: "visiting_boats",
+    label: "Visiting Boats",
     icon: IoBoatSharp,
     iconBg: "bg-blue-100",
     iconColor: "text-blue-500",
@@ -106,31 +121,42 @@ const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
   short: new Date(2000, index, 1).toLocaleString("en-PH", { month: "short" }),
 }));
 
+const isVisitingTransaction = (record) =>
+  String(record?.boat_category ?? "").toLowerCase() === "visiting" ||
+  Boolean(record?.visiting_boat_name);
+
+const escapeTooltipHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const getDashboardDockingBoatName = (docking) =>
+  String(
+    docking?.display_boat_name ||
+      docking?.visiting_boat_name ||
+      docking?.boat?.boat_name ||
+      docking?.boat_name ||
+      "Unknown Boat",
+  ).trim();
+
+const getDashboardBanyeraBoatName = (transaction) =>
+  String(
+    transaction?.display_boat_name ||
+      transaction?.visiting_boat_name ||
+      transaction?.boat?.boat_name ||
+      transaction?.boat_name ||
+      "Unknown Boat",
+  ).trim();
+
+const getVisitorPillHtml = () =>
+  `<span style="display:inline-flex;align-items:center;margin-left:6px;padding:2px 8px;border-radius:6px;border:1px solid #fde68a;background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0;vertical-align:middle;">
+    Visitor
+  </span>`;
+
 const getMonthlyTargetKey = (year, monthIndex) => `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
-
-const getFishItemsLabel = (record) => {
-  const seen = new Set();
-  const names = (record?.items ?? [])
-    .map((item) => item?.classification?.classification_name || item?.classification_name || "")
-    .map((name) => String(name).trim())
-    .filter((name) => {
-      if (!name) return false;
-      const normalized = name.toLowerCase();
-      if (seen.has(normalized)) return false;
-      seen.add(normalized);
-      return true;
-    });
-
-  return names.join(", ") || "â€”";
-};
-
-const getBoatTypeName = (record) =>
-  record?.boat?.boat_type?.type_name ||
-  record?.boat?.boatType?.type_name ||
-  record?.boat_type?.type_name ||
-  record?.boatType?.type_name ||
-  record?.boat_type_name ||
-  "—";
 
 const stripApexNativeTitles = (chartContext) => {
   const root = chartContext?.el;
@@ -151,17 +177,28 @@ const StatCard = ({
   valuePrefix = "",
   loading = false,
   showGrowthChart = false,
+  popoverContent = null,
+  popoverOpen = false,
+  onTogglePopover,
+  popoverRootAttribute = null,
+  active = false,
 }) => (
-  <div className="min-w-0 rounded-[10px] border border-slate-200 bg-white px-4 py-4 sm:px-5">
+  <div
+    className={`relative min-w-0 rounded-[10px] border px-4 py-4 sm:px-5 ${
+      active ? "border-[#2563eb] bg-[#2563eb]" : "border-slate-200 bg-white"
+    } ${onTogglePopover ? "cursor-pointer transition-colors" : ""}`}
+    onClick={onTogglePopover}
+    {...(popoverRootAttribute ? { [popoverRootAttribute]: "" } : {})}
+  >
     <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-4">
       {loading ? (
         <div className="h-11 w-11 flex-shrink-0 animate-pulse rounded-2xl bg-slate-200 sm:h-12 sm:w-12" />
       ) : (
-        <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl sm:h-12 sm:w-12 ${iconBg}`}>
-          <Icon className={iconColor} style={{ fontSize: 22 }} />
+        <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl sm:h-12 sm:w-12 ${active ? "bg-white/20" : iconBg}`}>
+          <Icon className={active ? "text-white" : iconColor} style={{ fontSize: 22 }} />
         </div>
       )}
-      <div className="min-w-[150px] flex-1">
+      <div className="min-w-[150px] flex-1 pt-1">
         {loading ? (
           <>
             <div className="h-[16px] w-32 animate-pulse rounded bg-slate-200" />
@@ -169,10 +206,10 @@ const StatCard = ({
           </>
         ) : (
           <>
-            <p className="m-0 text-[13px] font-medium text-slate-500" style={{ fontFamily: FONT }}>
+            <p className={`m-0 text-[13px] font-medium leading-tight ${active ? "text-white" : "text-slate-500"}`} style={{ fontFamily: FONT }}>
               {label}
             </p>
-            <p className="m-0 mt-1 break-words text-[clamp(20px,2.2vw,28px)] font-bold leading-tight text-slate-900">
+            <p className={`m-0 mt-0.5 break-words text-[clamp(20px,2.2vw,28px)] font-bold leading-tight ${active ? "text-white" : "text-slate-900"}`}>
               {valuePrefix}{fmtN(value, valuePrefix === PESO)}
             </p>
           </>
@@ -243,6 +280,14 @@ const StatCard = ({
           )}
           {trend}
         </span>
+      </div>
+    ) : null}
+    {!loading && popoverContent && popoverOpen ? (
+      <div
+        className="absolute left-1/2 top-[calc(100%+10px)] z-30 w-[min(360px,calc(100vw-48px))] -translate-x-1/2 rounded-[10px] border border-slate-200 bg-white p-3 text-left shadow-[0_16px_40px_rgba(15,23,42,0.16)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {popoverContent}
       </div>
     ) : null}
   </div>
@@ -353,6 +398,8 @@ const Dashboard = () => {
   const [selectedYearlyTargetYear, setSelectedYearlyTargetYear] = useState(fiscalYear);
   const [activeCashMonthIndex, setActiveCashMonthIndex] = useState(null);
   const [activeReceivableMonthIndex, setActiveReceivableMonthIndex] = useState(null);
+  const [registeredBoatsPopoverOpen, setRegisteredBoatsPopoverOpen] = useState(false);
+  const [visitingBoatsPopoverOpen, setVisitingBoatsPopoverOpen] = useState(false);
 
   const handleWidthChange = useCallback((width) => setContentMargin(width), []);
 
@@ -379,6 +426,28 @@ const Dashboard = () => {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [targetDropdownOpen]);
+
+  useEffect(() => {
+    if (!registeredBoatsPopoverOpen) return;
+    const handler = (event) => {
+      if (!event.target.closest("[data-registered-boats-card]")) {
+        setRegisteredBoatsPopoverOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [registeredBoatsPopoverOpen]);
+
+  useEffect(() => {
+    if (!visitingBoatsPopoverOpen) return;
+    const handler = (event) => {
+      if (!event.target.closest("[data-visiting-boats-card]")) {
+        setVisitingBoatsPopoverOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [visitingBoatsPopoverOpen]);
 
   useEffect(() => {
     setMonthlyTargets(data?.monthlyTargets ?? {});
@@ -422,6 +491,9 @@ const Dashboard = () => {
 
   const {
     boatsRegistered,
+    registeredBoatList,
+    visitingBoats,
+    visitingBoatList,
     totalDockingReceived,
     totalDockingTransactions,
     totalBanyeraReceived,
@@ -433,10 +505,11 @@ const Dashboard = () => {
     billsStatus,
     billsStatusWithPercent,
     totalBills,
-    recentDockings,
-    recentBanyera,
     topFishCatches,
     monthlyFishCatches,
+    monthlyDockings,
+    monthlyBanyera,
+    monthlyTransactions,
   } = useMemo(() => {
     const selectedYearNumber = Number(selectedYear) || new Date().getFullYear();
     const bills = data?.bills ?? [];
@@ -445,6 +518,17 @@ const Dashboard = () => {
     const dockings = data?.dockings ?? [];
     const vehicleTickets = data?.vehicleTickets ?? [];
     const boats = data?.boats ?? [];
+    const registeredBoatList = boats
+      .map((boat) => ({
+        name: String(boat?.boat_name || `Boat #${boat?.boat_id ?? ""}`).trim(),
+        boatType: String(
+          boat?.boat_type?.type_name ||
+            boat?.boatType?.type_name ||
+            boat?.boat_type_name ||
+            "Unknown type",
+        ).trim(),
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
 
     const getYear = (value) => {
       const parsedDate = new Date(value || 0);
@@ -511,9 +595,6 @@ const Dashboard = () => {
         return sum + (payableWithinTrackedItems * categoryAmount) / trackedTotal;
       }, 0);
 
-    const dockingReceived = getCategoryCollectionsFromPayments("docking");
-    const banyeraReceived = getCategoryCollectionsFromPayments("banyera");
-
     const ticketCollections = vehicleTicketsForYear.reduce(
       (sum, ticket) => sum + Number(ticket?.ticket_fee || 0),
       0,
@@ -543,6 +624,65 @@ const Dashboard = () => {
       (transaction) =>
         getYear(transaction?.transaction_date || transaction?.created_at) === selectedYearNumber,
     );
+    const normalizeVisitingBoatField = (value) =>
+      String(value || "")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+    const getVisitingBoatTypeLabel = (record) =>
+      String(
+        record?.visiting_boat_type?.type_name ||
+          record?.visitingBoatType?.type_name ||
+          record?.boat?.boat_type?.type_name ||
+          record?.boat?.boatType?.type_name ||
+          record?.visiting_boat_type_id ||
+          "Unknown type",
+      ).trim();
+    const getVisitingBoatKey = (record) => {
+      const boatName = normalizeVisitingBoatField(
+        record?.visiting_boat_name ||
+          record?.display_boat_name ||
+          record?.boat?.boat_name ||
+          "",
+      );
+      if (!boatName) return "";
+      return [
+        boatName,
+        normalizeVisitingBoatField(getVisitingBoatTypeLabel(record)),
+      ].join("::");
+    };
+    const visitingBoatMap = new Map();
+    [
+      ...dockingsForYear.map((record) => ({ record, kind: "docking" })),
+      ...banyeraTransactionsForYear.map((record) => ({ record, kind: "banyera" })),
+    ]
+      .filter(({ record }) => isVisitingTransaction(record))
+      .forEach(({ record, kind }) => {
+        const key = getVisitingBoatKey(record);
+        if (!key) return;
+
+        const current = visitingBoatMap.get(key) || {
+          name: String(
+            record?.visiting_boat_name ||
+              record?.display_boat_name ||
+              record?.boat?.boat_name ||
+              "Unknown Boat",
+          ).trim(),
+          boatType: getVisitingBoatTypeLabel(record),
+          dockingCount: 0,
+          banyeraCount: 0,
+        };
+
+        visitingBoatMap.set(key, {
+          ...current,
+          dockingCount: current.dockingCount + (kind === "docking" ? 1 : 0),
+          banyeraCount: current.banyeraCount + (kind === "banyera" ? 1 : 0),
+        });
+      });
+    const visitingBoatList = Array.from(visitingBoatMap.values()).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+    const visitingBoats = visitingBoatList.length;
     const getBanyeraTransactionTotal = (transaction) => {
       const storedTotal = Number(transaction?.total_fee ?? 0);
       if (storedTotal > 0) return storedTotal;
@@ -559,6 +699,18 @@ const Dashboard = () => {
       (sum, transaction) => sum + getBanyeraTransactionTotal(transaction),
       0,
     );
+    const visitingDockingCash = dockingsForYear.reduce(
+      (sum, docking) =>
+        isVisitingTransaction(docking) ? sum + Number(docking?.docking_fee ?? 0) : sum,
+      0,
+    );
+    const visitingBanyeraCash = banyeraTransactionsForYear.reduce(
+      (sum, transaction) =>
+        isVisitingTransaction(transaction) ? sum + getBanyeraTransactionTotal(transaction) : sum,
+      0,
+    );
+    const dockingReceived = getCategoryCollectionsFromPayments("docking") + visitingDockingCash;
+    const banyeraReceived = getCategoryCollectionsFromPayments("banyera") + visitingBanyeraCash;
     const totalVehicleTicketTransactions = vehicleTicketsForYear.reduce(
       (sum, ticket) => sum + Number(ticket?.ticket_fee ?? 0),
       0,
@@ -567,22 +719,6 @@ const Dashboard = () => {
       (sum, remittance) => sum + Number(remittance?.amount ?? 0),
       0,
     );
-
-    const latestDockings = [...dockingsForYear]
-      .sort((a, b) => {
-        const aTime = new Date(a?.docking_date || a?.created_at || 0).getTime();
-        const bTime = new Date(b?.docking_date || b?.created_at || 0).getTime();
-        return bTime - aTime;
-      })
-      .slice(0, 5);
-
-    const latestBanyera = [...banyeraTransactionsForYear]
-      .sort((a, b) => {
-        const aTime = new Date(a?.transaction_date || a?.created_at || 0).getTime();
-        const bTime = new Date(b?.transaction_date || b?.created_at || 0).getTime();
-        return bTime - aTime;
-      })
-      .slice(0, 5);
 
     const fishCatchTotals = banyeraTransactionsForYear.reduce((acc, transaction) => {
       (transaction?.items ?? []).forEach((item) => {
@@ -609,10 +745,69 @@ const Dashboard = () => {
       breakdown: {},
     }));
 
+    const monthlyDockings = Array.from({ length: 12 }, (_, index) => ({
+      month: new Date(2000, index, 1).toLocaleString("en-PH", { month: "short" }),
+      dockings: 0,
+      breakdown: {},
+    }));
+
+    const monthlyBanyera = Array.from({ length: 12 }, (_, index) => ({
+      month: new Date(2000, index, 1).toLocaleString("en-PH", { month: "short" }),
+      banyera: 0,
+      breakdown: {},
+    }));
+
+    const monthlyTransactions = Array.from({ length: 12 }, (_, index) => ({
+      month: new Date(2000, index, 1).toLocaleString("en-PH", { month: "short" }),
+      docking: 0,
+      banyera: 0,
+      tickets: 0,
+    }));
+
+    dockingsForYear.forEach((docking) => {
+      const parsedDate = new Date(docking?.docking_date || docking?.created_at || 0);
+      if (Number.isNaN(parsedDate.getTime())) return;
+
+      const monthBucket = monthlyDockings[parsedDate.getMonth()];
+      const transactionMonthBucket = monthlyTransactions[parsedDate.getMonth()];
+      const boatName = getDashboardDockingBoatName(docking);
+      const isVisitor = isVisitingTransaction(docking);
+      const breakdownKey = `${boatName}::${isVisitor ? "visitor" : "registered"}`;
+      const currentBreakdown = monthBucket.breakdown[breakdownKey] || {
+        name: boatName,
+        count: 0,
+        isVisitor,
+      };
+
+      monthBucket.dockings += 1;
+      transactionMonthBucket.docking += Number(docking?.docking_fee ?? 0);
+      monthBucket.breakdown[breakdownKey] = {
+        ...currentBreakdown,
+        count: currentBreakdown.count + 1,
+      };
+    });
+
     banyeraTransactionsForYear.forEach((transaction) => {
       const parsedDate = new Date(transaction?.transaction_date || transaction?.created_at || 0);
       if (Number.isNaN(parsedDate.getTime())) return;
       const monthBucket = monthlyFishCatches[parsedDate.getMonth()];
+      const banyeraMonthBucket = monthlyBanyera[parsedDate.getMonth()];
+      const transactionMonthBucket = monthlyTransactions[parsedDate.getMonth()];
+      const boatName = getDashboardBanyeraBoatName(transaction);
+      const isVisitor = isVisitingTransaction(transaction);
+      const breakdownKey = `${boatName}::${isVisitor ? "visitor" : "registered"}`;
+      const currentBreakdown = banyeraMonthBucket.breakdown[breakdownKey] || {
+        name: boatName,
+        count: 0,
+        isVisitor,
+      };
+
+      banyeraMonthBucket.banyera += 1;
+      transactionMonthBucket.banyera += getBanyeraTransactionTotal(transaction);
+      banyeraMonthBucket.breakdown[breakdownKey] = {
+        ...currentBreakdown,
+        count: currentBreakdown.count + 1,
+      };
 
       (transaction?.items ?? []).forEach((item) => {
         const fishName = String(
@@ -626,8 +821,17 @@ const Dashboard = () => {
       });
     });
 
+    vehicleTicketsForYear.forEach((ticket) => {
+      const parsedDate = new Date(ticket?.ticket_date || ticket?.issued_at || ticket?.created_at || 0);
+      if (Number.isNaN(parsedDate.getTime())) return;
+      monthlyTransactions[parsedDate.getMonth()].tickets += Number(ticket?.ticket_fee || 0);
+    });
+
     return {
       boatsRegistered: boats.length,
+      registeredBoatList,
+      visitingBoats,
+      visitingBoatList,
       totalDockingReceived: dockingReceived,
       totalDockingTransactions,
       totalBanyeraReceived: banyeraReceived,
@@ -642,10 +846,11 @@ const Dashboard = () => {
       billsStatus: statusItems,
       billsStatusWithPercent: statusItemsWithPercent,
       totalBills: statusItems.reduce((sum, item) => sum + item.value, 0),
-      recentDockings: latestDockings,
-      recentBanyera: latestBanyera,
       topFishCatches,
       monthlyFishCatches,
+      monthlyDockings,
+      monthlyBanyera,
+      monthlyTransactions,
     };
   }, [data, selectedYear]);
 
@@ -697,11 +902,6 @@ const Dashboard = () => {
       }
     });
 
-    const percentChange =
-      previousYearRevenue > 0
-        ? ((totalRevenue - previousYearRevenue) / previousYearRevenue) * 100
-        : 0;
-
     const dockings = data?.dockings ?? [];
     const banyeraTransactions = data?.banyeraTransactions ?? [];
     const getBanyeraTransactionTotal = (transaction) => {
@@ -712,6 +912,37 @@ const Dashboard = () => {
         0,
       );
     };
+
+    dockings.forEach((docking) => {
+      if (!isVisitingTransaction(docking)) return;
+      const parsedDate = new Date(docking?.docking_date || docking?.created_at || 0);
+      if (Number.isNaN(parsedDate.getTime())) return;
+      const amount = Number(docking?.docking_fee ?? 0);
+      if (parsedDate.getFullYear() === selectedYearNumber) {
+        baseMonths[parsedDate.getMonth()].revenue += amount;
+        totalRevenue += amount;
+      } else if (parsedDate.getFullYear() === previousYearNumber) {
+        previousYearRevenue += amount;
+      }
+    });
+
+    banyeraTransactions.forEach((transaction) => {
+      if (!isVisitingTransaction(transaction)) return;
+      const parsedDate = new Date(transaction?.transaction_date || transaction?.created_at || 0);
+      if (Number.isNaN(parsedDate.getTime())) return;
+      const amount = getBanyeraTransactionTotal(transaction);
+      if (parsedDate.getFullYear() === selectedYearNumber) {
+        baseMonths[parsedDate.getMonth()].revenue += amount;
+        totalRevenue += amount;
+      } else if (parsedDate.getFullYear() === previousYearNumber) {
+        previousYearRevenue += amount;
+      }
+    });
+
+    const percentChange =
+      previousYearRevenue > 0
+        ? ((totalRevenue - previousYearRevenue) / previousYearRevenue) * 100
+        : 0;
 
     // Calculate outstanding per month
     const bills = data?.bills ?? [];
@@ -763,6 +994,7 @@ const Dashboard = () => {
     });
 
     const unbilledDockingTotal = dockings.reduce((sum, docking) => {
+      if (isVisitingTransaction(docking)) return sum;
       const parsedDate = new Date(docking?.docking_date || docking?.created_at || 0);
       if (Number.isNaN(parsedDate.getTime()) || parsedDate.getFullYear() !== selectedYearNumber) {
         return sum;
@@ -773,6 +1005,7 @@ const Dashboard = () => {
     }, 0);
 
     const unbilledBanyeraTotal = banyeraTransactions.reduce((sum, transaction) => {
+      if (isVisitingTransaction(transaction)) return sum;
       const parsedDate = new Date(transaction?.transaction_date || transaction?.created_at || 0);
       if (Number.isNaN(parsedDate.getTime()) || parsedDate.getFullYear() !== selectedYearNumber) {
         return sum;
@@ -951,6 +1184,44 @@ const Dashboard = () => {
       },
     ],
     [monthlyFishCatches],
+  );
+
+  const monthlyDockingSeries = useMemo(
+    () => [
+      {
+        name: "Dockings",
+        data: monthlyDockings.map((item) => item.dockings),
+      },
+    ],
+    [monthlyDockings],
+  );
+
+  const monthlyBanyeraSeries = useMemo(
+    () => [
+      {
+        name: "Banyera",
+        data: monthlyBanyera.map((item) => item.banyera),
+      },
+    ],
+    [monthlyBanyera],
+  );
+
+  const monthlyTransactionSeries = useMemo(
+    () => [
+      {
+        name: "Docking",
+        data: monthlyTransactions.map((item) => item.docking),
+      },
+      {
+        name: "Banyera",
+        data: monthlyTransactions.map((item) => item.banyera),
+      },
+      {
+        name: "Ticket",
+        data: monthlyTransactions.map((item) => item.tickets),
+      },
+    ],
+    [monthlyTransactions],
   );
 
   const monthlyTargetChartOptions = useMemo(
@@ -1491,6 +1762,230 @@ const Dashboard = () => {
     [monthlyFishCatches],
   );
 
+  const monthlyDockingChartOptions = useMemo(() => {
+    return {
+      chart: {
+        type: "line",
+        toolbar: { show: false },
+        sparkline: { enabled: false },
+        fontFamily: FONT,
+        parentHeightOffset: 0,
+        offsetY: -4,
+      },
+      colors: ["#2563eb"],
+      stroke: {
+        curve: "smooth",
+        width: 3,
+      },
+      markers: {
+        size: 5,
+        strokeWidth: 2,
+        strokeColors: "#ffffff",
+        colors: ["#2563eb"],
+        hover: {
+          size: 6,
+        },
+      },
+      dataLabels: {
+        enabled: true,
+        offsetY: -10,
+        style: {
+          colors: ["#2563eb"],
+          fontSize: "10px",
+          fontFamily: FONT,
+          fontWeight: 700,
+        },
+        formatter: (value) => fmtN(value),
+      },
+      legend: { show: false },
+      tooltip: {
+        enabled: true,
+        shared: true,
+        intersect: false,
+        custom: ({ dataPointIndex }) => {
+          const point = monthlyDockings[dataPointIndex];
+          if (!point) return "";
+
+          const rows = Object.values(point.breakdown || {})
+            .sort((a, b) => Number(b?.count || 0) - Number(a?.count || 0))
+            .slice(0, 10)
+            .map(
+              (item) =>
+                `<div style="display:flex;justify-content:space-between;gap:12px;margin-top:6px;">
+                  <span style="color:#475569;">${escapeTooltipHtml(item.name)}${item.isVisitor ? getVisitorPillHtml() : ""}</span>
+                  <span style="color:#0f172a;font-weight:700;">${fmtN(item.count)}</span>
+                </div>`,
+            )
+            .join("");
+
+          return `<div style="padding:10px 12px;font-family:${FONT};min-width:180px;">
+            <div style="font-size:12px;font-weight:700;color:#0f172a;">${point.month}</div>
+            ${rows || `<div style="margin-top:6px;font-size:12px;color:#94a3b8;">No docking data</div>`}
+          </div>`;
+        },
+      },
+      xaxis: {
+        categories: monthlyDockings.map((item) => item.month),
+        tickPlacement: "between",
+        labels: {
+          rotate: -35,
+          rotateAlways: true,
+          offsetY: 4,
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+        },
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+      },
+      yaxis: {
+        min: 0,
+        max: 400,
+        tickAmount: 8,
+        stepSize: 50,
+        decimalsInFloat: 0,
+        forceNiceScale: false,
+        labels: {
+          offsetX: -4,
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+          formatter: (value) => fmtN(Math.round(Number(value || 0))),
+        },
+      },
+      grid: {
+        borderColor: "#eef2f7",
+        strokeDashArray: 3,
+        padding: {
+          top: 6,
+          right: 10,
+          bottom: 0,
+          left: 4,
+        },
+        xaxis: { lines: { show: false } },
+      },
+      fill: {
+        opacity: 1,
+      },
+    };
+  }, [monthlyDockings]);
+
+  const monthlyBanyeraChartOptions = useMemo(() => {
+    return {
+      chart: {
+        type: "line",
+        toolbar: { show: false },
+        sparkline: { enabled: false },
+        fontFamily: FONT,
+        parentHeightOffset: 0,
+        offsetY: -4,
+      },
+      colors: ["#2563eb"],
+      stroke: {
+        curve: "smooth",
+        width: 3,
+      },
+      markers: {
+        size: 5,
+        strokeWidth: 2,
+        strokeColors: "#ffffff",
+        colors: ["#2563eb"],
+        hover: {
+          size: 6,
+        },
+      },
+      dataLabels: {
+        enabled: true,
+        offsetY: -10,
+        style: {
+          colors: ["#2563eb"],
+          fontSize: "10px",
+          fontFamily: FONT,
+          fontWeight: 700,
+        },
+        formatter: (value) => fmtN(value),
+      },
+      legend: { show: false },
+      tooltip: {
+        enabled: true,
+        shared: true,
+        intersect: false,
+        custom: ({ dataPointIndex }) => {
+          const point = monthlyBanyera[dataPointIndex];
+          if (!point) return "";
+
+          const rows = Object.values(point.breakdown || {})
+            .sort((a, b) => Number(b?.count || 0) - Number(a?.count || 0))
+            .slice(0, 10)
+            .map(
+              (item) =>
+                `<div style="display:flex;justify-content:space-between;gap:12px;margin-top:6px;">
+                  <span style="color:#475569;">${escapeTooltipHtml(item.name)}${item.isVisitor ? getVisitorPillHtml() : ""}</span>
+                  <span style="color:#0f172a;font-weight:700;">${fmtN(item.count)}</span>
+                </div>`,
+            )
+            .join("");
+
+          return `<div style="padding:10px 12px;font-family:${FONT};min-width:180px;">
+            <div style="font-size:12px;font-weight:700;color:#0f172a;">${point.month}</div>
+            ${rows || `<div style="margin-top:6px;font-size:12px;color:#94a3b8;">No banyera data</div>`}
+          </div>`;
+        },
+      },
+      xaxis: {
+        categories: monthlyBanyera.map((item) => item.month),
+        tickPlacement: "between",
+        labels: {
+          rotate: -35,
+          rotateAlways: true,
+          offsetY: 4,
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+        },
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+      },
+      yaxis: {
+        min: 0,
+        max: 400,
+        tickAmount: 8,
+        stepSize: 50,
+        decimalsInFloat: 0,
+        forceNiceScale: false,
+        labels: {
+          offsetX: -4,
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+          formatter: (value) => fmtN(Math.round(Number(value || 0))),
+        },
+      },
+      grid: {
+        borderColor: "#eef2f7",
+        strokeDashArray: 3,
+        padding: {
+          top: 6,
+          right: 10,
+          bottom: 0,
+          left: 4,
+        },
+        xaxis: { lines: { show: false } },
+      },
+      fill: {
+        opacity: 1,
+      },
+    };
+  }, [monthlyBanyera]);
+
   const yearlyRevenueData = useMemo(() => {
     const years = getFiscalYearOptions().map((value) => Number(value));
     const vehicleTickets = (data?.vehicleTickets ?? []).filter(
@@ -1555,6 +2050,94 @@ const Dashboard = () => {
       },
     ],
     [yearlyRevenueData],
+  );
+
+  const yearlyReceivablesData = useMemo(() => {
+    const years = getFiscalYearOptions().map((value) => Number(value));
+    const payments = data?.payments ?? [];
+    const bills = data?.bills ?? [];
+    const dockings = data?.dockings ?? [];
+    const banyeraTransactions = data?.banyeraTransactions ?? [];
+
+    const getYear = (value) => {
+      const parsedDate = new Date(value || 0);
+      return Number.isNaN(parsedDate.getTime()) ? null : parsedDate.getFullYear();
+    };
+
+    const getBanyeraTransactionTotal = (transaction) => {
+      const storedTotal = Number(transaction?.total_fee ?? 0);
+      if (storedTotal > 0) return storedTotal;
+      return (transaction?.items ?? []).reduce(
+        (sum, item) => sum + Number(item?.subtotal ?? 0),
+        0,
+      );
+    };
+
+    return years.map((year) => {
+      const billsForYear = bills.filter(
+        (bill) => getYear(bill?.created_at || bill?.billing_date) === year,
+      );
+      const paymentsForYear = payments.filter(
+        (payment) => getYear(payment?.payment_date || payment?.created_at) === year,
+      );
+
+      const paymentTotalsByBillId = paymentsForYear.reduce((acc, payment) => {
+        const key = String(payment?.bill_id ?? "");
+        if (!key) return acc;
+        acc[key] = (acc[key] ?? 0) + Number(payment?.amount_paid || 0);
+        return acc;
+      }, {});
+
+      const billedDockingIds = new Set();
+      const billedBanyeraIds = new Set();
+      billsForYear.forEach((bill) => {
+        const items = Array.isArray(bill?.items) ? bill.items : [];
+        items.forEach((item) => {
+          const transactionType = String(item?.transaction_type || "").toLowerCase();
+          if (transactionType === "docking" && item?.docking_id) {
+            billedDockingIds.add(String(item.docking_id));
+          }
+          if (transactionType === "banyera" && item?.banyera_id) {
+            billedBanyeraIds.add(String(item.banyera_id));
+          }
+        });
+      });
+
+      const outstandingBills = billsForYear.reduce((sum, bill) => {
+        const totalAmount = Number(bill?.total_amount || 0);
+        const totalPaid = Number(paymentTotalsByBillId[String(bill?.bill_id ?? "")] ?? 0);
+        return sum + Math.max(0, totalAmount - totalPaid);
+      }, 0);
+
+      const unbilledDockings = dockings.reduce((sum, docking) => {
+        if (isVisitingTransaction(docking)) return sum;
+        if (getYear(docking?.docking_date || docking?.created_at) !== year) return sum;
+        if (billedDockingIds.has(String(docking?.docking_id ?? ""))) return sum;
+        return sum + Number(docking?.docking_fee ?? 0);
+      }, 0);
+
+      const unbilledBanyera = banyeraTransactions.reduce((sum, transaction) => {
+        if (isVisitingTransaction(transaction)) return sum;
+        if (getYear(transaction?.transaction_date || transaction?.created_at) !== year) return sum;
+        if (billedBanyeraIds.has(String(transaction?.banyera_id ?? ""))) return sum;
+        return sum + getBanyeraTransactionTotal(transaction);
+      }, 0);
+
+      return {
+        year: String(year),
+        receivables: outstandingBills + unbilledDockings + unbilledBanyera,
+      };
+    });
+  }, [data]);
+
+  const yearlyReceivablesSeries = useMemo(
+    () => [
+      {
+        name: "Receivables",
+        data: yearlyReceivablesData.map((item) => item.receivables),
+      },
+    ],
+    [yearlyReceivablesData],
   );
 
   const yearlyRevenueChartOptions = useMemo(
@@ -1648,6 +2231,272 @@ const Dashboard = () => {
       stroke: { show: false },
     }),
     [yearlyRevenueData],
+  );
+
+  const monthlyTransactionChartOptions = useMemo(
+    () => ({
+      chart: {
+        type: "bar",
+        toolbar: { show: false },
+        sparkline: { enabled: false },
+        fontFamily: FONT,
+        parentHeightOffset: 0,
+        offsetY: -4,
+        events: {
+          mounted: stripApexNativeTitles,
+          updated: stripApexNativeTitles,
+        },
+      },
+      colors: ["#2563eb", "#60a5fa", "#93c5fd"],
+      plotOptions: {
+        bar: {
+          horizontal: false,
+          borderRadius: 0,
+          columnWidth: "68%",
+          dataLabels: {
+            position: "top",
+          },
+        },
+      },
+      dataLabels: {
+        enabled: false,
+      },
+      annotations: {
+        points: monthlyTransactions
+          .map((point) => {
+            const values = [
+              Number(point.docking || 0),
+              Number(point.banyera || 0),
+              Number(point.tickets || 0),
+            ];
+            const total = values.reduce((sum, amount) => sum + amount, 0);
+            const highestValue = Math.max(...values);
+            if (total <= 0 || highestValue <= 0) return null;
+
+            return {
+              x: point.month,
+              y: highestValue,
+              marker: {
+                size: 0,
+                strokeWidth: 0,
+                fillColor: "transparent",
+                strokeColor: "transparent",
+              },
+              label: {
+                text: fmtCompactMoney(total),
+                offsetY: -8,
+                borderWidth: 0,
+                style: {
+                  background: "transparent",
+                  color: "#2563eb",
+                  fontFamily: FONT,
+                  fontSize: "9px",
+                  fontWeight: 700,
+                  padding: {
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                  },
+                },
+              },
+            };
+          })
+          .filter(Boolean),
+      },
+      legend: {
+        show: true,
+        position: "top",
+        horizontalAlign: "center",
+        fontFamily: FONT,
+        fontSize: "11px",
+        fontWeight: 600,
+        labels: {
+          colors: "#475569",
+        },
+        markers: {
+          width: 8,
+          height: 8,
+          radius: 2,
+        },
+        itemMargin: {
+          horizontal: 10,
+          vertical: 0,
+        },
+      },
+      tooltip: {
+        enabled: true,
+        shared: true,
+        intersect: false,
+        custom: ({ dataPointIndex }) => {
+          const point = monthlyTransactions[dataPointIndex];
+          if (!point) return "";
+          const total = Number(point.docking || 0) + Number(point.banyera || 0) + Number(point.tickets || 0);
+
+          return `<div style="padding:10px 12px;font-family:${FONT};min-width:180px;">
+            <div style="font-size:12px;font-weight:700;color:#0f172a;">${point.month}</div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:6px;">
+              <span style="color:#475569;">Docking</span>
+              <span style="color:#0f172a;font-weight:700;">${PESO}${fmt(point.docking)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:6px;">
+              <span style="color:#475569;">Banyera</span>
+              <span style="color:#0f172a;font-weight:700;">${PESO}${fmt(point.banyera)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:6px;">
+              <span style="color:#475569;">Ticket</span>
+              <span style="color:#0f172a;font-weight:700;">${PESO}${fmt(point.tickets)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;">
+              <span style="color:#0f172a;font-weight:500;">Total</span>
+              <span style="color:#0f172a;font-weight:500;">${PESO}${fmt(total)}</span>
+            </div>
+          </div>`;
+        },
+      },
+      xaxis: {
+        categories: monthlyTransactions.map((item) => item.month),
+        labels: {
+          rotate: -35,
+          rotateAlways: true,
+          offsetY: 4,
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+        },
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+      },
+      yaxis: {
+        min: 0,
+        max: 600000,
+        tickAmount: 6,
+        decimalsInFloat: 0,
+        labels: {
+          offsetX: -4,
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+          formatter: (value) => {
+            const amount = Number(value || 0);
+            if (amount === 0) return "0";
+            return fmtCompactMoney(amount);
+          },
+        },
+      },
+      grid: {
+        borderColor: "#eef2f7",
+        strokeDashArray: 3,
+        padding: {
+          top: 22,
+          right: 10,
+          bottom: 0,
+          left: 4,
+        },
+        xaxis: { lines: { show: false } },
+      },
+      fill: {
+        opacity: 1,
+      },
+    }),
+    [monthlyTransactions],
+  );
+
+  const yearlyReceivablesChartOptions = useMemo(
+    () => ({
+      chart: {
+        type: "bar",
+        toolbar: { show: false },
+        sparkline: { enabled: false },
+        fontFamily: FONT,
+        events: {
+          mounted: stripApexNativeTitles,
+          updated: stripApexNativeTitles,
+        },
+      },
+      colors: ["#2563eb"],
+      plotOptions: {
+        bar: {
+          borderRadius: 0,
+          columnWidth: "58%",
+          distributed: false,
+          dataLabels: {
+            position: "top",
+          },
+        },
+      },
+      dataLabels: {
+        enabled: true,
+        offsetY: -18,
+        style: {
+          colors: ["#2563eb"],
+          fontSize: "9px",
+          fontFamily: FONT,
+          fontWeight: 700,
+        },
+        formatter: (value) => (value > 0 ? fmtN(value) : ""),
+      },
+      legend: { show: false },
+      tooltip: {
+        enabled: true,
+        fillSeriesColor: false,
+        theme: false,
+        shared: false,
+        intersect: false,
+        x: { show: false },
+        marker: { show: false },
+        custom: ({ dataPointIndex }) => {
+          const point = yearlyReceivablesData[dataPointIndex];
+          if (!point) return "";
+          return `<div style="padding:10px 12px;font-family:${FONT};min-width:120px;">
+            <div style="font-size:12px;font-weight:700;color:#0f172a;">${point.year}</div>
+            <div style="margin-top:4px;font-size:12px;color:#000000;font-weight:500;">${PESO}${fmt(point.receivables)}</div>
+          </div>`;
+        },
+      },
+      xaxis: {
+        categories: yearlyReceivablesData.map((item) => item.year),
+        labels: {
+          rotate: -35,
+          rotateAlways: true,
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+        },
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+      },
+      yaxis: {
+        min: 0,
+        max: 1800000,
+        tickAmount: 6,
+        labels: {
+          formatter: (value) => {
+            if (value === 0) return "0";
+            if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+            return `${Math.round(value / 1000)}K`;
+          },
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+        },
+      },
+      grid: {
+        borderColor: "#eef2f7",
+        strokeDashArray: 3,
+        xaxis: { lines: { show: false } },
+      },
+      stroke: { show: false },
+    }),
+    [yearlyReceivablesData],
   );
 
   const openTargetModalForMonth = (monthIndex) => {
@@ -1752,6 +2601,46 @@ const Dashboard = () => {
     setYearlyTargetModalOpen(false);
   };
 
+  const renderBoatListPopover = (title, boatList, emptyLabel) => (
+    <div style={{ fontFamily: FONT }}>
+      <div className="border-b border-slate-100 pb-2 text-center">
+        <p className="m-0 text-[13px] font-normal text-slate-900">{title}</p>
+      </div>
+      <div className="mt-2 max-h-[210px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:hidden" style={HIDE_SCROLLBAR_STYLE}>
+        {boatList.length > 0 ? (
+          boatList.map((boat, index) => (
+            <div
+              key={`${boat.name}-${boat.boatType}`}
+              className="flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-slate-50"
+            >
+              <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500">
+                {index + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="m-0 min-w-0 truncate text-[12px] font-semibold text-slate-900">{boat.name}</p>
+                  <div className="flex flex-shrink-0 items-center gap-1">
+                    <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold text-blue-700" title="Docking count">
+                      D {boat.dockingCount}
+                    </span>
+                    <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700" title="Banyera count">
+                      B {boat.banyeraCount}
+                    </span>
+                  </div>
+                </div>
+                <p className="m-0 mt-0.5 truncate text-[11px] font-medium text-slate-500">{boat.boatType}</p>
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="m-0 rounded-lg bg-slate-50 px-3 py-3 text-[12px] font-medium text-slate-500">
+            {emptyLabel}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex min-h-screen bg-white" style={{ fontFamily: FONT }}>
       <Sidebar
@@ -1833,33 +2722,71 @@ const Dashboard = () => {
             </div>
 
             {/* Stat cards */}
-            <div className="mb-6 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-              {STATS.map((card) => (
-                <StatCard
-                  key={card.key}
-                  label={card.label}
-                  icon={card.icon}
-                  iconBg={card.iconBg}
-                  iconColor={card.iconColor}
-                  valuePrefix={card.valuePrefix}
-                  value={
-                    card.key === "boats"
-                      ? boatsRegistered
-                      : card.key === "docking"
-                        ? totalDockingTransactions
-                        : card.key === "banyera"
-                          ? totalBanyeraTransactions
-                          : card.key === "tickets"
-                            ? totalVehicleTicketTransactions
-                            : card.key === "remittances"
-                              ? totalRemittances
-                              : card.key === "revenue"
-                                ? totalTransactionRevenue
-                                : card.value
-                  }
-                  loading={showInitialSkeleton}
-                  showGrowthChart={false}
-                />
+            <div className="mb-6 space-y-5">
+              {[STATS.slice(0, 3), STATS.slice(3)].map((rowStats, rowIndex) => (
+                <div
+                  key={`stat-row-${rowIndex}`}
+                  className={`grid grid-cols-1 gap-5 sm:grid-cols-2 ${rowIndex === 0 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}
+                >
+                  {rowStats.map((card) => (
+                    <StatCard
+                      key={card.key}
+                      label={card.label}
+                      icon={card.icon}
+                      iconBg={card.iconBg}
+                      iconColor={card.iconColor}
+                      valuePrefix={card.valuePrefix}
+                      value={
+                        card.key === "boats"
+                          ? boatsRegistered
+                          : card.key === "visiting_boats"
+                            ? visitingBoats
+                            : card.key === "docking"
+                              ? totalDockingTransactions
+                              : card.key === "banyera"
+                                ? totalBanyeraTransactions
+                                : card.key === "tickets"
+                                  ? totalVehicleTicketTransactions
+                                  : card.key === "remittances"
+                                    ? totalRemittances
+                                    : card.key === "revenue"
+                                      ? totalTransactionRevenue
+                                      : card.value
+                      }
+                      loading={showInitialSkeleton}
+                      showGrowthChart={false}
+                      active={
+                        (card.key === "boats" && registeredBoatsPopoverOpen) ||
+                        (card.key === "visiting_boats" && visitingBoatsPopoverOpen)
+                      }
+                      popoverRootAttribute={
+                        card.key === "boats"
+                          ? "data-registered-boats-card"
+                          : card.key === "visiting_boats"
+                            ? "data-visiting-boats-card"
+                            : null
+                      }
+                      onTogglePopover={
+                        card.key === "boats"
+                          ? () => setRegisteredBoatsPopoverOpen((open) => !open)
+                          : card.key === "visiting_boats"
+                          ? () => setVisitingBoatsPopoverOpen((open) => !open)
+                          : undefined
+                      }
+                      popoverOpen={
+                        (card.key === "boats" && registeredBoatsPopoverOpen) ||
+                        (card.key === "visiting_boats" && visitingBoatsPopoverOpen)
+                      }
+                      popoverContent={
+                        card.key === "boats"
+                          ? renderBoatListPopover("Registered Boats", registeredBoatList, "No registered boats")
+                          : card.key === "visiting_boats"
+                            ? renderBoatListPopover("Visiting Boats", visitingBoatList, "No visiting boats")
+                            : null
+                      }
+                    />
+                  ))}
+                </div>
               ))}
             </div>
 
@@ -2504,177 +3431,116 @@ const Dashboard = () => {
               </section>
             </div>
 
-            {/* Recent Dockings + Recent Banyera — side by side */}
+            {/* Docking chart + Yearly Receivables — side by side */}
             <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-
-              {/* Recent Dockings */}
+              {/* Docking Per Month */}
               <section
-                className="rounded-[10px] bg-white p-6"
+                className="rounded-[10px] bg-white px-5 py-4"
                 style={{ border: "1px solid #e5e7eb" }}
               >
                 {showInitialSkeleton ? (
-                  <RecentTableSkeleton columns={5} rows={5} />
+                  <LineChartSkeleton />
                 ) : (
                   <>
-                    <div className="mb-5 flex items-center justify-between">
-                      <div>
-                        <p className="text-[13px] text-slate-700 font-bold">Recent Dockings</p>
-                        <p className="mt-0.5 text-xs text-gray-400">Latest boat docking records</p>
-                      </div>
+                    <div className="mb-4">
+                      <p
+                        className="m-0 text-center text-[13px] font-medium text-slate-500"
+                        style={{ fontFamily: FONT }}
+                      >
+                        Docking Per Month
+                      </p>
                     </div>
 
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm" style={{ minWidth: "460px" }}>
-                    <thead>
-                      <tr style={{ borderBottom: "2px solid #e5e7eb", borderTop: "2px solid #e5e7eb" }}>
-                        {["Boat Name", "Boat Type", "Date Added", "Time", `Total (${PESO})`].map((heading) => (
-                          <th
-                            key={heading}
-                            className="pb-3 pt-3 text-left text-[11px] font-medium uppercase"
-                            style={{ color: "#8C8CA0" }}
-                          >
-                            {heading === `Total (${PESO})` ? (
-                              <div className="text-right">{heading}</div>
-                            ) : (
-                              heading
-                            )}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {recentDockings.length ? (
-                        recentDockings.map((record, index) => {
-                          const dockingDate = new Date(record.docking_date || record.created_at);
-                          const isLast = index === recentDockings.length - 1;
-                          return (
-                            <tr
-                              key={record.docking_id}
-                              style={{ borderBottom: isLast ? "none" : "1px solid #f1f5f9" }}
-                            >
-                              <td className="py-3 text-[13px] font-semibold text-blue-600">
-                                {record.boat?.boat_name ?? record.boat_name ?? "—"}
-                              </td>
-                              <td className="py-3 text-[13px] text-slate-600">
-                                {getBoatTypeName(record)}
-                              </td>
-                              <td className="py-3 text-xs text-gray-500">
-                                {dockingDate.toLocaleDateString("en-PH", {
-                                  year: "numeric",
-                                  month: "short",
-                                  day: "2-digit",
-                                })}
-                              </td>
-                              <td className="py-3 text-xs text-gray-500">
-                                {dockingDate.toLocaleTimeString("en-PH", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </td>
-                              <td className="py-3 text-right text-xs font-bold text-gray-800">
-                                {fmt(record.docking_fee)}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <tr>
-                          <td colSpan={5} className="py-8 text-center text-[13px] text-slate-400">
-                            No docking records found.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                      </table>
-                    </div>
+                    <ReactApexChart
+                      type="line"
+                      series={monthlyDockingSeries}
+                      options={monthlyDockingChartOptions}
+                      height={340}
+                    />
                   </>
                 )}
               </section>
 
-              {/* Recent Banyera */}
+              {/* Yearly Receivables */}
               <section
-                className="rounded-[10px] bg-white p-6"
+                className="rounded-[10px] border border-slate-200 bg-white px-5 py-4"
                 style={{ border: "1px solid #e5e7eb" }}
               >
                 {showInitialSkeleton ? (
-                  <RecentTableSkeleton columns={6} rows={5} subtitleWidth="w-52" />
+                  <LineChartSkeleton />
                 ) : (
                   <>
-                    <div className="mb-5 flex items-center justify-between">
-                      <div>
-                        <p className="text-[13px] text-slate-700 font-bold">Recent Banyera</p>
-                        <p className="mt-0.5 text-xs text-gray-400">Latest banyera transactions</p>
+                    <div className="mb-4">
+                      <p
+                        className="m-0 text-center text-[13px] font-medium text-slate-500"
+                        style={{ fontFamily: FONT }}
+                      >
+                        Yearly Receivables
+                      </p>
+                    </div>
+
+                    <ReactApexChart
+                      type="bar"
+                      series={yearlyReceivablesSeries}
+                      options={yearlyReceivablesChartOptions}
+                      height={340}
+                    />
+                  </>
+                )}
+              </section>
+
+              {/* Banyera Per Month */}
+              <section
+                className="rounded-[10px] bg-white px-5 py-4"
+                style={{ border: "1px solid #e5e7eb" }}
+              >
+                {showInitialSkeleton ? (
+                  <LineChartSkeleton />
+                ) : (
+                  <>
+                    <div className="mb-4">
+                      <p
+                        className="m-0 text-center text-[13px] font-medium text-slate-500"
+                        style={{ fontFamily: FONT }}
+                      >
+                        Banyera Per Month
+                      </p>
+                    </div>
+
+                    <ReactApexChart
+                      type="line"
+                      series={monthlyBanyeraSeries}
+                      options={monthlyBanyeraChartOptions}
+                      height={340}
+                    />
+                  </>
+                )}
+              </section>
+
+              {/* Transaction Per Month */}
+              <section
+                className="rounded-[10px] border border-slate-200 bg-white px-5 py-4"
+                style={{ border: "1px solid #e5e7eb" }}
+              >
+                {showInitialSkeleton ? (
+                  <LineChartSkeleton />
+                ) : (
+                  <>
+                      <div className="mb-4">
+                        <p
+                          className="m-0 text-center text-[13px] font-medium text-slate-500"
+                          style={{ fontFamily: FONT }}
+                        >
+                          Transaction Per Month
+                        </p>
                       </div>
-                    </div>
 
-                    <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden" style={HIDE_SCROLLBAR_STYLE}>
-                      <table className="w-full text-sm" style={{ minWidth: "700px" }}>
-                    <thead>
-                      <tr style={{ borderBottom: "2px solid #e5e7eb", borderTop: "2px solid #e5e7eb" }}>
-                        {["Boat Name", "Boat Type", "Fish Items", "Date", "Time", `Total (${PESO})`].map((heading) => (
-                          <th
-                            key={heading}
-                            className="pb-3 pt-3 text-left text-[11px] font-medium uppercase"
-                            style={{ color: "#8C8CA0" }}
-                          >
-                            {heading === `Total (${PESO})` ? (
-                              <div className="text-right">{heading}</div>
-                            ) : (
-                              heading
-                            )}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {recentBanyera.length ? (
-                        recentBanyera.map((record, index) => {
-                          const transactionDate = new Date(record.transaction_date || record.created_at);
-                          const isLast = index === recentBanyera.length - 1;
-
-                          return (
-                            <tr
-                              key={record.transaction_id}
-                              style={{ borderBottom: isLast ? "none" : "1px solid #f1f5f9" }}
-                            >
-                              <td className="py-3 text-[13px] font-semibold text-blue-600">
-                                {record?.boat?.boat_name || "—"}
-                              </td>
-                              <td className="py-3 text-[13px] text-slate-600">
-                                {getBoatTypeName(record)}
-                              </td>
-                              <td className="py-3 text-[13px] text-slate-600">
-                                {getFishItemsLabel(record)}
-                              </td>
-                              <td className="py-3 text-xs text-gray-500">
-                                {transactionDate.toLocaleDateString("en-PH", {
-                                  year: "numeric",
-                                  month: "short",
-                                  day: "2-digit",
-                                })}
-                              </td>
-                              <td className="py-3 text-xs text-gray-500">
-                                {transactionDate.toLocaleTimeString("en-PH", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </td>
-                              <td className="py-3 text-right text-xs font-bold text-gray-800">
-                                {fmt(record?.total_fee || 0)}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <tr>
-                          <td colSpan={6} className="py-8 text-center text-[13px] text-slate-400">
-                            No banyera transactions found.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                      </table>
-                    </div>
+                      <ReactApexChart
+                        type="bar"
+                        series={monthlyTransactionSeries}
+                      options={monthlyTransactionChartOptions}
+                      height={340}
+                    />
                   </>
                 )}
               </section>

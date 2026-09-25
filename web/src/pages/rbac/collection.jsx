@@ -928,7 +928,7 @@ const SuperCollections = ({ initialTab }) => {
               {activeCollectionTab === "collections" ? (
                 <TableCard
                   title="Collection Records"
-                  subtitle="All collections from tickets and payments."
+                  subtitle="All collections from tickets, payments, and visitor cash transactions."
                   loading={showInitialSkeleton}
                   headerActionsSkeletonCount={2}
                   className=""

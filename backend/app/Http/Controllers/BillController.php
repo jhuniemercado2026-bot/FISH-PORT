@@ -241,7 +241,7 @@ class BillController extends Controller
 
     public function statementOfAccount(Request $request)
     {
-        $perPage = min(max((int) $request->query('per_page', 10), 1), 100);
+        $perPage = min(max((int) $request->query('per_page', 10), 1), 1000);
         $search = trim((string) $request->query('search', ''));
         $status = (string) $request->query('status', 'all');
         $selectedBoat = trim((string) $request->query('boat', ''));
@@ -342,7 +342,7 @@ class BillController extends Controller
                 DB::raw('summary.latest_billed_date as latest_billed_date'),
                 DB::raw('COALESCE(unbilled_dockings.unbilled_docking_total, 0) as unbilled_docking_total'),
                 DB::raw('COALESCE(unbilled_banyera.unbilled_banyera_total, 0) as unbilled_banyera_total'),
-                DB::raw('(COALESCE(summary.billed_total, 0) + COALESCE(unbilled_dockings.unbilled_docking_total, 0) + COALESCE(unbilled_banyera.unbilled_banyera_total, 0)) as total_billed'),
+                DB::raw('COALESCE(summary.billed_total, 0) as total_billed'),
                 DB::raw('(COALESCE(summary.balance_total, 0) + COALESCE(unbilled_dockings.unbilled_docking_total, 0) + COALESCE(unbilled_banyera.unbilled_banyera_total, 0)) as balance_due'),
             ]);
 
@@ -362,12 +362,14 @@ class BillController extends Controller
 
         $statsRows = DB::query()->fromSub(clone $query, 'stats_source')->get();
         $stats = [
-            'total_billed' => (float) $statsRows->sum('total_billed'),
+            'total_billed' => (float) $statsRows->sum('billed_total'),
+            'total_unbilled' => (float) $statsRows->sum('unbilled_docking_total') + (float) $statsRows->sum('unbilled_banyera_total'),
             'total_collected' => (float) $statsRows->sum('paid_total'),
             'total_receivables' => (float) $statsRows->sum('balance_due'),
         ];
         $masterStats = [
-            'total_billed' => (float) $masterStatsRows->sum('total_billed'),
+            'total_billed' => (float) $masterStatsRows->sum('billed_total'),
+            'total_unbilled' => (float) $masterStatsRows->sum('unbilled_docking_total') + (float) $masterStatsRows->sum('unbilled_banyera_total'),
             'total_collected' => (float) $masterStatsRows->sum('paid_total'),
             'total_receivables' => (float) $masterStatsRows->sum('balance_due'),
         ];
@@ -714,7 +716,7 @@ class BillController extends Controller
 
     private function statementOwnerResponse(Request $request, ?array $period = null)
     {
-        $perPage = min(max((int) $request->query('per_page', 10), 1), 100);
+        $perPage = min(max((int) $request->query('per_page', 10), 1), 1000);
         $page = max((int) $request->query('page', 1), 1);
         $search = trim((string) $request->query('search', ''));
         $status = (string) $request->query('status', 'all');
@@ -906,7 +908,7 @@ class BillController extends Controller
                 DB::raw('summary.latest_billed_date as latest_billed_date'),
                 DB::raw('COALESCE(unbilled_dockings.unbilled_docking_total, 0) as unbilled_docking_total'),
                 DB::raw('COALESCE(unbilled_banyera.unbilled_banyera_total, 0) as unbilled_banyera_total'),
-                DB::raw('(COALESCE(summary.billed_total, 0) + COALESCE(unbilled_dockings.unbilled_docking_total, 0) + COALESCE(unbilled_banyera.unbilled_banyera_total, 0)) as total_billed'),
+                DB::raw('COALESCE(summary.billed_total, 0) as total_billed'),
                 DB::raw('(COALESCE(summary.balance_total, 0) + COALESCE(unbilled_dockings.unbilled_docking_total, 0) + COALESCE(unbilled_banyera.unbilled_banyera_total, 0)) as balance_due'),
             ]);
 
@@ -917,6 +919,10 @@ class BillController extends Controller
     {
         $balance = (float) ($row->balance_due ?? 0);
         $paid = (float) ($row->paid_total ?? 0);
+        $billedTotal = (float) ($row->billed_total ?? 0);
+        $unbilledDockingTotal = (float) ($row->unbilled_docking_total ?? 0);
+        $unbilledBanyeraTotal = (float) ($row->unbilled_banyera_total ?? 0);
+        $unbilledTotal = $unbilledDockingTotal + $unbilledBanyeraTotal;
         $status = $balance <= 0.009 ? 'paid' : ($paid > 0.009 ? 'partial' : 'pending');
 
         return [
@@ -935,7 +941,11 @@ class BillController extends Controller
             'boat_count' => (int) ($row->boat_count ?? 0),
             'bill_count' => (int) ($row->bill_count ?? 0),
             'payment_count' => (int) ($row->payment_count ?? 0),
-            'total_billed' => (float) ($row->total_billed ?? 0),
+            'billed_total' => $billedTotal,
+            'unbilled_docking_total' => $unbilledDockingTotal,
+            'unbilled_banyera_total' => $unbilledBanyeraTotal,
+            'unbilled_total' => $unbilledTotal,
+            'total_billed' => (float) ($row->total_billed ?? ($billedTotal + $unbilledTotal)),
             'total_paid' => $paid,
             'balance_due' => $balance,
             'latest_billed_date' => $row->latest_billed_date,
@@ -970,6 +980,9 @@ class BillController extends Controller
     {
         $balance = (float) ($row->balance_due ?? 0);
         $paid = (float) ($row->paid_total ?? 0);
+        $unbilledDockingTotal = (float) ($row->unbilled_docking_total ?? 0);
+        $unbilledBanyeraTotal = (float) ($row->unbilled_banyera_total ?? 0);
+        $unbilledTotal = $unbilledDockingTotal + $unbilledBanyeraTotal;
         $status = $balance <= 0.009 ? 'paid' : ($paid > 0.009 ? 'partial' : 'pending');
 
         return [
@@ -982,7 +995,11 @@ class BillController extends Controller
             'boat_created_at' => $row->boat_created_at,
             'boat_deleted_at' => $row->boat_deleted_at ?? null,
             'is_archived' => ($row->boat_deleted_at ?? null) !== null,
+            'billed_total' => (float) ($row->billed_total ?? 0),
             'total_billed' => (float) ($row->total_billed ?? 0),
+            'unbilled_docking_total' => $unbilledDockingTotal,
+            'unbilled_banyera_total' => $unbilledBanyeraTotal,
+            'unbilled_total' => $unbilledTotal,
             'total_paid' => $paid,
             'balance_due' => $balance,
             'bill_count' => (int) ($row->bill_count ?? 0),
@@ -1071,7 +1088,9 @@ class BillController extends Controller
                 ]);
             });
 
-        $totalBilled = (float) $bills->sum('total_amount') + (float) $unbilledCharges->sum('charge');
+        $billedTotal = (float) $bills->sum('total_amount');
+        $unbilledTotal = (float) $unbilledCharges->sum('charge');
+        $totalBilled = $billedTotal + $unbilledTotal;
         $totalPaid = (float) $bills->sum('amount_paid');
         $balance = max($totalBilled - $totalPaid, 0);
         $status = $balance <= 0.009 ? 'paid' : ($totalPaid > 0.009 ? 'partial' : 'pending');
@@ -1085,6 +1104,8 @@ class BillController extends Controller
             'boat_created_at' => $boat?->created_at,
             'boat_deleted_at' => $boat?->deleted_at,
             'is_archived' => $boat?->deleted_at !== null,
+            'billed_total' => $billedTotal,
+            'unbilled_total' => $unbilledTotal,
             'total_billed' => $totalBilled,
             'total_paid' => $totalPaid,
             'balance_due' => $balance,

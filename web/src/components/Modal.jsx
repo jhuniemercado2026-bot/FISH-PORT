@@ -86,8 +86,11 @@ const Modal = ({
   showFooterActions = true,
   footerLeftContent = null,
   footerRightContent = null,
+  centerFooterContent = false,
   bodyClassName = "",
   contentClassName = "",
+  hideCloseButton = false,
+  titleClassName = "",
 }) => {
   const [internalSaving, setInternalSaving] = useState(false);
   const [externalSavingVisible, setExternalSavingVisible] = useState(false);
@@ -161,7 +164,7 @@ const Modal = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 px-4 backdrop-blur-sm"
       onMouseDown={(event) => {
         if (closeOnBackdrop && !isSaving && event.target === event.currentTarget) {
           onClose?.();
@@ -250,16 +253,18 @@ const Modal = ({
         className="universal-modal-shell w-full overflow-hidden rounded-[10px] bg-white shadow-2xl"
         style={{ maxWidth, fontFamily: FONT }}
       >
-        <div className="flex items-center justify-between px-8 pb-2 pt-4">
-          <h3 className="m-0 text-[20px] font-bold text-[#1a1f36]">{title}</h3>
-          <button
-            onClick={onClose}
-            disabled={isSaving}
-            className="ml-4 flex h-10 w-10 flex-shrink-0 items-center justify-center border-none bg-transparent p-0 text-[#1a1f36] cursor-pointer disabled:cursor-not-allowed"
-            style={{ opacity: isSaving ? 0.5 : 1 }}
-          >
-            <IoCloseOutline className="text-[24px]" />
-          </button>
+        <div className={`flex items-center px-8 pb-2 pt-4 ${hideCloseButton ? "justify-center" : "justify-between"}`.trim()}>
+          <h3 className={`m-0 text-[20px] font-bold text-[#1a1f36] ${titleClassName}`.trim()}>{title}</h3>
+          {!hideCloseButton ? (
+            <button
+              onClick={onClose}
+              disabled={isSaving}
+              className="ml-4 flex h-10 w-10 flex-shrink-0 items-center justify-center border-none bg-transparent p-0 text-[#1a1f36] cursor-pointer disabled:cursor-not-allowed"
+              style={{ opacity: isSaving ? 0.5 : 1 }}
+            >
+              <IoCloseOutline className="text-[24px]" />
+            </button>
+          ) : null}
         </div>
         <div className="border-t border-slate-200" />
         <SkeletonLoadingProvider loading={false}>
@@ -268,10 +273,10 @@ const Modal = ({
           </div>
         </SkeletonLoadingProvider>
         {showFooter ? (
-          <div className="flex flex-col gap-4 border-t border-slate-200 px-8 py-5 sm:flex-row sm:items-center sm:justify-between">
-            {footerLeftContent ? <div className="min-w-0">{footerLeftContent}</div> : <div />}
+          <div className={`flex flex-col gap-4 border-t border-slate-200 px-8 py-5 sm:flex-row sm:items-center ${centerFooterContent ? "sm:justify-center" : "sm:justify-between"}`.trim()}>
+            {!centerFooterContent ? (footerLeftContent ? <div className="min-w-0">{footerLeftContent}</div> : <div />) : null}
             {footerRightContent ? (
-              <div className="ml-auto min-w-0">{footerRightContent}</div>
+              <div className={`${centerFooterContent ? "min-w-0" : "ml-auto min-w-0"}`.trim()}>{footerRightContent}</div>
             ) : showFooterActions ? (
             <div className="flex justify-end gap-3">
               <button

@@ -12,6 +12,13 @@ class BanyeraTransaction extends Model
 
     protected $fillable = [
         'boat_id',
+        'boat_category',
+        'visiting_boat_name',
+        'visiting_owner_firstname',
+        'visiting_owner_lastname',
+        'visiting_owner_address',
+        'visiting_contact_number',
+        'visiting_boat_type_id',
         'owner_id',
         'transaction_date',
         'total_fee',
@@ -37,6 +44,11 @@ class BanyeraTransaction extends Model
     public function boat()
     {
         return $this->belongsTo(Boat::class, 'boat_id', 'boat_id')->withTrashed();
+    }
+
+    public function visitingBoatType()
+    {
+        return $this->belongsTo(BoatType::class, 'visiting_boat_type_id', 'boat_type_id')->withTrashed();
     }
 
     public function items()
@@ -92,6 +104,15 @@ class BanyeraTransaction extends Model
             );
         }
 
+        if (!$this->hasJoinedAlias($query, 'banyera_search_visiting_boat_types')) {
+            $query->leftJoin(
+                'boat_types as banyera_search_visiting_boat_types',
+                'banyera_transactions.visiting_boat_type_id',
+                '=',
+                'banyera_search_visiting_boat_types.boat_type_id'
+            );
+        }
+
         return $query;
     }
 
@@ -101,6 +122,13 @@ class BanyeraTransaction extends Model
             ->select([
                 'banyera_transactions.banyera_id',
                 'banyera_transactions.boat_id',
+                'banyera_transactions.boat_category',
+                'banyera_transactions.visiting_boat_name',
+                'banyera_transactions.visiting_owner_firstname',
+                'banyera_transactions.visiting_owner_lastname',
+                'banyera_transactions.visiting_owner_address',
+                'banyera_transactions.visiting_contact_number',
+                'banyera_transactions.visiting_boat_type_id',
                 'banyera_transactions.owner_id',
                 'banyera_transactions.transaction_date',
                 'banyera_transactions.total_fee',
@@ -119,6 +147,7 @@ class BanyeraTransaction extends Model
                 'boat.owner:owner_id,owner_firstname,owner_lastname,address,contact_number,owner_signature_data_url,owner_signature_public_id,owner_signature_signed_at,owner_signature_updated_by,deleted_at',
                 'boat.owner.ownerSignatureUpdatedByUser:user_id,first_name,last_name,email',
                 'boat.boatType:boat_type_id,type_name,deleted_at',
+                'visitingBoatType:boat_type_id,type_name,deleted_at',
                 'items:item_id,banyera_id,classification_id,quantity,fee_id,subtotal,daug',
                 'items.classification:classification_id,classification_name',
                 'createdBy:user_id,first_name,last_name,email',
@@ -156,7 +185,13 @@ class BanyeraTransaction extends Model
             $inner
                 ->where('banyera_transactions.total_fee', 'like', "{$search}%")
                 ->orWhere('banyera_search_boats.boat_name', 'like', "{$search}%")
-                ->orWhere('banyera_search_boat_types.type_name', 'like', "{$search}%");
+                ->orWhere('banyera_search_boat_types.type_name', 'like', "{$search}%")
+                ->orWhere('banyera_search_visiting_boat_types.type_name', 'like', "{$search}%")
+                ->orWhere('banyera_transactions.visiting_boat_name', 'like', "{$search}%")
+                ->orWhere('banyera_transactions.visiting_owner_firstname', 'like', "{$search}%")
+                ->orWhere('banyera_transactions.visiting_owner_lastname', 'like', "{$search}%")
+                ->orWhere('banyera_transactions.visiting_owner_address', 'like', "{$search}%")
+                ->orWhere('banyera_transactions.visiting_contact_number', 'like', "{$search}%");
 
             if ($dateStart && $dateEnd) {
                 $inner->orWhere(function (Builder $dateQuery) use ($dateStart, $dateEnd) {
@@ -185,6 +220,7 @@ class BanyeraTransaction extends Model
             ->searchTable($search)
             ->when($status === 'active', fn (Builder $filtered) => $filtered->whereNull('banyera_transactions.voided_at'))
             ->when($status === 'voided', fn (Builder $filtered) => $filtered->whereNotNull('banyera_transactions.voided_at'))
+            ->when($status === 'visitor', fn (Builder $filtered) => $filtered->where('banyera_transactions.boat_category', 'visiting'))
             ->when($fishType !== '' && $fishType !== 'all', function (Builder $filtered) use ($fishType) {
                 $filtered->whereHas('items', function (Builder $itemQuery) use ($fishType) {
                     $itemQuery->where('classification_id', $fishType);

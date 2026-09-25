@@ -16,6 +16,8 @@ export type AuthUser = {
   profile_image?: string;
   profile_image_url?: string;
   profile_image_uri?: string;
+  password?: string;
+  password_confirmation?: string;
 };
 
 type AuthSession = {

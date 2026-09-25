@@ -6,6 +6,7 @@ use App\Events\AccountStatusUpdated;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
+use App\Jobs\SendExistingFeeNotificationsToAccount;
 use App\Models\User;
 use App\Services\ActivityLogService;
 use App\Services\PHPMailerService;
@@ -25,8 +26,11 @@ class AuthController extends Controller
             'client_type' => 'sometimes|string|in:web,mobile',
         ]);
 
-        // Find user by email
-        $user = User::where('email', strtolower(trim($request->email)))->first();
+        $email = strtolower(trim((string) $request->email));
+
+        // Find user by normalized email. Some older accounts may have been
+        // saved with casing or stray spaces before model-level normalization.
+        $user = User::whereRaw('LOWER(TRIM(email)) = ?', [$email])->first();
 
         // Email not found
         if (!$user) {
@@ -69,6 +73,15 @@ class AuthController extends Controller
             ], 403);
         }
 
+        if ($request->input('client_type') === 'mobile' && $role !== 'inspector') {
+            return response()->json([
+                'message' => 'Only inspector accounts can sign in on mobile.',
+                'errors' => [
+                    'role' => ['Only inspector accounts can sign in on mobile.'],
+                ],
+            ], 403);
+        }
+
         // Keep existing valid tokens intact so the web session and other clients
         // keep working when a user signs in from a new device.
         $token = $user->createToken('auth_token_' . $role)->plainTextToken;
@@ -83,6 +96,13 @@ class AuthController extends Controller
         $user->update(['status' => 'online']);
         $user->refresh();
         $this->broadcastAccountStatus($user, 'online');
+
+        if (in_array($role, ['coordinator', 'inspector'], true)) {
+            SendExistingFeeNotificationsToAccount::dispatch(
+                (int) $user->user_id,
+                (int) $user->user_id,
+            )->afterResponse();
+        }
 
         return response()->json([
             'message' => 'Login successful.',
@@ -132,6 +152,16 @@ class AuthController extends Controller
                 'message' => 'Account deactivated.',
                 'errors' => [
                     'email' => ['Your account has been deactivated. Please contact the administrator.'],
+                ],
+            ], 403);
+        }
+
+        if ($this->isNewAccountWithoutFirstLogin($user)) {
+            return response()->json([
+                'message' => 'Please sign in first with your temporary password to complete your account before using Forgot Password.',
+                'requires_first_login' => true,
+                'errors' => [
+                    'email' => ['New accounts must sign in first before using Forgot Password.'],
                 ],
             ], 403);
         }
@@ -214,6 +244,18 @@ class AuthController extends Controller
         ]);
 
         $email = strtolower(trim($validated['email']));
+        $user = User::query()->where('email', $email)->first();
+
+        if ($user && $this->isNewAccountWithoutFirstLogin($user)) {
+            return response()->json([
+                'message' => 'Please sign in first with your temporary password to complete your account before using Forgot Password.',
+                'requires_first_login' => true,
+                'errors' => [
+                    'verification_code' => ['New accounts must sign in first before using Forgot Password.'],
+                ],
+            ], 403);
+        }
+
         $cachedCode = Cache::get($this->forgotPasswordCodeCacheKey($email));
 
         if (!$cachedCode || empty($cachedCode['code_hash'])) {
@@ -249,7 +291,17 @@ class AuthController extends Controller
         $validated = $request->validate([
             'email' => 'required|email',
             'verification_code' => 'required|digits:6',
-            'password' => 'required|string|min:8|confirmed',
+            'password' => [
+                'required',
+                'string',
+                'min:8',
+                'regex:/[A-Z]/',
+                'regex:/[0-9]/',
+                'regex:/[^A-Za-z0-9]/',
+                'confirmed',
+            ],
+        ], [
+            'password.regex' => 'Password must include at least 1 uppercase letter, 1 number, and 1 symbol.',
         ]);
 
         $email = strtolower(trim($validated['email']));
@@ -282,6 +334,16 @@ class AuthController extends Controller
                     'email' => ['No account found with this email address.'],
                 ],
             ], 404);
+        }
+
+        if ($this->isNewAccountWithoutFirstLogin($user)) {
+            return response()->json([
+                'message' => 'Please sign in first with your temporary password to complete your account before using Forgot Password.',
+                'requires_first_login' => true,
+                'errors' => [
+                    'password' => ['New accounts must sign in first before using Forgot Password.'],
+                ],
+            ], 403);
         }
 
         $user->update([
@@ -374,6 +436,13 @@ class AuthController extends Controller
     private function forgotPasswordCodeCacheKey(string $email): string
     {
         return 'forgot_password_code_' . sha1(strtolower(trim($email)));
+    }
+
+    private function isNewAccountWithoutFirstLogin(User $user): bool
+    {
+        return $user->status === 'offline'
+            && trim((string) $user->first_name) === ''
+            && trim((string) $user->last_name) === '';
     }
 
     private function forgotPasswordResendCountKey(string $email): string

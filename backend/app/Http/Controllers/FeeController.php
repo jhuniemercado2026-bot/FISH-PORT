@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Events\MasterDataUpdated;
 use App\Enums\FeeTypeName;
-use App\Jobs\SendFeeChangeInspectorNotifications;
+use App\Jobs\SendFeeChangeCoordinatorToInspectorNotifications;
 use App\Models\Fee;
 use App\Services\ActivityLogService;
 use Carbon\Carbon;
@@ -204,7 +204,7 @@ class FeeController extends Controller
 
     private function queueInspectorFeeNotifications(Fee $fee, string $action): void
     {
-        SendFeeChangeInspectorNotifications::dispatch(
+        SendFeeChangeCoordinatorToInspectorNotifications::dispatch(
             (int) $fee->fee_id,
             $action,
             Auth::id(),

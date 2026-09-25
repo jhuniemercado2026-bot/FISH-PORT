@@ -4,7 +4,7 @@ import { useFiscalYearStore } from "../store/fiscalYearStore";
 
 const UNIVERSAL_SEARCH_MIN_LENGTH = 1;
 
-export const useUniversalSearchQuery = ({ search = "", limit = 30, fiscalYear } = {}, queryOptions = {}) => {
+export const useUniversalSearchQuery = ({ search = "", limit = 120, fiscalYear } = {}, queryOptions = {}) => {
   const storedFiscalYear = useFiscalYearStore((state) => state.fiscalYear);
   const resolvedFiscalYear = fiscalYear ?? storedFiscalYear;
 

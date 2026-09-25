@@ -16,6 +16,7 @@ class VehicleTypeController extends Controller
             'vehicle_type_id' => $type->vehicle_type_id,
             'type_name' => $type->type_name,
             'created_at' => $type->created_at?->toDateTimeString(),
+            'deleted_at' => $type->deleted_at?->toDateTimeString(),
             'created_by_name' => $type->createdBy?->full_name,
             'created_by_email' => $type->createdBy?->email ?? null,
             'tickets_count' => $type->tickets_count ?? 0,
@@ -27,14 +28,18 @@ class VehicleTypeController extends Controller
     public function index(Request $request)
     {
         $compact = $request->boolean('compact');
+        $includeArchived = $request->boolean('include_archived') || $request->boolean('include_archived_lookups');
 
-        $query = VehicleType::query()
-            ->active()
+        $query = ($includeArchived ? VehicleType::withTrashed() : VehicleType::query())
             ->with('createdBy:user_id,first_name,last_name,email')
             ->select($compact
-                ? ['vehicle_type_id', 'type_name', 'created_by']
-                : ['vehicle_type_id', 'type_name', 'created_at', 'created_by']
+                ? ['vehicle_type_id', 'type_name', 'created_by', 'deleted_at']
+                : ['vehicle_type_id', 'type_name', 'created_at', 'created_by', 'deleted_at']
             );
+
+        if (! $includeArchived) {
+            $query->active();
+        }
 
         if (!$compact) {
             $query->withCount([
@@ -98,6 +103,7 @@ class VehicleTypeController extends Controller
                     ? [
                         'vehicle_type_id' => $type->vehicle_type_id,
                         'type_name' => $type->type_name,
+                        'deleted_at' => $type->deleted_at?->toDateTimeString(),
                         'created_by_name' => $type->createdBy?->full_name,
                         'created_by_email' => $type->createdBy?->email,
                     ]
@@ -124,6 +130,7 @@ class VehicleTypeController extends Controller
                 ? [
                     'vehicle_type_id' => $type->vehicle_type_id,
                     'type_name' => $type->type_name,
+                    'deleted_at' => $type->deleted_at?->toDateTimeString(),
                     'created_by_name' => $type->createdBy?->full_name,
                     'created_by_email' => $type->createdBy?->email,
                 ]
