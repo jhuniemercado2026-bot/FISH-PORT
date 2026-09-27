@@ -17,6 +17,7 @@ import {
 import ReactApexChart from "react-apexcharts";
 import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
+import VisitorPill from "../../components/VisitorPill";
 import Modal, { ModalTextInput } from "../../components/Modal";
 import TitlePage from "../../components/TitlePage";
 import api from "../../api/axios";
@@ -400,6 +401,8 @@ const Dashboard = () => {
   const [activeReceivableMonthIndex, setActiveReceivableMonthIndex] = useState(null);
   const [registeredBoatsPopoverOpen, setRegisteredBoatsPopoverOpen] = useState(false);
   const [visitingBoatsPopoverOpen, setVisitingBoatsPopoverOpen] = useState(false);
+  const [dockingBreakdownPopoverOpen, setDockingBreakdownPopoverOpen] = useState(false);
+  const [banyeraBreakdownPopoverOpen, setBanyeraBreakdownPopoverOpen] = useState(false);
 
   const handleWidthChange = useCallback((width) => setContentMargin(width), []);
 
@@ -450,6 +453,28 @@ const Dashboard = () => {
   }, [visitingBoatsPopoverOpen]);
 
   useEffect(() => {
+    if (!dockingBreakdownPopoverOpen) return;
+    const handler = (event) => {
+      if (!event.target.closest("[data-docking-breakdown-card]")) {
+        setDockingBreakdownPopoverOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [dockingBreakdownPopoverOpen]);
+
+  useEffect(() => {
+    if (!banyeraBreakdownPopoverOpen) return;
+    const handler = (event) => {
+      if (!event.target.closest("[data-banyera-breakdown-card]")) {
+        setBanyeraBreakdownPopoverOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [banyeraBreakdownPopoverOpen]);
+
+  useEffect(() => {
     setMonthlyTargets(data?.monthlyTargets ?? {});
     setYearlyTargets(data?.yearlyTargets ?? {});
   }, [data?.monthlyTargets, data?.yearlyTargets]);
@@ -496,8 +521,12 @@ const Dashboard = () => {
     visitingBoatList,
     totalDockingReceived,
     totalDockingTransactions,
+    totalDockingRegistered,
+    totalDockingVisiting,
     totalBanyeraReceived,
     totalBanyeraTransactions,
+    totalBanyeraRegistered,
+    totalBanyeraVisiting,
     totalTicketCollections,
     totalVehicleTicketTransactions,
     totalRemittances,
@@ -518,22 +547,71 @@ const Dashboard = () => {
     const dockings = data?.dockings ?? [];
     const vehicleTickets = data?.vehicleTickets ?? [];
     const boats = data?.boats ?? [];
-    const registeredBoatList = boats
-      .map((boat) => ({
-        name: String(boat?.boat_name || `Boat #${boat?.boat_id ?? ""}`).trim(),
-        boatType: String(
-          boat?.boat_type?.type_name ||
-            boat?.boatType?.type_name ||
-            boat?.boat_type_name ||
-            "Unknown type",
-        ).trim(),
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name));
+    const getRegisteredBoatName = (boat) =>
+      String(
+        boat?.boat_name ||
+          boat?.boatName ||
+          boat?.name ||
+          boat?.boat?.boat_name ||
+          `Boat #${boat?.boat_id ?? boat?.id ?? ""}`,
+      ).trim();
+    const getRegisteredBoatType = (boat) => {
+      const rawType = boat?.boat_type ?? boat?.boatType;
+      const typeName =
+        typeof rawType === "string"
+          ? rawType
+          : rawType?.type_name || rawType?.boat_type_name;
 
+      return String(
+        typeName || boat?.boat_type_name || boat?.type_name || "Unknown type",
+      ).trim();
+    };
     const getYear = (value) => {
       const parsedDate = new Date(value || 0);
       return Number.isNaN(parsedDate.getTime()) ? null : parsedDate.getFullYear();
     };
+
+    const registeredBoatMap = new Map();
+    boats.forEach((boat) => {
+      const boatKey = String(boat?.boat_id ?? boat?.id ?? getRegisteredBoatName(boat)).trim();
+      if (!boatKey) return;
+
+      registeredBoatMap.set(boatKey, {
+        name: getRegisteredBoatName(boat),
+        boatType: getRegisteredBoatType(boat),
+        dockingCount: 0,
+        banyeraCount: 0,
+      });
+    });
+    const registeredDockingsForYear = dockings.filter(
+      (docking) => !isVisitingTransaction(docking) && getYear(docking?.docking_date || docking?.created_at) === selectedYearNumber,
+    );
+    const registeredBanyeraForYear = (data?.banyeraTransactions ?? []).filter(
+      (transaction) => !isVisitingTransaction(transaction) && getYear(transaction?.transaction_date || transaction?.created_at) === selectedYearNumber,
+    );
+    registeredDockingsForYear.forEach((docking) => {
+      const boatKey = String(docking?.boat_id ?? docking?.boat?.boat_id ?? getDashboardDockingBoatName(docking)).trim();
+      if (!registeredBoatMap.has(boatKey)) return;
+
+      const current = registeredBoatMap.get(boatKey);
+      registeredBoatMap.set(boatKey, {
+        ...current,
+        dockingCount: Number(current.dockingCount ?? 0) + 1,
+      });
+    });
+    registeredBanyeraForYear.forEach((transaction) => {
+      const boatKey = String(transaction?.boat_id ?? transaction?.boat?.boat_id ?? getDashboardBanyeraBoatName(transaction)).trim();
+      if (!registeredBoatMap.has(boatKey)) return;
+
+      const current = registeredBoatMap.get(boatKey);
+      registeredBoatMap.set(boatKey, {
+        ...current,
+        banyeraCount: Number(current.banyeraCount ?? 0) + 1,
+      });
+    });
+    const registeredBoatList = Array.from(registeredBoatMap.values())
+      .sort((left, right) => left.name.localeCompare(right.name));
+
     const isActiveVehicleTicket = (ticket) =>
       !Boolean(ticket?.is_voided || ticket?.voided_at) &&
       String(ticket?.status || "").toLowerCase() !== "voided";
@@ -699,18 +777,28 @@ const Dashboard = () => {
       (sum, transaction) => sum + getBanyeraTransactionTotal(transaction),
       0,
     );
-    const visitingDockingCash = dockingsForYear.reduce(
+    const registeredDockingTotal = dockingsForYear.reduce(
+      (sum, docking) =>
+        !isVisitingTransaction(docking) ? sum + Number(docking?.docking_fee ?? 0) : sum,
+      0,
+    );
+    const visitingDockingTotal = dockingsForYear.reduce(
       (sum, docking) =>
         isVisitingTransaction(docking) ? sum + Number(docking?.docking_fee ?? 0) : sum,
       0,
     );
-    const visitingBanyeraCash = banyeraTransactionsForYear.reduce(
+    const registeredBanyeraTotal = banyeraTransactionsForYear.reduce(
+      (sum, transaction) =>
+        !isVisitingTransaction(transaction) ? sum + getBanyeraTransactionTotal(transaction) : sum,
+      0,
+    );
+    const visitingBanyeraTotal = banyeraTransactionsForYear.reduce(
       (sum, transaction) =>
         isVisitingTransaction(transaction) ? sum + getBanyeraTransactionTotal(transaction) : sum,
       0,
     );
-    const dockingReceived = getCategoryCollectionsFromPayments("docking") + visitingDockingCash;
-    const banyeraReceived = getCategoryCollectionsFromPayments("banyera") + visitingBanyeraCash;
+    const dockingReceived = getCategoryCollectionsFromPayments("docking") + visitingDockingTotal;
+    const banyeraReceived = getCategoryCollectionsFromPayments("banyera") + visitingBanyeraTotal;
     const totalVehicleTicketTransactions = vehicleTicketsForYear.reduce(
       (sum, ticket) => sum + Number(ticket?.ticket_fee ?? 0),
       0,
@@ -834,8 +922,12 @@ const Dashboard = () => {
       visitingBoatList,
       totalDockingReceived: dockingReceived,
       totalDockingTransactions,
+      totalDockingRegistered: registeredDockingTotal,
+      totalDockingVisiting: visitingDockingTotal,
       totalBanyeraReceived: banyeraReceived,
       totalBanyeraTransactions,
+      totalBanyeraRegistered: registeredBanyeraTotal,
+      totalBanyeraVisiting: visitingBanyeraTotal,
       totalTicketCollections: ticketCollections,
       totalVehicleTicketTransactions,
       totalRemittances,
@@ -1222,6 +1314,139 @@ const Dashboard = () => {
       },
     ],
     [monthlyTransactions],
+  );
+
+  const monthlyDockingRevenueBreakdown = useMemo(() => {
+    const selectedYearNumber = Number(selectedYear) || new Date().getFullYear();
+    const monthBuckets = Array.from({ length: 12 }, (_, index) => ({
+      month: new Date(2000, index, 1).toLocaleString("en-PH", { month: "short" }),
+      registered: 0,
+      visiting: 0,
+    }));
+
+    (data?.dockings ?? []).forEach((docking) => {
+      const parsedDate = new Date(docking?.docking_date || docking?.created_at || 0);
+      if (Number.isNaN(parsedDate.getTime())) return;
+      const year = parsedDate.getFullYear();
+      if (year !== selectedYearNumber) return;
+
+      const monthIndex = parsedDate.getMonth();
+      const amount = Number(docking?.docking_fee ?? 0);
+      if (!amount) return;
+
+      if (isVisitingTransaction(docking)) {
+        monthBuckets[monthIndex].visiting += amount;
+      } else {
+        monthBuckets[monthIndex].registered += amount;
+      }
+    });
+
+    return monthBuckets;
+  }, [data?.dockings, selectedYear]);
+
+  const monthlyBanyeraRevenueBreakdown = useMemo(() => {
+    const selectedYearNumber = Number(selectedYear) || new Date().getFullYear();
+    const monthBuckets = Array.from({ length: 12 }, (_, index) => ({
+      month: new Date(2000, index, 1).toLocaleString("en-PH", { month: "short" }),
+      registered: 0,
+      visiting: 0,
+    }));
+
+    (data?.banyeraTransactions ?? []).forEach((transaction) => {
+      const parsedDate = new Date(transaction?.transaction_date || transaction?.created_at || 0);
+      if (Number.isNaN(parsedDate.getTime())) return;
+      const year = parsedDate.getFullYear();
+      if (year !== selectedYearNumber) return;
+
+      const monthIndex = parsedDate.getMonth();
+      const amount = Number(transaction?.total_fee ?? 0) > 0
+        ? Number(transaction?.total_fee ?? 0)
+        : (transaction?.items ?? []).reduce((sum, item) => sum + Number(item?.subtotal ?? 0), 0);
+      if (!amount) return;
+
+      if (isVisitingTransaction(transaction)) {
+        monthBuckets[monthIndex].visiting += amount;
+      } else {
+        monthBuckets[monthIndex].registered += amount;
+      }
+    });
+
+    return monthBuckets;
+  }, [data?.banyeraTransactions, selectedYear]);
+
+  const monthlyDockingRevenueBreakdownSeries = useMemo(
+    () => [
+      {
+        name: "Registered Boats",
+        data: monthlyDockingRevenueBreakdown.map((item) => item.registered),
+      },
+      {
+        name: "Visiting Boats",
+        data: monthlyDockingRevenueBreakdown.map((item) => item.visiting),
+      },
+    ],
+    [monthlyDockingRevenueBreakdown],
+  );
+
+  const monthlyBanyeraRevenueBreakdownSeries = useMemo(
+    () => [
+      {
+        name: "Registered Boats",
+        data: monthlyBanyeraRevenueBreakdown.map((item) => item.registered),
+      },
+      {
+        name: "Visiting Boats",
+        data: monthlyBanyeraRevenueBreakdown.map((item) => item.visiting),
+      },
+    ],
+    [monthlyBanyeraRevenueBreakdown],
+  );
+
+  const monthlyDockingTotalSeries = useMemo(
+    () => [{
+      name: "Total",
+      data: monthlyDockingRevenueBreakdown.map((item) => Number(item.registered || 0) + Number(item.visiting || 0)),
+    }],
+    [monthlyDockingRevenueBreakdown],
+  );
+
+  const monthlyBanyeraTotalSeries = useMemo(
+    () => [{
+      name: "Total",
+      data: monthlyBanyeraRevenueBreakdown.map((item) => Number(item.registered || 0) + Number(item.visiting || 0)),
+    }],
+    [monthlyBanyeraRevenueBreakdown],
+  );
+
+  const monthlyRegisteredVisitingSummary = useMemo(() => {
+    const monthBuckets = Array.from({ length: 12 }, (_, index) => ({
+      month: new Date(2000, index, 1).toLocaleString("en-PH", { month: "short" }),
+      registered: 0,
+      visiting: 0,
+      total: 0,
+    }));
+
+    monthlyDockingRevenueBreakdown.forEach((item, index) => {
+      monthBuckets[index].registered += Number(item.registered || 0);
+      monthBuckets[index].visiting += Number(item.visiting || 0);
+      monthBuckets[index].total += Number(item.registered || 0) + Number(item.visiting || 0);
+    });
+
+    monthlyBanyeraRevenueBreakdown.forEach((item, index) => {
+      monthBuckets[index].registered += Number(item.registered || 0);
+      monthBuckets[index].visiting += Number(item.visiting || 0);
+      monthBuckets[index].total += Number(item.registered || 0) + Number(item.visiting || 0);
+    });
+
+    return monthBuckets;
+  }, [monthlyDockingRevenueBreakdown, monthlyBanyeraRevenueBreakdown]);
+
+  const monthlyRegisteredVisitingCombinedSeries = useMemo(
+    () => [{
+      name: "Total",
+      data: monthlyRegisteredVisitingSummary.map((item) => item.total),
+    }],
+    [monthlyRegisteredVisitingSummary],
   );
 
   const monthlyTargetChartOptions = useMemo(
@@ -2406,6 +2631,283 @@ const Dashboard = () => {
     [monthlyTransactions],
   );
 
+  const monthlyRegisteredVsVisitingChartOptions = useMemo(() => {
+    const maxValue = Math.max(
+      0,
+      ...monthlyRegisteredVisitingSummary.map((item) => Number(item.total || 0)),
+    );
+    const paddedMax = Math.max(180000, Math.ceil((maxValue * 1.35) / 30000) * 30000);
+
+    return {
+      chart: {
+        type: "bar",
+        toolbar: { show: false },
+        sparkline: { enabled: false },
+        fontFamily: FONT,
+        parentHeightOffset: 0,
+        offsetY: -4,
+        events: {
+          mounted: stripApexNativeTitles,
+          updated: stripApexNativeTitles,
+        },
+      },
+      colors: ["#2563eb"],
+      plotOptions: {
+        bar: {
+          horizontal: false,
+          borderRadius: 0,
+          columnWidth: "68%",
+          dataLabels: {
+            position: "top",
+          },
+        },
+      },
+      dataLabels: { enabled: false },
+      annotations: {
+        points: monthlyRegisteredVisitingSummary
+          .filter((point) => Number(point.total || 0) > 0)
+          .map((point) => ({
+            x: point.month,
+            y: Number(point.total || 0),
+            marker: {
+              size: 0,
+              strokeWidth: 0,
+              fillColor: "transparent",
+              strokeColor: "transparent",
+            },
+            label: {
+              text: fmtCompactMoney(Number(point.total || 0)),
+              offsetY: -10,
+              borderWidth: 0,
+              style: {
+                background: "transparent",
+                color: "#2563eb",
+                fontFamily: FONT,
+                fontSize: "9px",
+                fontWeight: 700,
+                padding: { left: 0, right: 0, top: 0, bottom: 0 },
+              },
+            },
+          })),
+      },
+      legend: { show: false },
+      tooltip: {
+        enabled: true,
+        shared: true,
+        intersect: false,
+        fillSeriesColor: false,
+        theme: false,
+        marker: { show: false },
+        x: { show: false },
+        custom: ({ dataPointIndex }) => {
+          const point = monthlyRegisteredVisitingSummary[dataPointIndex];
+          if (!point) return "";
+          const total = Number(point.registered || 0) + Number(point.visiting || 0);
+          return `<div style="padding:10px 12px;font-family:${FONT};min-width:200px;">
+            <div style="font-size:12px;font-weight:700;color:#0f172a;">${point.month}</div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:6px;">
+              <span style="color:#475569;">Registered</span>
+              <span style="color:#0f172a;font-weight:700;">${PESO}${fmt(point.registered)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:4px;">
+              <span style="color:#475569;">Visiting</span>
+              <span style="color:#0f172a;font-weight:700;">${PESO}${fmt(point.visiting)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;gap:12px;margin-top:4px;padding-top:4px;border-top:1px solid #e2e8f0;">
+              <span style="color:#0f172a;font-weight:600;">Total</span>
+              <span style="color:#0f172a;font-weight:700;">${PESO}${fmt(total)}</span>
+            </div>
+          </div>`;
+        },
+      },
+      xaxis: {
+        categories: monthlyRegisteredVisitingSummary.map((item) => item.month),
+        labels: {
+          rotate: -35,
+          rotateAlways: true,
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+        },
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+      },
+      yaxis: {
+        min: 0,
+        max: paddedMax,
+        tickAmount: 6,
+        labels: {
+          formatter: (value) => {
+            if (value === 0) return "0";
+            if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+            return `${Math.round(value / 1000)}K`;
+          },
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+        },
+      },
+      grid: {
+        borderColor: "#eef2f7",
+        strokeDashArray: 3,
+        padding: {
+          top: 24,
+          right: 10,
+          bottom: 0,
+          left: 4,
+        },
+        xaxis: { lines: { show: false } },
+      },
+    };
+  }, [monthlyRegisteredVisitingSummary]);
+
+  const monthlyBanyeraBreakdownChartOptions = useMemo(() => {
+    const maxValue = Math.max(
+      0,
+      ...monthlyBanyeraRevenueBreakdown.flatMap((item) => [Number(item.registered || 0), Number(item.visiting || 0)]),
+    );
+    const paddedMax = Math.max(180000, Math.ceil((maxValue * 1.35) / 30000) * 30000);
+
+    return {
+      chart: {
+        type: "bar",
+        toolbar: { show: false },
+        sparkline: { enabled: false },
+        fontFamily: FONT,
+        parentHeightOffset: 0,
+        offsetY: -4,
+        events: {
+          mounted: stripApexNativeTitles,
+          updated: stripApexNativeTitles,
+        },
+      },
+      colors: ["#2563eb", "#f59e0b"],
+      plotOptions: {
+        bar: {
+          horizontal: false,
+          borderRadius: 0,
+          columnWidth: "62%",
+          dataLabels: {
+            position: "top",
+          },
+        },
+      },
+      dataLabels: {
+        enabled: false,
+      },
+      annotations: {
+        points: monthlyBanyeraRevenueBreakdown
+          .filter((point) => Number(point.registered || 0) > 0)
+          .map((point) => ({
+            x: point.month,
+            y: Number(point.registered || 0),
+            marker: {
+              size: 0,
+              strokeWidth: 0,
+              fillColor: "transparent",
+              strokeColor: "transparent",
+            },
+            label: {
+              text: fmtCompactMoney(Number(point.registered || 0)),
+              offsetY: -10,
+              borderWidth: 0,
+              style: {
+                background: "transparent",
+                color: "#2563eb",
+                fontFamily: FONT,
+                fontSize: "9px",
+                fontWeight: 700,
+                padding: { left: 0, right: 0, top: 0, bottom: 0 },
+              },
+            },
+          })),
+      },
+      legend: {
+        show: true,
+        position: "top",
+        horizontalAlign: "center",
+        fontSize: "11px",
+        fontFamily: FONT,
+        itemMargin: { horizontal: 12 },
+      },
+      tooltip: {
+        enabled: true,
+        shared: true,
+        intersect: false,
+        fillSeriesColor: false,
+        theme: false,
+        marker: { show: false },
+        x: { show: false },
+        custom: ({ dataPointIndex }) => {
+          const point = monthlyBanyeraRevenueBreakdown[dataPointIndex];
+          if (!point) return "";
+          const total = Number(point.registered || 0) + Number(point.visiting || 0);
+          return `<div style="padding:10px 12px;font-family:${FONT};min-width:180px;">
+            <div style="font-size:12px;font-weight:700;color:#0f172a;">${point.month}</div>
+            <div style="margin-top:6px;display:flex;justify-content:space-between;gap:12px;">
+              <span style="color:#475569;">Registered Boats</span>
+              <span style="color:#0f172a;font-weight:700;">${PESO}${fmt(point.registered)}</span>
+            </div>
+            <div style="margin-top:4px;display:flex;justify-content:space-between;gap:12px;">
+              <span style="color:#475569;">Visiting Boats</span>
+              <span style="color:#0f172a;font-weight:700;">${PESO}${fmt(point.visiting)}</span>
+            </div>
+            <div style="margin-top:6px;padding-top:6px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:12px;">
+              <span style="color:#0f172a;font-weight:600;">Total</span>
+              <span style="color:#0f172a;font-weight:700;">${PESO}${fmt(total)}</span>
+            </div>
+          </div>`;
+        },
+      },
+      xaxis: {
+        categories: monthlyBanyeraRevenueBreakdown.map((item) => item.month),
+        labels: {
+          rotate: -35,
+          rotateAlways: true,
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+        },
+        axisBorder: { show: false },
+        axisTicks: { show: false },
+      },
+      yaxis: {
+        min: 0,
+        max: paddedMax,
+        tickAmount: 6,
+        labels: {
+          formatter: (value) => {
+            if (value === 0) return "0";
+            if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+            return `${Math.round(value / 1000)}K`;
+          },
+          style: {
+            colors: "#475569",
+            fontSize: "10px",
+            fontFamily: FONT,
+          },
+        },
+      },
+      grid: {
+        borderColor: "#eef2f7",
+        strokeDashArray: 3,
+        padding: {
+          top: 42,
+          right: 10,
+          bottom: 0,
+          left: 4,
+        },
+        xaxis: { lines: { show: false } },
+      },
+    };
+  }, [monthlyBanyeraRevenueBreakdown]);
+
   const yearlyReceivablesChartOptions = useMemo(
     () => ({
       chart: {
@@ -2633,10 +3135,28 @@ const Dashboard = () => {
             </div>
           ))
         ) : (
-          <p className="m-0 rounded-lg bg-slate-50 px-3 py-3 text-[12px] font-medium text-slate-500">
+          <p className="m-0 rounded-lg bg-slate-50 px-3 py-3 text-center text-[12px] font-medium text-slate-500">
             {emptyLabel}
           </p>
         )}
+      </div>
+    </div>
+  );
+
+  const renderAmountBreakdownPopover = (title, registeredAmount, visitingAmount) => (
+    <div style={{ fontFamily: FONT }}>
+      <div className="border-b border-slate-100 pb-2 text-center">
+        <p className="m-0 text-[13px] font-normal text-slate-900">{title}</p>
+      </div>
+      <div className="mt-2 space-y-2">
+        <div className="flex items-center justify-between gap-4 rounded-lg bg-white px-3 py-2">
+          <span className="text-[12px] font-semibold text-slate-700">Registered Boats</span>
+          <span className="text-[12px] font-bold text-slate-900">{PESO}{fmt(registeredAmount)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-4 rounded-lg bg-white px-3 py-2">
+          <span className="text-[12px] font-semibold text-slate-700">Visiting Boats</span>
+          <span className="text-[12px] font-bold text-slate-900">{PESO}{fmt(visitingAmount)}</span>
+        </div>
       </div>
     </div>
   );
@@ -2757,32 +3277,48 @@ const Dashboard = () => {
                       showGrowthChart={false}
                       active={
                         (card.key === "boats" && registeredBoatsPopoverOpen) ||
-                        (card.key === "visiting_boats" && visitingBoatsPopoverOpen)
+                        (card.key === "visiting_boats" && visitingBoatsPopoverOpen) ||
+                        (card.key === "docking" && dockingBreakdownPopoverOpen) ||
+                        (card.key === "banyera" && banyeraBreakdownPopoverOpen)
                       }
                       popoverRootAttribute={
                         card.key === "boats"
                           ? "data-registered-boats-card"
                           : card.key === "visiting_boats"
                             ? "data-visiting-boats-card"
-                            : null
+                            : card.key === "docking"
+                              ? "data-docking-breakdown-card"
+                              : card.key === "banyera"
+                                ? "data-banyera-breakdown-card"
+                                : null
                       }
                       onTogglePopover={
                         card.key === "boats"
                           ? () => setRegisteredBoatsPopoverOpen((open) => !open)
                           : card.key === "visiting_boats"
                           ? () => setVisitingBoatsPopoverOpen((open) => !open)
-                          : undefined
+                          : card.key === "docking"
+                            ? () => setDockingBreakdownPopoverOpen((open) => !open)
+                            : card.key === "banyera"
+                              ? () => setBanyeraBreakdownPopoverOpen((open) => !open)
+                              : undefined
                       }
                       popoverOpen={
                         (card.key === "boats" && registeredBoatsPopoverOpen) ||
-                        (card.key === "visiting_boats" && visitingBoatsPopoverOpen)
+                        (card.key === "visiting_boats" && visitingBoatsPopoverOpen) ||
+                        (card.key === "docking" && dockingBreakdownPopoverOpen) ||
+                        (card.key === "banyera" && banyeraBreakdownPopoverOpen)
                       }
                       popoverContent={
                         card.key === "boats"
                           ? renderBoatListPopover("Registered Boats", registeredBoatList, "No registered boats")
                           : card.key === "visiting_boats"
                             ? renderBoatListPopover("Visiting Boats", visitingBoatList, "No visiting boats")
-                            : null
+                            : card.key === "docking"
+                              ? renderAmountBreakdownPopover("Docking Breakdown", totalDockingRegistered, totalDockingVisiting)
+                              : card.key === "banyera"
+                                ? renderAmountBreakdownPopover("Banyera Breakdown", totalBanyeraRegistered, totalBanyeraVisiting)
+                                : null
                       }
                     />
                   ))}
@@ -3545,6 +4081,57 @@ const Dashboard = () => {
                 )}
               </section>
 
+            </div>
+
+            <div className="mt-6 mb-6">
+              <section className="rounded-[10px] border border-slate-200 bg-white px-5 py-4">
+                {showInitialSkeleton ? (
+                  <div>
+                    <SkeletonBlock className="mx-auto mb-6 h-[16px] w-64" />
+                    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+                      <div className="h-[300px] animate-pulse rounded-lg bg-slate-200" />
+                      <div className="h-[300px] animate-pulse rounded-lg bg-slate-200" />
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-4">
+                      <p
+                        className="m-0 text-center text-[13px] font-medium text-slate-500"
+                        style={{ fontFamily: FONT }}
+                      >
+                        Registered and Visiting Boats per Month
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+                      <div>
+                        <div className="mb-3 text-center">
+                          <p className="m-0 text-[12px] font-medium text-slate-500">Docking</p>
+                        </div>
+                        <ReactApexChart
+                          type="bar"
+                          series={monthlyDockingTotalSeries}
+                          options={monthlyRegisteredVsVisitingChartOptions}
+                          height={300}
+                        />
+                      </div>
+
+                      <div>
+                        <div className="mb-3 text-center">
+                          <p className="m-0 text-[12px] font-medium text-slate-500">Banyera</p>
+                        </div>
+                        <ReactApexChart
+                          type="bar"
+                          series={monthlyBanyeraTotalSeries}
+                          options={monthlyBanyeraBreakdownChartOptions}
+                          height={300}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </section>
             </div>
           </div>
         </main>

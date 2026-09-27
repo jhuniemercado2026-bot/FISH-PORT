@@ -38,6 +38,7 @@ import NoDataFound from "../../components/NoDataFound";
 import Spinner from "../../components/Spinner";
 import Legend from "../../components/Legend";
 import ArchiveModal from "../../components/ArchiveModal";
+import VisitorPill from "../../components/VisitorPill";
 import { useSidebar } from "../../store/sidebarStore";
 import { showAddedToast, showBottomToast, showNoChangesToast, showUpdatedToast } from "../../store/bottomToastStore";
 import api from "../../api/axios";
@@ -200,7 +201,7 @@ const applyTimeValueToBanyeraForm = (current, timeValue) => {
   };
 };
 
-// Data shape helpers
+
 const isVisitingBanyera = (tx) =>
   String(tx?.boat_category ?? "").toLowerCase() === "visiting" || Boolean(tx?.visiting_boat_name);
 
@@ -940,27 +941,35 @@ const AddBanyeraModal = ({ open, onClose, onSave, saving, boats = [], boatTypes 
   }, [open]);
 
   useEffect(() => {
+    if (!open) return;
+
     if (!selectedBoatTypeId) {
       if (!form.fee_id) return;
       setForm((current) => ({ ...current, fee_id: "" }));
+      setErrors((current) => ({ ...current, fee_id: "" }));
       return;
     }
 
     if (banyeraFees.length === 0) {
       if (!form.fee_id) return;
       setForm((current) => ({ ...current, fee_id: "" }));
+      setErrors((current) => ({ ...current, fee_id: "" }));
       return;
     }
 
     const matchingFee = banyeraFees[0];
     const nextFeeId = String(matchingFee.fee_id);
-    if (String(form.fee_id || "") === nextFeeId) return;
+    const currentFeeId = String(form.fee_id || "");
+    const currentFeeStillMatches = banyeraFees.some((fee) => String(fee.fee_id) === currentFeeId);
+
+    if (currentFeeId === nextFeeId && currentFeeStillMatches) return;
 
     setForm((current) => ({
       ...current,
       fee_id: nextFeeId,
     }));
-  }, [selectedBoatTypeId, banyeraFees, form.fee_id]);
+    setErrors((current) => ({ ...current, fee_id: "" }));
+  }, [open, selectedBoatTypeId, banyeraFees, form.fee_id]);
 
   const totalFee = items.reduce((sum, it) => {
     const qty = parseInt(it.quantity) || 0;
@@ -2553,14 +2562,7 @@ const SuperBanyera = () => {
                                         style={{ backgroundColor: isVoided ? "#f59e0b" : "#16a34a" }}
                                       />
                                       <p className="m-0 text-[13px] font-medium text-[#1a1f36]">{getBoatName(tx)}</p>
-                                      {isVisitor ? (
-                                        <span
-                                          className="inline-flex flex-shrink-0 items-center rounded-[6px] px-2 py-0.5 text-[10px] font-bold uppercase tracking-normal"
-                                          style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}
-                                        >
-                                          Visitor
-                                        </span>
-                                      ) : null}
+                                      {isVisitor ? <VisitorPill /> : null}
                                     </div>
                                   </button>
                                 </td>

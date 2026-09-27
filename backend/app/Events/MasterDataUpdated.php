@@ -26,7 +26,7 @@ class MasterDataUpdated implements ShouldBroadcastNow
 
     public function broadcastAs(): string
     {
-        return 'updated';
+        return $this->action;
     }
 
     public function broadcastWith(): array

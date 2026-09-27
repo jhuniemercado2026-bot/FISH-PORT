@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Modal as NativeModal, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export type HistoryStatusFilter = "all" | "active" | "voided" | "pending" | "remitted";
+export type HistoryStatusFilter = "all" | "active" | "voided" | "pending" | "remitted" | "visiting";
 
 type OptionModalProps = {
   visible: boolean;
@@ -17,6 +17,7 @@ const options: Array<{ value: HistoryStatusFilter; label: string }> = [
   { value: "voided", label: "Voided" },
   { value: "pending", label: "Unchecked" },
   { value: "remitted", label: "Checked" },
+  { value: "visiting", label: "Visiting Boats" },
 ];
 
 export default function OptionModal({ visible, selectedValue, onClose, onSelect }: OptionModalProps) {

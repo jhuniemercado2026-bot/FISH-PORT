@@ -45,7 +45,7 @@ import {
 } from "../../utils/offlineMasterData";
 import { startTransactionsRealtime } from "../../utils/realtimeTransactions";
 import { submitOrQueueOfflineTransaction } from "../../utils/offlineTransactionQueue";
-import { printThermalReceiptWithSignature } from "../../utils/thermalReceiptPrinter";
+import { printThermalReceipt } from "../../utils/thermalReceiptPrinter";
 
 
 type TransactionType = "banyera" | "docking" | "tickets" | "remittance";
@@ -2363,10 +2363,13 @@ export default function AddTransactionScreen() {
     setIsPrintingBanyeraPreview(true);
 
     try {
-      await printThermalReceiptWithSignature(
-        banyeraReceiptText,
-        banyeraOwnerSignatureImage
-      );
+      await printThermalReceipt({
+        title: "OPOL FISH PORT",
+        subtitle: "BANYERA TRANSACTION",
+        details: banyeraPrintPreviewDetails,
+        lines: banyeraPrintPreviewLines,
+        totalText: formatPeso(banyeraTotalFee),
+      });
       showToast("success", "Banyera preview sent to PT-210 printer.");
       await handleSave({ skipBanyeraPreview: true, printed: true });
     } catch (error) {
@@ -3912,9 +3915,11 @@ export default function AddTransactionScreen() {
                           </View>
                           <View className="w-[112px]">
                             <FormSectionLabel label="Subtotal" />
-                            <View className="h-14 justify-center rounded-[10px] border border-[#E8E1E6] bg-white px-3">
+                            <View className="h-14 justify-center rounded-[10px] border border-[#E8E1E6] bg-[#F8F8FA] px-3">
                               <Text
-                                className="text-[12px] text-[#1A1F36]"
+                                className={`text-[12px] ${
+                                  subtotal > 0 ? "text-[#1A1F36]" : "text-[#9AA3AF]"
+                                }`}
                                 style={{ fontFamily: "Montserrat_400Regular" }}
                               >
                                 {subtotal > 0

@@ -18,7 +18,7 @@ import {
   getOfflineTransactionDrafts,
   OfflineTransactionDraft,
 } from "../../../utils/offlineTransactionQueue";
-import { printThermalReceiptWithSignature } from "../../../utils/thermalReceiptPrinter";
+import { printThermalReceipt } from "../../../utils/thermalReceiptPrinter";
 
 type TransactionType = "docking" | "banyera" | "tickets" | "remittance";
 type VoidableTransactionType = Exclude<TransactionType, "remittance">;
@@ -392,16 +392,6 @@ function buildBanyeraReceiptTextFromDetail(record: TransactionRecord) {
   );
 
   return receiptLines.join("\n");
-}
-
-function getBanyeraSignatureDataUrl(record: TransactionRecord) {
-  return (
-    record.owner_signature_data_url ||
-    record.ownerSignatureDataUrl ||
-    record.boat?.owner?.owner_signature_data_url ||
-    record.boat?.ownerSignatureDataUrl ||
-    ""
-  );
 }
 
 const createDraftDetail = (draft: OfflineTransactionDraft): TransactionRecord => {
@@ -1013,10 +1003,13 @@ export default function HistoryDetailScreen() {
     setIsPrintingBanyera(true);
 
     try {
-      await printThermalReceiptWithSignature(
-        buildBanyeraReceiptTextFromDetail(detail),
-        getBanyeraSignatureDataUrl(detail)
-      );
+      await printThermalReceipt({
+        title: "OPOL FISH PORT",
+        subtitle: "BANYERA TRANSACTION",
+        details: banyeraDetailPreviewDetails,
+        lines: banyeraDetailPreviewLines,
+        totalText: banyeraDetailTotalText,
+      });
 
       const response = await fetch(
         `${getApiBaseUrl()}${endpointForType("banyera")}/${transactionId}/print`,

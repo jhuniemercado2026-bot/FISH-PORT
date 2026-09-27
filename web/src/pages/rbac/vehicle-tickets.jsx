@@ -1204,19 +1204,17 @@ const AddVehicleTicketDrawer = ({
         current[0]?.quantity ?? "0",
         { zeroDailyTicket: isAnnualRegisteredDailyEntry }
       );
-      const currentDailyRow = current.find((item) => item.row_type === "daily");
-      const currentBanyeraRow = current.find((item) => item.row_type === "banyera");
+      const nextSignature = JSON.stringify(nextRows.map(({ fee_id, quantity, row_type }) => ({ fee_id, quantity, row_type })));
+      const currentSignature = JSON.stringify(current.map(({ fee_id, quantity, row_type }) => ({ fee_id, quantity, row_type })));
+
+      if (nextSignature === currentSignature) return current;
 
       return nextRows.map((row) => {
-        const currentRow = row.row_type === "banyera" ? currentBanyeraRow : currentDailyRow;
-        const nextFeeId =
-          isAnnualRegisteredDailyEntry && row.row_type === "daily"
-            ? row.fee_id
-            : row.fee_id || "";
+        const currentRow = current.find((item) => item.row_type === row.row_type) ?? { fee_id: "", quantity: row.quantity ?? "0" };
         return {
           ...row,
-          fee_id: nextFeeId,
-          quantity: currentRow?.quantity ?? row.quantity ?? "0",
+          fee_id: row.fee_id || currentRow.fee_id || "",
+          quantity: currentRow.quantity ?? row.quantity ?? "0",
         };
       });
     });
@@ -1230,16 +1228,15 @@ const AddVehicleTicketDrawer = ({
 
     setFeeItems((current) => {
       const currentAnnualRow = current[0] ?? { fee_id: "", quantity: "1" };
-      if (String(currentAnnualRow.fee_id || "") === nextFeeId) return current;
+      const nextAnnualRow = {
+        ...currentAnnualRow,
+        fee_id: nextFeeId,
+        quantity: currentAnnualRow.quantity || "1",
+        row_type: "annual",
+      };
 
-      return [
-        {
-          ...currentAnnualRow,
-          fee_id: nextFeeId,
-          quantity: currentAnnualRow.quantity || "1",
-          row_type: "annual",
-        },
-      ];
+      if (String(currentAnnualRow.fee_id || "") === nextFeeId) return current;
+      return [nextAnnualRow];
     });
   }, [applicableFees, form.vehicle_type_id, isAnnualTicket, open]);
 

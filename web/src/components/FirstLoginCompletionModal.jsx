@@ -13,6 +13,8 @@ import api from "../api/axios";
 import { getStoredToken, getStoredUser, normalizeRole } from "../pages/login/auth";
 import { logoutUser } from "../pages/login/logout";
 import { showBottomToast } from "../store/bottomToastStore";
+import { syncUsersQueryCache } from "../hooks/useUsersQuery";
+import { useQueryClient } from "@tanstack/react-query";
 
 const FONT = "'Montserrat', sans-serif";
 
@@ -100,6 +102,7 @@ const needsFirstLoginCompletion = (user) => (
 export default function FirstLoginCompletionModal() {
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [user, setUser] = useState(() => getStoredUser());
   const [form, setForm] = useState({
     first_name: "",
@@ -187,6 +190,7 @@ export default function FirstLoginCompletionModal() {
       };
 
       sessionStorage.setItem("user", JSON.stringify(updatedUser));
+      syncUsersQueryCache(queryClient, updatedUser);
       setUser(updatedUser);
       setForm({
         first_name: updatedUser.first_name || "",

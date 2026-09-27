@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Keyboard,
@@ -11,6 +11,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  TextInputProps,
   TouchableWithoutFeedback,
   View,
 } from "react-native";
@@ -104,11 +105,20 @@ type LiveInputProps = {
   value: string;
   onChangeText: (value: string) => void;
   onBlur: () => void;
+  onFocus?: () => void;
+  onSubmitEditing?: () => void;
   placeholder: string;
   error?: string;
   success?: boolean;
   secureTextEntry?: boolean;
   rightAdornment?: React.ReactNode;
+  autoComplete?: TextInputProps["autoComplete"];
+  textContentType?: TextInputProps["textContentType"];
+  importantForAutofill?: TextInputProps["importantForAutofill"];
+  returnKeyType?: TextInputProps["returnKeyType"];
+  autoFocus?: boolean;
+  inputRef?: (instance: TextInput | null) => void;
+  blurOnSubmit?: boolean;
 };
 
 function LiveInput({
@@ -116,11 +126,20 @@ function LiveInput({
   value,
   onChangeText,
   onBlur,
+  onFocus,
+  onSubmitEditing,
   placeholder,
   error = "",
   success = false,
   secureTextEntry = false,
   rightAdornment,
+  autoComplete,
+  textContentType,
+  importantForAutofill,
+  returnKeyType,
+  autoFocus,
+  inputRef,
+  blurOnSubmit,
 }: LiveInputProps) {
   const borderClass = error
     ? "border-[#DC2626]"
@@ -139,14 +158,23 @@ function LiveInput({
       </Text>
       <View className={`h-14 flex-row items-center rounded-[10px] border bg-white px-4 ${borderClass}`}>
         <TextInput
+          ref={inputRef}
           value={value}
           onChangeText={onChangeText}
           onBlur={onBlur}
+          onFocus={onFocus}
+          onSubmitEditing={onSubmitEditing}
           placeholder={placeholder}
           placeholderTextColor="#9AA3AF"
           secureTextEntry={secureTextEntry}
+          autoComplete={autoComplete}
+          textContentType={textContentType}
+          importantForAutofill={importantForAutofill}
           autoCapitalize="none"
           autoCorrect={false}
+          autoFocus={autoFocus}
+          returnKeyType={returnKeyType}
+          blurOnSubmit={blurOnSubmit}
           className="flex-1 text-[14px] text-[#1A1F36]"
           style={{ fontFamily: "Montserrat_400Regular" }}
         />
@@ -175,6 +203,9 @@ export default function FirstLoginCompletionModal() {
   const [signingOut, setSigningOut] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const fieldRefs = useRef<Record<string, TextInput | null>>({});
 
   const session = getAuthSession();
   const shouldShow = Boolean(getAuthToken()) && needsFirstLoginCompletion(profile);
@@ -216,6 +247,37 @@ export default function FirstLoginCompletionModal() {
 
   const markTouched = (field: keyof FormState) => {
     setTouched((current) => ({ ...current, [field]: true }));
+  };
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener("keyboardDidShow", (event) => {
+      setKeyboardInset(event.endCoordinates?.height ?? 0);
+    });
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardInset(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  const scrollToField = (fieldName: keyof FormState) => {
+    const input = fieldRefs.current[fieldName];
+    if (!input || !scrollViewRef.current) return;
+
+    requestAnimationFrame(() => {
+      input.measureInWindow((x, y, width, height) => {
+        const extraPadding = 90 + keyboardInset * 0.25;
+        const targetY = Math.max(0, y - extraPadding);
+        scrollViewRef.current?.scrollTo({ y: targetY, animated: true });
+      });
+    });
+  };
+
+  const setFieldRef = (fieldName: keyof FormState) => (instance: TextInput | null) => {
+    fieldRefs.current[fieldName] = instance;
   };
 
   const handleSave = async () => {
@@ -304,7 +366,8 @@ export default function FirstLoginCompletionModal() {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <KeyboardAvoidingView
             className="flex-1 justify-center px-4"
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
           >
             <View
               className="max-h-[92%] w-full overflow-hidden rounded-[14px] border border-[#E8E1E6] bg-[#FFFDFB]"
@@ -314,9 +377,10 @@ export default function FirstLoginCompletionModal() {
               }}
             >
               <ScrollView
+                ref={scrollViewRef}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ padding: 20 }}
+                contentContainerStyle={{ padding: 20, paddingBottom: Math.max(80, keyboardInset + 40) }}
               >
                 <Text
                   className="text-center text-[22px] text-[#1A1F36]"
@@ -332,8 +396,14 @@ export default function FirstLoginCompletionModal() {
                       value={form.first_name}
                       onChangeText={(value) => updateField("first_name", value)}
                       onBlur={() => markTouched("first_name")}
+                      onFocus={() => scrollToField("first_name")}
+                      onSubmitEditing={() => fieldRefs.current.last_name?.focus()}
                       placeholder="Enter first name"
                       error={getError("first_name")}
+                      autoFocus
+                      returnKeyType="next"
+                      inputRef={setFieldRef("first_name")}
+                      blurOnSubmit={false}
                     />
                     <FieldError message={getError("first_name")} />
                   </View>
@@ -344,8 +414,16 @@ export default function FirstLoginCompletionModal() {
                       value={form.last_name}
                       onChangeText={(value) => updateField("last_name", value)}
                       onBlur={() => markTouched("last_name")}
+                      onFocus={() => scrollToField("last_name")}
+                      onSubmitEditing={() => fieldRefs.current.password?.focus()}
                       placeholder="Enter last name"
                       error={getError("last_name")}
+                      autoComplete="off"
+                      textContentType="none"
+                      importantForAutofill="no"
+                      returnKeyType="next"
+                      inputRef={setFieldRef("last_name")}
+                      blurOnSubmit={false}
                     />
                     <FieldError message={getError("last_name")} />
                   </View>
@@ -356,10 +434,18 @@ export default function FirstLoginCompletionModal() {
                       value={form.password}
                       onChangeText={(value) => updateField("password", value)}
                       onBlur={() => markTouched("password")}
+                      onFocus={() => scrollToField("password")}
+                      onSubmitEditing={() => fieldRefs.current.password_confirmation?.focus()}
                       placeholder="Enter password"
                       error={passwordError}
                       success={passwordSuccess}
                       secureTextEntry={!showPassword}
+                      autoComplete="off"
+                      textContentType="none"
+                      importantForAutofill="no"
+                      returnKeyType="next"
+                      inputRef={setFieldRef("password")}
+                      blurOnSubmit={false}
                       rightAdornment={
                         <Pressable
                           accessibilityLabel={showPassword ? "Hide password" : "Show password"}
@@ -412,10 +498,15 @@ export default function FirstLoginCompletionModal() {
                       value={form.password_confirmation}
                       onChangeText={(value) => updateField("password_confirmation", value)}
                       onBlur={() => markTouched("password_confirmation")}
+                      onFocus={() => scrollToField("password_confirmation")}
+                      onSubmitEditing={handleSave}
                       placeholder="Re type password"
                       error={confirmError}
                       success={confirmSuccess}
                       secureTextEntry={!showConfirmPassword}
+                      returnKeyType="done"
+                      inputRef={setFieldRef("password_confirmation")}
+                      blurOnSubmit={false}
                       rightAdornment={
                         <Pressable
                           accessibilityLabel={

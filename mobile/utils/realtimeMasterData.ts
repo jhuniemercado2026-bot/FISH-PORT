@@ -98,7 +98,8 @@ export function startMasterDataRealtime({ onUpdate }: RealtimeOptions) {
       const channel = String((payload as { channel?: string }).channel ?? "");
       if (channel && channel !== MASTER_DATA_CHANNEL) return;
 
-      if (event === "updated" || event === ".updated") {
+      const normalizedEvent = event.replace(/^\./, "");
+      if (["created", "updated", "deleted", "archived", "restored", "changed"].includes(normalizedEvent)) {
         const data = parseEventData((payload as { data?: unknown }).data);
         if (data && typeof data === "object") {
           onUpdate(data as MasterDataUpdatePayload);

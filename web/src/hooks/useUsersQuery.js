@@ -91,6 +91,77 @@ export const useUsersQuery = (queryOptions = {}) =>
     ...queryOptions,
   });
 
+const getUserMatchKey = (user) => String(user?.user_id ?? user?.id ?? "");
+const getUserEmailKey = (user) => String(user?.email || "").trim().toLowerCase();
+const getUserDisplayName = (user) => {
+  const direct = String(user?.full_name || "").trim();
+  if (direct) return direct;
+
+  const combined = [user?.first_name, user?.last_name].filter(Boolean).join(" ").trim();
+  if (combined) return combined;
+
+  return String(user?.email || "").trim() || "—";
+};
+
+const upsertUserInList = (targetUser, currentUser) => {
+  if (!currentUser) return currentUser;
+
+  const currentId = getUserMatchKey(currentUser);
+  const currentEmail = getUserEmailKey(currentUser);
+  const targetId = getUserMatchKey(targetUser);
+  const targetEmail = getUserEmailKey(targetUser);
+
+  const isMatch = Boolean(
+    (targetId && currentId && targetId === currentId)
+    || (targetEmail && currentEmail && targetEmail === currentEmail)
+  );
+
+  if (!isMatch) return currentUser;
+
+  const nextUser = {
+    ...currentUser,
+    ...targetUser,
+    full_name: String(targetUser?.full_name || currentUser?.full_name || getUserDisplayName({ ...currentUser, ...targetUser })).trim() || "—",
+  };
+
+  return {
+    ...nextUser,
+    full_name: getUserDisplayName(nextUser),
+  };
+};
+
+export const syncUsersQueryCache = (queryClient, updatedUser) => {
+  if (!queryClient || !updatedUser) return;
+
+  queryClient.getQueryCache().findAll({ queryKey: USERS_QUERY_KEY }).forEach((query) => {
+    queryClient.setQueryData(query.queryKey, (data) => {
+      if (!data) return data;
+
+      if (Array.isArray(data)) {
+        return data.map((item) => upsertUserInList(updatedUser, item));
+      }
+
+      if (Array.isArray(data.users)) {
+        return {
+          ...data,
+          users: data.users.map((item) => upsertUserInList(updatedUser, item)),
+        };
+      }
+
+      if (Array.isArray(data.data)) {
+        return {
+          ...data,
+          data: data.data.map((item) => upsertUserInList(updatedUser, item)),
+        };
+      }
+
+      return data;
+    });
+  });
+
+  void queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY, refetchType: "active" });
+};
+
 export const useUsersPageQuery = (filters = {}, queryOptions = {}) =>
   useQuery({
     ...getUsersPageQueryOptions(filters),

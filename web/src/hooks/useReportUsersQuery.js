@@ -3,6 +3,15 @@ import api from "../api/axios";
 
 export const REPORT_USERS_QUERY_KEY = ["report-users"];
 
+export const syncReportUsersQueryCache = (queryClient) => {
+  if (!queryClient) return;
+
+  void queryClient.invalidateQueries({
+    queryKey: REPORT_USERS_QUERY_KEY,
+    refetchType: "active",
+  });
+};
+
 export const getReportUsersQueryOptions = () => ({
   queryKey: REPORT_USERS_QUERY_KEY,
   queryFn: async ({ signal }) => {

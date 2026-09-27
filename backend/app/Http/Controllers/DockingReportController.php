@@ -17,6 +17,36 @@ class DockingReportController extends Controller
         return $query->where('dockings.created_by', (int) $userId);
     }
 
+    private function applyBoatFilter($query, Request $request)
+    {
+        $boatId = $request->query('boat_id');
+        $sourceType = trim((string) $request->query('source_type', ''));
+        $sourceId = $request->query('source_id');
+
+        if ($boatId !== null && $boatId !== '' && $boatId !== 'all') {
+            if (!ctype_digit((string) $boatId)) abort(400, 'Invalid boat filter.');
+            return $query->where('dockings.boat_id', (int) $boatId);
+        }
+
+        if ($sourceType !== '' && $sourceType !== 'all') {
+            if (!in_array($sourceType, ['docking', 'banyera'], true)) abort(400, 'Invalid visiting boat source type.');
+            if ($sourceId !== null && $sourceId !== '' && $sourceId !== 'all') {
+                if (!ctype_digit((string) $sourceId)) abort(400, 'Invalid visiting boat filter.');
+                return $query->where('dockings.docking_id', (int) $sourceId)
+                    ->where('dockings.boat_category', 'visiting');
+            }
+            return $query->where('dockings.boat_category', 'visiting');
+        }
+
+        if ($sourceId !== null && $sourceId !== '' && $sourceId !== 'all') {
+            if (!ctype_digit((string) $sourceId)) abort(400, 'Invalid visiting boat filter.');
+            return $query->where('dockings.docking_id', (int) $sourceId)
+                ->where('dockings.boat_category', 'visiting');
+        }
+
+        return $query;
+    }
+
     private function buildReportQuery()
     {
         return Docking::query()
@@ -96,7 +126,9 @@ class DockingReportController extends Controller
         $query = $this->buildReportQuery()
             ->whereDate('dockings.docking_date', $date);
 
-        return $this->renderReport($this->applyUserFilter($query, $request));
+        return $this->renderReport(
+            $this->applyBoatFilter($this->applyUserFilter($query, $request), $request)
+        );
     }
 
     public function monthly(Request $request)
@@ -110,7 +142,9 @@ class DockingReportController extends Controller
             ->whereYear('dockings.docking_date', (int) $validated['year'])
             ->whereMonth('dockings.docking_date', (int) $validated['month']);
 
-        return $this->renderReport($this->applyUserFilter($query, $request));
+        return $this->renderReport(
+            $this->applyBoatFilter($this->applyUserFilter($query, $request), $request)
+        );
     }
 
     public function yearly(Request $request)
@@ -122,6 +156,8 @@ class DockingReportController extends Controller
         $query = $this->buildReportQuery()
             ->whereYear('dockings.docking_date', (int) $validated['year']);
 
-        return $this->renderReport($this->applyUserFilter($query, $request));
+        return $this->renderReport(
+            $this->applyBoatFilter($this->applyUserFilter($query, $request), $request)
+        );
     }
 }

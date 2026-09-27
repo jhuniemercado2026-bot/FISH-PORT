@@ -143,13 +143,32 @@ class BackupRecoveryController extends Controller
         return $accounts->count();
     }
 
+    private function backupDirectory(): string
+    {
+        $candidates = [
+            storage_path('app/private/' . self::BACKUP_DIRECTORY),
+            storage_path('app/' . self::BACKUP_DIRECTORY),
+            rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . self::BACKUP_DIRECTORY,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (!is_dir($candidate) && !@mkdir($candidate, 0775, true) && !is_dir($candidate)) {
+                continue;
+            }
+
+            if (is_writable($candidate)) {
+                return $candidate;
+            }
+        }
+
+        throw new RuntimeException('The backup directory is not writable.');
+    }
+
     private function createDatabaseBackup(string $prefix = 'backup'): string
     {
         $this->ensureMysqlConnection();
 
-        $directory = storage_path('app/private/' . self::BACKUP_DIRECTORY);
-        File::ensureDirectoryExists($directory);
-
+        $directory = $this->backupDirectory();
         $database = (string) config('database.connections.mysql.database');
         $filename = $this->backupFilename($prefix);
         $path = $directory . DIRECTORY_SEPARATOR . $filename;
@@ -163,27 +182,106 @@ class BackupRecoveryController extends Controller
         $process->setEnv($this->processEnvironment());
         $process->setTimeout(self::PROCESS_TIMEOUT_SECONDS);
 
-        $handle = fopen($path, 'wb');
-        if ($handle === false) {
-            throw new RuntimeException('Unable to create the backup file.');
-        }
-
         try {
-            $process->mustRun(function ($type, $buffer) use ($handle) {
-                if ($type === Process::OUT) {
-                    fwrite($handle, $buffer);
-                }
-            });
-        } finally {
-            fclose($handle);
-        }
+            $handle = fopen($path, 'wb');
+            if ($handle === false) {
+                throw new RuntimeException('Unable to create the backup file.');
+            }
 
-        if (!is_file($path) || filesize($path) === 0) {
+            try {
+                $process->mustRun(function ($type, $buffer) use ($handle) {
+                    if ($type === Process::OUT) {
+                        fwrite($handle, $buffer);
+                    }
+                });
+            } finally {
+                fclose($handle);
+            }
+
+            if (!is_file($path) || filesize($path) === 0) {
+                @unlink($path);
+                throw new RuntimeException('The generated backup file is empty.');
+            }
+
+            return $path;
+        } catch (\Throwable $error) {
             @unlink($path);
-            throw new RuntimeException('The generated backup file is empty.');
+
+            $this->writeDatabaseBackupFallback($database, $path);
+
+            if (!is_file($path) || filesize($path) === 0) {
+                throw $error;
+            }
+
+            return $path;
+        }
+    }
+
+    private function writeDatabaseBackupFallback(string $database, string $path): void
+    {
+        $connection = config('database.connections.mysql');
+
+        $dsn = 'mysql:host=' . ($connection['host'] ?? '127.0.0.1')
+            . ';port=' . ($connection['port'] ?? 3306)
+            . ';dbname=' . $database
+            . ';charset=utf8mb4';
+
+        $username = (string) ($connection['username'] ?? 'root');
+        $password = (string) ($connection['password'] ?? '');
+
+        $pdo = new \PDO($dsn, $username, $password, [
+            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+            \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+            \PDO::ATTR_EMULATE_PREPARES => false,
+        ]);
+
+        $tables = $pdo->query("SHOW TABLES")->fetchAll(\PDO::FETCH_COLUMN);
+        $output = "-- Auto-generated fallback backup\n-- Database: `{$database}`\n-- Generated: " . now('Asia/Manila')->toDateTimeString() . "\n\n";
+
+        foreach ($tables as $table) {
+            $tableName = (string) $table;
+
+            $createStatement = $pdo->query("SHOW CREATE TABLE `{$tableName}`")
+                ->fetch(\PDO::FETCH_NUM)[1] ?? null;
+
+            if ($createStatement === null) {
+                continue;
+            }
+
+            $output .= "DROP TABLE IF EXISTS `{$tableName}`;\n";
+            $output .= $createStatement . ";\n\n";
+
+            $rows = $pdo->query("SELECT * FROM `{$tableName}`");
+            $columns = $rows->columnCount() > 0 ? $this->pdoColumnNames($pdo, $tableName) : [];
+
+            foreach ($rows as $row) {
+                if (empty($columns)) {
+                    continue;
+                }
+
+                $values = [];
+                foreach ($columns as $column) {
+                    $value = $row[$column] ?? null;
+                    $values[] = $value === null ? 'NULL' : $pdo->quote((string) $value);
+                }
+
+                $output .= 'INSERT INTO `' . $tableName . '` (`' . implode('`, `', $columns) . '`) VALUES (' . implode(', ', $values) . ');\n';
+            }
+
+            $output .= "\n";
         }
 
-        return $path;
+        $written = file_put_contents($path, $output);
+        if ($written === false) {
+            throw new RuntimeException('Unable to write the fallback backup file.');
+        }
+    }
+
+    private function pdoColumnNames(\PDO $pdo, string $tableName): array
+    {
+        $columns = $pdo->query("SHOW COLUMNS FROM `{$tableName}`")->fetchAll(\PDO::FETCH_COLUMN, 0);
+
+        return array_map('strval', $columns);
     }
 
     private function backupFilename(string $prefix): string
@@ -243,20 +341,41 @@ class BackupRecoveryController extends Controller
 
     private function resolveMysqlBinary(string $binary): string
     {
-        $envKey = strtoupper($binary) . '_BINARY';
-        $configuredPath = env($envKey);
+        $binaryVariants = $this->mysqlBinaryVariants($binary);
 
-        if ($configuredPath && is_file($configuredPath)) {
-            return $configuredPath;
+        foreach ($binaryVariants as $variant) {
+            $envKey = strtoupper(str_replace('-', '_', $variant)) . '_BINARY';
+            $configuredPath = env($envKey);
+
+            if ($configuredPath && is_file($configuredPath)) {
+                return $configuredPath;
+            }
         }
 
-        foreach ($this->mysqlBinaryCandidates($binary) as $candidate) {
-            if (is_file($candidate)) {
-                return $candidate;
+        foreach ($binaryVariants as $variant) {
+            foreach ($this->mysqlBinaryCandidates($variant) as $candidate) {
+                if (is_file($candidate)) {
+                    return $candidate;
+                }
             }
         }
 
         return $binary;
+    }
+
+    private function mysqlBinaryVariants(string $binary): array
+    {
+        $variants = [$binary];
+
+        if ($binary === 'mysqldump') {
+            $variants[] = 'mariadb-dump';
+        }
+
+        if ($binary === 'mysql') {
+            $variants[] = 'mariadb';
+        }
+
+        return array_values(array_unique($variants));
     }
 
     private function mysqlBinaryCandidates(string $binary): array
@@ -269,6 +388,11 @@ class BackupRecoveryController extends Controller
             'C:\\laragon\\bin\\mysql\\mysql-5.7\\bin\\' . $fileName,
             'C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\' . $fileName,
             'C:\\Program Files\\MySQL\\MySQL Server 5.7\\bin\\' . $fileName,
+            '/usr/local/mysql/bin/' . $fileName,
+            '/usr/local/bin/' . $fileName,
+            '/usr/bin/' . $fileName,
+            '/opt/alt/php' . PHP_MAJOR_VERSION . '/' . 'usr/bin/' . $fileName,
+            '/usr/local/mysql/bin/' . $binary,
             '/usr/bin/' . $binary,
             '/usr/local/bin/' . $binary,
         ];
@@ -316,7 +440,9 @@ class BackupRecoveryController extends Controller
 
         $message = $fallbackMessage;
         if ($error instanceof ProcessFailedException) {
-            $message = trim($error->getProcess()->getErrorOutput()) ?: $fallbackMessage;
+            $process = $error->getProcess();
+            $message = trim($process->getErrorOutput()) ?: trim($process->getOutput()) ?: $fallbackMessage;
+            $message .= ' | Command: ' . implode(' ', $process->getCommandLine());
         } elseif ($error instanceof RuntimeException) {
             $message = $error->getMessage() ?: $fallbackMessage;
         }

@@ -87,11 +87,8 @@ export default function ReportDailyDatePicker({
 
   const defaultPickerValue = useMemo(() => {
     if (pickerValue) return pickerValue;
-    const fiscalYearNumber = Number(fiscalYear);
-    return Number.isInteger(fiscalYearNumber)
-      ? dayjs(`${fiscalYearNumber}-01-01`, dateFormat, true)
-      : dayjs();
-  }, [dateFormat, fiscalYear, pickerValue]);
+    return dayjs();
+  }, [pickerValue]);
 
   const disabledDate = (current) => {
     if (!current) return false;

@@ -2,6 +2,7 @@
   "expo": {
     "name": "Opol Fish Port",
     "slug": "frontend-mobile",
+    "owner": "jhunies-team",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/opol_fish_port_app_icon.png",
@@ -49,7 +50,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "c555bb11-13c2-48af-9134-dc1d737df101"
+        "projectId": "c1896135-f7a6-41cd-9bc8-1c8911f07eae"
       }
     }
   }

@@ -326,8 +326,14 @@ export default function TransactionsRealtimeBridge() {
       }
     });
 
-    masterDataChannel.listen(".updated", (payload) => {
+    const handleMasterDataUpdate = (payload) => {
       const resource = String(payload?.resource || "");
+      const action = String(payload?.action || "");
+
+      if (action && !["created", "updated", "deleted", "archived", "restored", "changed"].includes(action)) {
+        return;
+      }
+
       void queryClient.invalidateQueries({ queryKey: ["universal-search"], refetchType: "active" });
 
       if (["boats", "boat_types", "boat_owners"].includes(resource)) {
@@ -350,7 +356,14 @@ export default function TransactionsRealtimeBridge() {
       if (["vehicle_types", "annual_vehicle_tickets"].includes(resource)) {
         invalidateVehicleTicketQueries(queryClient);
       }
-    });
+    };
+
+    masterDataChannel.listen(".created", handleMasterDataUpdate);
+    masterDataChannel.listen(".updated", handleMasterDataUpdate);
+    masterDataChannel.listen(".deleted", handleMasterDataUpdate);
+    masterDataChannel.listen(".archived", handleMasterDataUpdate);
+    masterDataChannel.listen(".restored", handleMasterDataUpdate);
+    masterDataChannel.listen(".changed", handleMasterDataUpdate);
 
     return () => {
       echo.leave("transactions");

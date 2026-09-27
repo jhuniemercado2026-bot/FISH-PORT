@@ -7,6 +7,7 @@ import App from './App.jsx';
 import ActivityLogsRealtimeBridge from './components/ActivityLogsRealtimeBridge.jsx';
 import AccountStatusRealtimeBridge from './components/AccountStatusRealtimeBridge.jsx';
 import DashboardRealtimeBridge from './components/DashboardRealtimeBridge.jsx';
+import FeesRealtimeBridge from './components/FeesRealtimeBridge.jsx';
 import NotificationsRealtimeBridge from './components/NotificationsRealtimeBridge.jsx';
 import TransactionLockRealtimeBridge from './components/TransactionLockRealtimeBridge.jsx';
 import TransactionsRealtimeBridge from './components/TransactionsRealtimeBridge.jsx';
@@ -17,6 +18,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <TransactionLockRealtimeBridge />
     <TransactionsRealtimeBridge />
     <DashboardRealtimeBridge />
+    <FeesRealtimeBridge />
     <NotificationsRealtimeBridge />
     <ActivityLogsRealtimeBridge />
     <AccountStatusRealtimeBridge />

@@ -15,10 +15,11 @@ export const getRevenueReportQueryOptions = ({
   month = undefined,
   year = undefined,
   userId = undefined,
+  transactionType = "all",
 } = {}) => ({
   queryKey: [
     "revenue-report",
-    { filterType, date, month, year, userId },
+    { filterType, date, month, year, userId, transactionType },
   ],
   queryFn: async ({ signal }) => {
     try {
@@ -40,6 +41,9 @@ export const getRevenueReportQueryOptions = ({
 
       if (userId && userId !== "all") {
         params.user_id = userId;
+      }
+      if (transactionType && transactionType !== "all") {
+        params.transaction_type = transactionType;
       }
 
       const response = await api.get(endpoint, { params, signal }).catch(err => {

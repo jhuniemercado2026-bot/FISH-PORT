@@ -376,11 +376,11 @@ class AuthController extends Controller
             user: $user
         );
 
-        // Revoke only the current token
+        // Revoke only the current token, but mark the account offline immediately
+        // so the presence list reflects the user's actual logged-out state.
         $user->currentAccessToken()->delete();
-        $hasOtherActiveSessions = $user->tokens()->exists();
 
-        if ($user->status !== 'deactivated' && ! $hasOtherActiveSessions) {
+        if ($user->status !== 'deactivated') {
             $user->update(['status' => 'offline']);
             $user->refresh();
             $this->broadcastAccountStatus($user, 'offline');

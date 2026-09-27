@@ -1,6 +1,9 @@
 import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { clearStoredAuth, getStoredUser, normalizeRole } from "../pages/login/auth";
 import { disconnectEcho, getEcho, REALTIME_AUTH_CHANGED_EVENT } from "../lib/realtime";
+import { syncUsersQueryCache } from "../hooks/useUsersQuery";
+import { syncReportUsersQueryCache } from "../hooks/useReportUsersQuery";
 import { accountPresenceActions } from "../store/accountPresenceStore";
 
 const FORCED_LOGOUT_MESSAGE = "System error, your account will be logged out.";
@@ -32,6 +35,8 @@ const forceLogout = (message = FORCED_LOGOUT_MESSAGE) => {
 };
 
 export default function AccountStatusRealtimeBridge() {
+  const queryClient = useQueryClient();
+
   useEffect(() => {
     let cleanupSubscriptions = null;
 
@@ -87,11 +92,29 @@ export default function AccountStatusRealtimeBridge() {
           return;
         }
 
+        if (resource === "users" && record) {
+          const normalizedAction = action || "updated";
+          if (["created", "updated"].includes(normalizedAction)) {
+            syncUsersQueryCache(queryClient, record);
+            syncReportUsersQueryCache(queryClient);
+          }
+        }
+
         if (resource !== "users" || status !== "deactivated" || !currentUserMatchesRecord(record)) {
           return;
         }
 
         forceLogout();
+      });
+
+      channel.listen(".created", (payload) => {
+        const resource = String(payload?.resource || "");
+        const record = payload?.record;
+
+        if (resource === "users" && record) {
+          syncUsersQueryCache(queryClient, record);
+          syncReportUsersQueryCache(queryClient);
+        }
       });
 
       cleanupSubscriptions = () => {

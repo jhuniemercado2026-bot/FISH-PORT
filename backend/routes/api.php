@@ -44,6 +44,7 @@ use App\Http\Controllers\VoidRequestController;
 |--------------------------------------------------------------------------
 */
 
+Route::get('/', fn () => 'hello');
 Route::post('login', [AuthController::class, 'login']);
 Route::post('forgot-password/check-email', [AuthController::class, 'checkForgotPasswordEmail']);
 Route::post('forgot-password/verify-code', [AuthController::class, 'verifyForgotPasswordCode']);

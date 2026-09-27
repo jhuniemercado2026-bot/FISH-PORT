@@ -1051,7 +1051,7 @@ class BanyeraTransactionController extends Controller
     {
         $coordinators = User::query()
             ->where('role', 'coordinator')
-            ->where('status', 'active')
+            ->where('status', '!=', 'deactivated')
             ->get(['user_id']);
 
         if ($coordinators->isEmpty()) {
@@ -1087,14 +1087,18 @@ class BanyeraTransactionController extends Controller
             $inspectorName = $inspector?->email ?: 'An inspector';
         }
 
-        $boatName = trim((string) ($transaction->boat?->boat_name ?? 'Unknown boat'));
-        $totalFee = 'PHP ' . number_format((float) ($transaction->total_fee ?? 0), 2);
+        $inspectorLabel = 'Inspector ' . $inspectorName;
+        $boatName = $this->isVisitingBanyera($transaction)
+            ? trim((string) ($transaction->visiting_boat_name ?? ''))
+            : trim((string) ($transaction->boat?->boat_name ?? ''));
+        $boatName = $boatName !== '' ? $boatName : 'Unknown boat';
+        $totalFee = '₱' . number_format((float) ($transaction->total_fee ?? 0), 2);
 
         if ($printCount > 1) {
-            return $inspectorName . ' reprinted the banyera transaction for boat "' . $boatName . '" with a total fee of ' . $totalFee . '. Print count: ' . $printCount . '.';
+            return $inspectorLabel . ', reprinted the banyera transaction for ' . ($this->isVisitingBanyera($transaction) ? 'visiting boat' : 'boat') . ' "' . $boatName . '" with a total fee of ' . $totalFee . '. Print count: ' . $printCount . '.';
         }
 
-        return $inspectorName . ' printed the banyera details for boat "' . $boatName . '" with a total fee of ' . $totalFee . '.';
+        return $inspectorLabel . ' printed the banyera details for ' . ($this->isVisitingBanyera($transaction) ? 'visiting boat' : 'boat') . ' "' . $boatName . '" with a total fee of ' . $totalFee . '.';
     }
 
     public function update(Request $request, $id)

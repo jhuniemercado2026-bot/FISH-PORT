@@ -1,9 +1,4 @@
-import { toByteArray } from "base64-js";
-import { PNG } from "pngjs/browser";
 import type { BluetoothPrinter } from "@netinove/thermal-printer";
-
-const PRINTER_WIDTH_DOTS = 384;
-const MAX_SIGNATURE_HEIGHT_DOTS = 96;
 
 function centerPrinterText(text: string, width = 32) {
   const trimmed = text.trim();
@@ -32,91 +27,127 @@ function findPreferredThermalPrinter(printers: BluetoothPrinter[]) {
   );
 }
 
-function decodeSignatureDataUrl(signatureDataUrl?: string | null) {
-  const match = String(signatureDataUrl ?? "").match(/^data:image\/png;base64,(.+)$/);
-
-  if (!match) {
-    return null;
-  }
-
-  try {
-    return PNG.sync.read(toByteArray(match[1]));
-  } catch {
-    return null;
-  }
+function toThermalCurrencyText(value: string) {
+  return String(value ?? "")
+    .replace(/₱/g, "PHP ")
+    .replace(/PHP\s+/g, "PHP ")
+    .replace(/,/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function buildSignatureRasterBytes(signatureDataUrl?: string | null) {
-  const png = decodeSignatureDataUrl(signatureDataUrl);
+type ThermalReceiptPreview = {
+  title: string;
+  subtitle: string;
+  details: { label: string; value: string }[];
+  lines: {
+    name: string;
+    quantity: number;
+    feeText: string;
+    subtotalText: string;
+    daugText?: string | null;
+  }[];
+  totalText: string;
+};
 
-  if (!png || png.width <= 0 || png.height <= 0) {
-    return [];
-  }
+function wrapPrinterText(value: string, width = 32) {
+  const trimmed = value.trim();
+  if (!trimmed) return [""];
 
-  const scale = Math.min(
-    PRINTER_WIDTH_DOTS / png.width,
-    MAX_SIGNATURE_HEIGHT_DOTS / png.height,
-    1
-  );
-  const targetWidth = Math.max(1, Math.floor(png.width * scale));
-  const targetHeight = Math.max(1, Math.floor(png.height * scale));
-  const widthBytes = Math.ceil(targetWidth / 8);
-  const raster = new Array(widthBytes * targetHeight).fill(0);
+  const words = trimmed.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
 
-  for (let y = 0; y < targetHeight; y += 1) {
-    const sourceY = Math.min(png.height - 1, Math.floor(y / scale));
+  words.forEach((word) => {
+    const candidate = current ? `${current} ${word}` : word;
 
-    for (let x = 0; x < targetWidth; x += 1) {
-      const sourceX = Math.min(png.width - 1, Math.floor(x / scale));
-      const sourceIndex = (sourceY * png.width + sourceX) * 4;
-      const red = png.data[sourceIndex] ?? 255;
-      const green = png.data[sourceIndex + 1] ?? 255;
-      const blue = png.data[sourceIndex + 2] ?? 255;
-      const alpha = png.data[sourceIndex + 3] ?? 255;
-      const luminance = red * 0.299 + green * 0.587 + blue * 0.114;
-      const isInk = alpha > 64 && luminance < 210;
-
-      if (isInk) {
-        const byteIndex = y * widthBytes + Math.floor(x / 8);
-        raster[byteIndex] |= 0x80 >> (x % 8);
-      }
+    if (candidate.length <= width) {
+      current = candidate;
+      return;
     }
+
+    if (current) {
+      lines.push(current);
+    }
+
+    if (word.length <= width) {
+      current = word;
+      return;
+    }
+
+    for (let index = 0; index < word.length; index += width) {
+      lines.push(word.slice(index, index + width));
+    }
+
+    current = "";
+  });
+
+  if (current) {
+    lines.push(current);
   }
 
-  const xL = widthBytes & 0xff;
-  const xH = (widthBytes >> 8) & 0xff;
-  const yL = targetHeight & 0xff;
-  const yH = (targetHeight >> 8) & 0xff;
+  return lines.length > 0 ? lines : [""];
+}
 
-  return [
-    0x1b, 0x61, 0x01,
-    0x1d, 0x76, 0x30, 0x00, xL, xH, yL, yH,
-    ...raster,
-    0x1b, 0x61, 0x00,
-    0x0a,
+function buildThermalReceiptTextFromPreview(preview: ThermalReceiptPreview) {
+  const title = String(preview.title || "OPOL FISH PORT").trim();
+  const subtitle = String(preview.subtitle || "TRANSACTION").trim();
+  const lines = [
+    centerPrinterText(title),
+    centerPrinterText(subtitle),
+    "-".repeat(32),
   ];
+
+  preview.details.forEach(({ label, value }) => {
+    const detailLabel = String(label || "").trim();
+    const detailValue = String(value || "-").trim();
+
+    if (!detailLabel && !detailValue) {
+      return;
+    }
+
+    const detailText = detailLabel ? `${detailLabel}: ${detailValue}` : detailValue;
+
+    if (detailText.length <= 32) {
+      lines.push(detailText);
+      return;
+    }
+
+    lines.push(`${detailLabel}:`);
+    wrapPrinterText(detailValue, 32).forEach((chunk) => lines.push(chunk));
+  });
+
+  lines.push("-".repeat(32));
+
+  preview.lines.forEach((line, index) => {
+    const itemName = String(line.name || "Fish").trim() || "Fish";
+    const feeText = toThermalCurrencyText(line.feeText || "PHP 0.00");
+    const subtotalText = toThermalCurrencyText(line.subtotalText || "PHP 0.00");
+    lines.push(`${index + 1}. ${itemName}`);
+    lines.push(`${String(line.quantity || 0)} x ${feeText}`.padEnd(22, " ") + subtotalText);
+
+    if (line.daugText) {
+      lines.push(`Daug${" ".repeat(17)}${toThermalCurrencyText(line.daugText)}`);
+    }
+  });
+
+  lines.push("-".repeat(32));
+
+  const totalLabel = "TOTAL";
+  const totalValue = toThermalCurrencyText(preview.totalText || "PHP 0.00");
+  const totalPadding = Math.max(1, 32 - totalLabel.length - totalValue.length);
+  lines.push(`${totalLabel}${" ".repeat(totalPadding)}${totalValue}`);
+  lines.push("");
+
+  return lines.join("\n");
 }
 
-function buildSignatureFooterText() {
-  return [
-    "____________________________",
-    centerPrinterText("Signature"),
-    "",
-    "",
-    "",
-  ].join("\n");
-}
-
-export async function printThermalReceiptWithSignature(
-  text: string,
-  signatureDataUrl?: string | null
-) {
+export async function printThermalReceipt(receipt: string | ThermalReceiptPreview) {
   const {
     connect: connectThermalPrinter,
     getBondedPrinters,
     getConnectionState,
     requestBluetoothPermissions,
-    write: writeThermalBytes,
     writeText: writeThermalText,
   } = await import("@netinove/thermal-printer");
 
@@ -139,12 +170,8 @@ export async function printThermalReceiptWithSignature(
     await connectThermalPrinter(printer.address);
   }
 
-  await writeThermalText(`${text.trimEnd()}\n\n`);
+  const receiptText = typeof receipt === "string" ? receipt : buildThermalReceiptTextFromPreview(receipt);
 
-  const signatureBytes = buildSignatureRasterBytes(signatureDataUrl);
-  if (signatureBytes.length > 0) {
-    await writeThermalBytes(signatureBytes);
-  }
-
-  await writeThermalText(buildSignatureFooterText(), { trailingLines: 3 });
+  await writeThermalText(`${receiptText.trimEnd()}\n\n`);
+  await writeThermalText("\n", { trailingLines: 3 });
 }

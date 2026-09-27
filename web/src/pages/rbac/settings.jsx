@@ -27,6 +27,7 @@ import TitlePage from "../../components/TitlePage";
 import api from "../../api/axios";
 import { showBottomToast, showInfoToast, showNoChangesToast, showUpdatedToast } from "../../store/bottomToastStore";
 import { SETTINGS_QUERY_KEY, useSettingsQuery } from "../../hooks/useSettingsQuery";
+import { syncUsersQueryCache } from "../../hooks/useUsersQuery";
 import { useSidebar } from "../../store/sidebarStore";
 import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
 import { useFiscalYearStore, getFiscalYearOptions } from "../../store/fiscalYearStore";
@@ -289,9 +290,13 @@ const UserProfileTab = ({ showToast }) => {
   const { data, isLoading, error } = useSettingsQuery();
   const {
     transactionLock,
+    rawTransactionLock,
     transactionLockMessage,
   } = useTransactionLockQuery();
-  const isTransactionLocked = Boolean(transactionLock && transactionLock.applies_to !== "transactions");
+  const isTransactionLocked = Boolean(
+    rawTransactionLock ||
+      (transactionLock && transactionLock.applies_to === "transactions"),
+  );
   const profile = data?.user ?? null;
   const [saving,            setSaving]            = useState(false);
   const [showPersonalModal, setShowPersonalModal] = useState(false);
@@ -355,6 +360,7 @@ const UserProfileTab = ({ showToast }) => {
 
   const syncProfileCache = useCallback((nextProfile) => {
     queryClient.setQueryData(SETTINGS_QUERY_KEY, { user: nextProfile });
+    syncUsersQueryCache(queryClient, nextProfile);
     localStorage.removeItem("user");
     sessionStorage.setItem("user", JSON.stringify(nextProfile));
   }, [queryClient]);

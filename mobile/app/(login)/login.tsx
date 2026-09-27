@@ -472,9 +472,10 @@ export default function LoginScreen() {
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
         <View className="flex-1 bg-[#1A1F36]">
           <KeyboardAwareScrollView
-            contentContainerStyle={{ flexGrow: 1 }}
+            contentContainerStyle={{ flexGrow: 1, paddingBottom: 16 }}
             enableOnAndroid
-            extraScrollHeight={120}
+            enableAutomaticScroll
+            extraScrollHeight={24}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
@@ -500,7 +501,10 @@ export default function LoginScreen() {
               </View>
             </SafeAreaView>
 
-            <View className="flex-1 rounded-t-[46px] bg-[#FFFDFB] px-7 pb-10 pt-10">
+            <View
+              className="flex-1 rounded-t-[46px] bg-[#FFFDFB] px-7 pb-10 pt-10"
+              style={{ minHeight: 640, paddingBottom: 120 }}
+            >
               {showForgotModal ? (
                 <View>
                   <View className="flex-row items-center justify-between">
@@ -593,11 +597,7 @@ export default function LoginScreen() {
                       value={email}
                       style={{ fontFamily: "Montserrat_400Regular" }}
                       returnKeyType="next"
-                      onFocus={() => {
-                        setTimeout(() => {
-                          emailRef.current?.focus();
-                        }, 100);
-                      }}
+                      blurOnSubmit={false}
                       onSubmitEditing={() => passwordRef.current?.focus()}
                     />
                   </View>
@@ -633,11 +633,7 @@ export default function LoginScreen() {
                       value={password}
                       style={{ fontFamily: "Montserrat_400Regular" }}
                       returnKeyType="done"
-                      onFocus={() => {
-                        setTimeout(() => {
-                          passwordRef.current?.focus();
-                        }, 100);
-                      }}
+                      blurOnSubmit={false}
                       onSubmitEditing={handleLogin}
                     />
                     <Pressable

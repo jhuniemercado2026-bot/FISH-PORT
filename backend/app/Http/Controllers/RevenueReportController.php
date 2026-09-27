@@ -31,6 +31,22 @@ class RevenueReportController extends Controller
         return ['valid' => true, 'value' => (int) $rawUserId];
     }
 
+    private function requestedTransactionType(Request $request): array
+    {
+        $transactionType = trim((string) $request->query('transaction_type', ''));
+        $allowed = ['all', 'docking', 'banyera', 'ticket', 'registered', 'visiting'];
+
+        if ($transactionType === '') {
+            return ['valid' => true, 'value' => 'all'];
+        }
+
+        if (!in_array($transactionType, $allowed, true)) {
+            return ['valid' => false, 'value' => 'all'];
+        }
+
+        return ['valid' => true, 'value' => $transactionType];
+    }
+
     protected function normalizeRevenueRow(object|array $row): array
     {
         $payload = is_array($row) ? $row : (array) $row;
@@ -53,7 +69,7 @@ class RevenueReportController extends Controller
         ];
     }
 
-    private function getRevenueRowsAndTotal(?string $date, ?string $month, ?string $year, ?int $userId = null, ?array $reportUserRoles = null)
+    private function getRevenueRowsAndTotal(?string $date, ?string $month, ?string $year, ?int $userId = null, ?array $reportUserRoles = null, string $transactionType = 'all')
     {
         // Build subqueries for OR numbers and receivable amounts
         $dockingOrsSubquery = DB::table('bill_items')
@@ -143,6 +159,25 @@ class RevenueReportController extends Controller
             ->whereNull('vehicle_tickets.voided_at')
             ->groupBy('vehicle_tickets.ticket_date', 'vehicle_tickets.plate_number', 'vehicle_types.type_name', 'vehicle_tickets.ticket_type');
 
+        if ($transactionType === 'docking') {
+            $banyeraQuery->whereRaw('0 = 1');
+            $ticketQuery->whereRaw('0 = 1');
+        } elseif ($transactionType === 'banyera') {
+            $dockingQuery->whereRaw('0 = 1');
+            $ticketQuery->whereRaw('0 = 1');
+        } elseif ($transactionType === 'ticket') {
+            $dockingQuery->whereRaw('0 = 1');
+            $banyeraQuery->whereRaw('0 = 1');
+        } elseif ($transactionType === 'registered') {
+            $dockingQuery->where('dockings.boat_category', 'registered');
+            $banyeraQuery->where('banyera_transactions.boat_category', 'registered');
+            $ticketQuery->whereRaw('0 = 1');
+        } elseif ($transactionType === 'visiting') {
+            $dockingQuery->where('dockings.boat_category', 'visiting');
+            $banyeraQuery->where('banyera_transactions.boat_category', 'visiting');
+            $ticketQuery->whereRaw('0 = 1');
+        }
+
         if ($userId) {
             $dockingQuery->where('dockings.created_by', $userId);
             $banyeraQuery->where('banyera_transactions.created_by', $userId);
@@ -222,12 +257,18 @@ class RevenueReportController extends Controller
                 return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
             }
 
+            $requestedTransactionType = $this->requestedTransactionType($request);
+            if (!$requestedTransactionType['valid']) {
+                return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
+            }
+
             $result = $this->getRevenueRowsAndTotal(
                 $date,
                 null,
                 null,
                 $requestedUserId['value'],
-                $requestedUserId['value'] ? $this->reportUserRoles($request) : null
+                $requestedUserId['value'] ? $this->reportUserRoles($request) : null,
+                $requestedTransactionType['value']
             );
 
             return response()->json($result);
@@ -251,12 +292,18 @@ class RevenueReportController extends Controller
                 return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
             }
 
+            $requestedTransactionType = $this->requestedTransactionType($request);
+            if (!$requestedTransactionType['valid']) {
+                return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
+            }
+
             $result = $this->getRevenueRowsAndTotal(
                 null,
                 $month,
                 $year,
                 $requestedUserId['value'],
-                $requestedUserId['value'] ? $this->reportUserRoles($request) : null
+                $requestedUserId['value'] ? $this->reportUserRoles($request) : null,
+                $requestedTransactionType['value']
             );
 
             return response()->json($result);
@@ -279,12 +326,18 @@ class RevenueReportController extends Controller
                 return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
             }
 
+            $requestedTransactionType = $this->requestedTransactionType($request);
+            if (!$requestedTransactionType['valid']) {
+                return response()->json(['rows' => [], 'totalRevenue' => 0], 400);
+            }
+
             $result = $this->getRevenueRowsAndTotal(
                 null,
                 null,
                 $year,
                 $requestedUserId['value'],
-                $requestedUserId['value'] ? $this->reportUserRoles($request) : null
+                $requestedUserId['value'] ? $this->reportUserRoles($request) : null,
+                $requestedTransactionType['value']
             );
 
             return response()->json($result);

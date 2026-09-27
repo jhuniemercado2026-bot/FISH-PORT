@@ -295,15 +295,25 @@ export const getBanyeraReportQueryOptions = ({
   selectedMonth,
   selectedYear,
   userId,
+  boatId,
+  sourceType,
+  sourceId,
 } = {}) => ({
-  queryKey: ["banyera-report", { filterType, selectedDate, selectedMonth, selectedYear, userId }],
+  queryKey: ["banyera-report", { filterType, selectedDate, selectedMonth, selectedYear, userId, boatId, sourceType, sourceId }],
   queryFn: async ({ signal }) => {
     const withUser = (params) => (userId && userId !== "all" ? { ...params, user_id: userId } : params);
+    const withBoatFilter = (params) => {
+      const next = { ...params };
+      if (boatId && boatId !== "all") next.boat_id = boatId;
+      if (sourceType && sourceType !== "all") next.source_type = sourceType;
+      if (sourceId && sourceId !== "all") next.source_id = sourceId;
+      return next;
+    };
 
     if (filterType === "daily") {
       if (!selectedDate) return extractBanyeraReportPayload(null);
       const response = await api.get("/banyera-reports/daily", {
-        params: withUser({ date: selectedDate }),
+        params: withUser(withBoatFilter({ date: selectedDate })),
         signal,
       });
       return extractBanyeraReportPayload(response.data);
@@ -312,7 +322,7 @@ export const getBanyeraReportQueryOptions = ({
     if (filterType === "monthly") {
       if (!selectedMonth || !selectedYear) return extractBanyeraReportPayload(null);
       const response = await api.get("/banyera-reports/monthly", {
-        params: withUser({ month: String(selectedMonth).split("-")[1], year: selectedYear }),
+        params: withUser(withBoatFilter({ month: String(selectedMonth).split("-")[1], year: selectedYear })),
         signal,
       });
       return extractBanyeraReportPayload(response.data);
@@ -321,7 +331,7 @@ export const getBanyeraReportQueryOptions = ({
     if (filterType === "yearly") {
       if (!selectedYear) return extractBanyeraReportPayload(null);
       const response = await api.get("/banyera-reports/yearly", {
-        params: withUser({ year: selectedYear }),
+        params: withUser(withBoatFilter({ year: selectedYear })),
         signal,
       });
       return extractBanyeraReportPayload(response.data);

@@ -165,11 +165,12 @@ export default function PrintPreviewModal({
                     {totalText}
                   </Text>
                 </View>
+
               </View>
             </View>
           </ScrollView>
 
-          <View className="border-t border-[#E8E1E6] bg-white px-5 pb-5 pt-4">
+          <View className="border-t border-[#E8E1E6] bg-white px-5 pb-[max(14px,env(safe-area-inset-bottom))] pt-4">
             <Pressable
               className={`h-12 flex-row items-center justify-center rounded-[10px] ${
                 printing ? "bg-[#46506E]" : "bg-[#2563EB]"

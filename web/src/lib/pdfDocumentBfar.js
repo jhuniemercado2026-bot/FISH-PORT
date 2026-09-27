@@ -250,11 +250,15 @@ const getTransactionDateValue = (row) =>
   row?.banyera_date ||
   "";
 
-const getBoatName = (row, fallback = "-") =>
-  row?.boat_name ||
-  row?.boatName ||
-  row?.boat?.boat_name ||
-  fallback;
+const getBoatName = (row, fallback = "-") => {
+  const boatCategory = String(row?.boat_category ?? row?.boat?.boat_category ?? "").toLowerCase();
+
+  if (boatCategory === "visiting") {
+    return row?.visiting_boat_name || row?.boat_name || row?.boatName || row?.boat?.boat_name || row?.boat?.visiting_boat_name || fallback;
+  }
+
+  return row?.boat_name || row?.boatName || row?.boat?.boat_name || row?.visiting_boat_name || row?.boat?.visiting_boat_name || fallback;
+};
 
 const getClassificationName = (item) =>
   item?.fishClassification ||

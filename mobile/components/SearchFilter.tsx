@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Dimensions,
   Easing,
   Keyboard,
   KeyboardAvoidingView,
@@ -78,6 +79,8 @@ export default function SearchFilter({
   const [sheetTranslateY] = useState(() => new Animated.Value(28));
   const [listHeight] = useState(() => new Animated.Value(maxDropdownHeight));
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const screenHeight = Dimensions.get("window").height;
 
   const selectedOption =
     options.find((option) => String(option.value) === String(value)) ?? null;
@@ -110,7 +113,6 @@ export default function SearchFilter({
       backdropOpacity.setValue(0);
       sheetOpacity.setValue(0);
       sheetTranslateY.setValue(28);
-      setVisible(true);
       onOpenChange?.(true);
       Animated.parallel([
         Animated.timing(backdropOpacity, {
@@ -164,28 +166,30 @@ export default function SearchFilter({
   }, [backdropOpacity, onOpenChange, open, sheetOpacity, sheetTranslateY]);
 
   useEffect(() => {
-    if (!visible) {
-      setIsKeyboardVisible(false);
+    if (!open) {
+      setKeyboardInset(0);
       return undefined;
     }
 
-    const showSubscription = Keyboard.addListener("keyboardDidShow", () => {
+    const showSubscription = Keyboard.addListener("keyboardDidShow", (event) => {
       setIsKeyboardVisible(true);
+      setKeyboardInset(event.endCoordinates?.height ?? 0);
     });
 
     const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
       setIsKeyboardVisible(false);
+      setKeyboardInset(0);
     });
 
     return () => {
       showSubscription.remove();
       hideSubscription.remove();
     };
-  }, [visible]);
+  }, [open]);
 
   useEffect(() => {
     const nextHeight = isKeyboardVisible
-      ? Math.min(maxDropdownHeight, 144)
+      ? Math.min(maxDropdownHeight, Math.max(160, screenHeight * 0.28))
       : maxDropdownHeight;
 
     Animated.timing(listHeight, {
@@ -194,7 +198,7 @@ export default function SearchFilter({
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start();
-  }, [isKeyboardVisible, listHeight, maxDropdownHeight]);
+  }, [isKeyboardVisible, listHeight, maxDropdownHeight, screenHeight]);
 
   const setSearchText = (nextValue: string) => {
     if (isSearchTextControlled) {
@@ -216,6 +220,7 @@ export default function SearchFilter({
       return;
     }
 
+    setVisible(true);
     setOpen(true);
   };
 
@@ -305,17 +310,22 @@ export default function SearchFilter({
             style={{ opacity: backdropOpacity }}
           />
           <KeyboardAvoidingView
-            className="flex-1 justify-end"
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            keyboardVerticalOffset={0}
+            className="flex-1"
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
+            pointerEvents="box-none"
           >
             <Pressable className="absolute inset-0" onPress={closePicker} />
 
             <Animated.View
-              className="overflow-hidden rounded-t-[28px] bg-white"
+              className="absolute left-0 right-0 overflow-hidden rounded-t-[28px] bg-white"
               onStartShouldSetResponder={() => true}
               style={{
-                maxHeight: "82%",
+                maxHeight:
+                  keyboardInset > 0
+                    ? Math.max(260, screenHeight - keyboardInset - 30)
+                    : "82%",
+                bottom: keyboardInset > 0 ? keyboardInset + 8 : 0,
                 opacity: sheetOpacity,
                 transform: [{ translateY: sheetTranslateY }],
               }}

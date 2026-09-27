@@ -1279,6 +1279,10 @@ export default function HistoryScreen() {
 
     if (statusFilter !== "all") {
       transactions = transactions.filter((t) => {
+        if (statusFilter === "visiting") {
+          return isVisitingBoatRecord(t.data);
+        }
+
         const status = getTransactionStatus(t.data).label.toLowerCase();
         const normalizedFilter =
           statusFilter === "pending"

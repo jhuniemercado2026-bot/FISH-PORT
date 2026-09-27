@@ -240,7 +240,9 @@ export default function ActivityLogsRealtimeBridge() {
 
       if (!canReceiveActivityLog(log, getCurrentUser())) return;
 
-      updateAccountDirectoryFromActivityLog(queryClient, log);
+      if (String(log?.module || "").toLowerCase() !== "security") {
+        updateAccountDirectoryFromActivityLog(queryClient, log);
+      }
 
       queryClient
         .getQueryCache()

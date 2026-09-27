@@ -31,6 +31,7 @@ import DetailDrawer, { DrawerInfoCard, DrawerSection } from "../../components/Dr
 import FilterSelect from "../../components/FilterSelect";
 import FilterButton from "../../components/FilterButton";
 import Modal from "../../components/Modal";
+import VisitorPillShared from "../../components/VisitorPill";
 import NoDataFound from "../../components/NoDataFound";
 import TableCard from "../../components/TableCard";
 import OverviewCard from "../../components/Overview";
@@ -542,15 +543,6 @@ const isDockingVoided = (docking) =>
 const isVisitingDocking = (docking) =>
   String(docking?.boat_category ?? "").toLowerCase() === "visiting" || Boolean(docking?.visiting_boat_name);
 
-const VisitorPill = () => (
-  <span
-    className="inline-flex flex-shrink-0 items-center rounded-[6px] px-2 py-0.5 text-[10px] font-bold uppercase tracking-normal"
-    style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}
-  >
-    Visitor
-  </span>
-);
-
 const normalizeDockingResponse = (responseData) =>
   responseData?.data ?? responseData?.docking ?? responseData ?? null;
 
@@ -918,7 +910,7 @@ const CalendarDockingsDrawer = ({ open, dateLabel, dockings, onClose, onSelectDo
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex items-center gap-2">
                       <p className="m-0 truncate text-[15px] font-bold" style={{ color: accent.title }}>{getDockingBoatName(docking)}</p>
-                      {isVisitor ? <VisitorPill /> : null}
+                      {isVisitor ? <VisitorPillShared /> : null}
                     </div>
                   </div>
                   <p className="m-0 mt-1 text-[12px] text-slate-500">
@@ -1036,22 +1028,29 @@ const AddDockingModal = ({ open, boats, boatTypes = [], fees, onClose, onSubmit,
   }), [fees, selectedBoatTypeId]);
 
   useEffect(() => {
+    if (!open) return;
+
     if (!selectedBoatTypeId) {
       if (!form.fee_id && !form.docking_fee) return;
       setForm((current) => ({ ...current, fee_id: "", docking_fee: "" }));
+      setErrors((current) => ({ ...current, fee_id: "" }));
       return;
     }
 
     if (availableFees.length === 0) {
       if (!form.fee_id && !form.docking_fee) return;
       setForm((current) => ({ ...current, fee_id: "", docking_fee: "" }));
+      setErrors((current) => ({ ...current, fee_id: "" }));
       return;
     }
 
     const matchingFee = availableFees[0];
     const nextFeeId = String(matchingFee.fee_id);
     const nextDockingFee = matchingFee?.amount != null ? String(matchingFee.amount) : "";
-    if (String(form.fee_id || "") === nextFeeId && String(form.docking_fee || "") === nextDockingFee) return;
+    const currentFeeId = String(form.fee_id || "");
+    const currentFeeStillMatches = availableFees.some((fee) => String(fee.fee_id) === currentFeeId);
+
+    if (currentFeeId === nextFeeId && currentFeeStillMatches && String(form.docking_fee || "") === nextDockingFee) return;
 
     setForm((current) => ({
       ...current,
@@ -1059,7 +1058,7 @@ const AddDockingModal = ({ open, boats, boatTypes = [], fees, onClose, onSubmit,
       docking_fee: nextDockingFee,
     }));
     setErrors((current) => ({ ...current, fee_id: "" }));
-  }, [selectedBoatTypeId, availableFees, form.fee_id, form.docking_fee]);
+  }, [open, selectedBoatTypeId, availableFees, form.fee_id, form.docking_fee]);
 
   if (!open) return null;
 
@@ -1392,14 +1391,31 @@ const EditDockingDrawer = ({ docking, open, boats, fees, onClose, onSubmit, savi
   });
 
   useEffect(() => {
-    if (!selectedBoat || form.fee_id || availableFees.length === 0) return;
+    if (!selectedBoat) return;
+    if (availableFees.length === 0) {
+      const currentlySelectedFeeExists = fees.some((fee) => String(fee.fee_id) === String(form.fee_id || ""));
+      if (!currentlySelectedFeeExists && !form.fee_id && !form.docking_fee) return;
+      setForm((current) => ({
+        ...current,
+        fee_id: "",
+        docking_fee: "",
+      }));
+      return;
+    }
+
+    const currentSelectedFee = availableFees.find((fee) => String(fee.fee_id) === String(form.fee_id || ""));
     const matchingFee = availableFees[0];
+    const nextFeeId = String(matchingFee.fee_id);
+    const nextDockingFee = matchingFee?.amount != null ? String(matchingFee.amount) : "";
+
+    if (currentSelectedFee && String(form.fee_id || "") === String(currentSelectedFee.fee_id) && String(form.docking_fee || "") === String(currentSelectedFee.amount ?? "")) return;
+
     setForm((current) => ({
       ...current,
-      fee_id: String(matchingFee.fee_id),
-      docking_fee: matchingFee?.amount != null ? String(matchingFee.amount) : "",
+      fee_id: nextFeeId,
+      docking_fee: nextDockingFee,
     }));
-  }, [selectedBoat, availableFees, form.fee_id]);
+  }, [selectedBoat, availableFees, fees, form.fee_id, form.docking_fee]);
 
   if (!docking) return null;
 
@@ -2690,7 +2706,7 @@ const SuperDocking = () => {
                                   style={{ backgroundColor: isVoided ? "#f59e0b" : "#16a34a" }}
                                 />
                                 <p className="m-0 text-[13px] font-medium text-[#1a1f36]">{getDockingBoatName(docking)}</p>
-                                {isVisitor ? <VisitorPill /> : null}
+                                {isVisitor ? <VisitorPillShared /> : null}
                               </div>
                             </button>
                           </td>

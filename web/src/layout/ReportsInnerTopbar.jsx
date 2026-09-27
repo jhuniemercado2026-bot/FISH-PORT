@@ -2,6 +2,7 @@ import React from "react";
 import "typeface-montserrat";
 import ReportDailyDatePicker from "../components/ReportDailyDatePicker";
 import FilterButton from "../components/FilterButton";
+import VisitorPill from "../components/VisitorPill";
 
 import { IoDocumentTextOutline, IoSyncOutline } from "react-icons/io5";
 
@@ -57,6 +58,11 @@ const ReportsInnerTopbar = ({
   userFilterOptions = [],
   onUserFilterChange,
   isUserFilterLoading = false,
+  showTransactionFilter = false,
+  transactionFilterValue = "all",
+  transactionFilterOptions = [],
+  onTransactionFilterChange,
+  isTransactionFilterLoading = false,
   showBoatFilter = false,
   boatFilterValue,
   boatFilterOptions = [],
@@ -64,6 +70,7 @@ const ReportsInnerTopbar = ({
   isBoatFilterLoading = false,
   boatFilterPlaceholder,
   boatFilterShowSearch = false,
+  boatFilterMode = "default",
 }) => {
   const isRevenueReport = activeReport === "revenue";
   const isDailyReport = activeReport === "daily";
@@ -174,29 +181,6 @@ const ReportsInnerTopbar = ({
       {usesCustomReportFilters ? (
         <div className="mx-auto flex w-full max-w-[1100px] flex-col items-center justify-center gap-3">
           <div className="flex w-full flex-wrap items-center justify-center gap-2">
-
-            {showBoatFilter && (
-              <div className={REPORT_INPUT_WIDTH_CLASS}>
-                <FilterButton
-                  width="100%"
-                  height={46}
-                  value={boatFilterValue}
-                  onChange={onBoatFilterChange}
-                  options={boatFilterOptions}
-                  loading={isBoatFilterLoading}
-                  placeholder={boatFilterPlaceholder}
-                  showSearch={boatFilterShowSearch}
-                  filterOption={(input, option) =>
-                    String(option?.displayLabel ?? option?.label ?? "")
-                      .toLowerCase()
-                      .includes(String(input).toLowerCase())
-                  }
-                  optionLabelProp="displayLabel"
-                  popupClassName="report-user-filter-dropdown"
-                />
-              </div>
-            )}
-
             {/* FILTER TYPE */}
             {!isVehicleTicketReport && !isVehicleTypesReport && !isBoatTypesReport && !isFeesReport && (
               <div className={REPORT_INPUT_WIDTH_CLASS}>
@@ -268,6 +252,65 @@ const ReportsInnerTopbar = ({
             </div>
           )}
 
+            {showBoatFilter && (
+              <div className={REPORT_INPUT_WIDTH_CLASS}>
+                <FilterButton
+                  width="100%"
+                  height={46}
+                  value={boatFilterValue}
+                  onChange={onBoatFilterChange}
+                  options={boatFilterOptions}
+                  loading={isBoatFilterLoading}
+                  placeholder={boatFilterPlaceholder}
+                  showSearch={boatFilterShowSearch}
+                  filterOption={(input, option) => {
+                    const label = String(option?.displayLabel ?? option?.label ?? "");
+                    return label.toLowerCase().includes(String(input).toLowerCase());
+                  }}
+                  optionLabelProp="displayLabel"
+                  popupClassName="report-user-filter-dropdown"
+                  optionRender={(option) => {
+                    const raw = option?.data ?? option ?? {};
+                    const label = String(raw?.displayLabel ?? raw?.label ?? "");
+                    const isVisitorOption = String(raw?.isVisitor ?? "") === "true" || label.toLowerCase().includes("visitor");
+
+                    return (
+                      <div className="flex items-center gap-2 leading-tight">
+                        <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">{label}</span>
+                        {isVisitorOption ? <VisitorPill className="ml-1" /> : null}
+                      </div>
+                    );
+                  }}
+                />
+              </div>
+            )}
+
+            {showTransactionFilter && (
+              <div className={REPORT_INPUT_WIDTH_CLASS}>
+                <FilterButton
+                  width="100%"
+                  height={46}
+                  value={transactionFilterValue}
+                  onChange={onTransactionFilterChange}
+                  options={transactionFilterOptions}
+                  loading={isTransactionFilterLoading}
+                  placeholder="Select Transaction"
+                  showSearch
+                  filterOption={(input, option) =>
+                    String(option?.displayLabel ?? option?.label ?? "")
+                      .toLowerCase()
+                      .includes(String(input).toLowerCase())
+                  }
+                  optionRender={(option) => {
+                    const raw = option?.data ?? option ?? {};
+                    const label = String(raw?.displayLabel ?? raw?.label ?? "");
+                    return <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">{label}</span>;
+                  }}
+                  popupClassName="report-user-filter-dropdown"
+                />
+              </div>
+            )}
+
             {showUserFilter && (
               <div className={REPORT_INPUT_WIDTH_CLASS}>
                 <FilterButton
@@ -331,13 +374,24 @@ const ReportsInnerTopbar = ({
                   loading={isBoatFilterLoading}
                   placeholder={boatFilterPlaceholder}
                   showSearch={boatFilterShowSearch}
-                  filterOption={(input, option) =>
-                    String(option?.displayLabel ?? option?.label ?? "")
-                      .toLowerCase()
-                      .includes(String(input).toLowerCase())
-                  }
+                  filterOption={(input, option) => {
+                    const label = String(option?.displayLabel ?? option?.label ?? "");
+                    return label.toLowerCase().includes(String(input).toLowerCase());
+                  }}
                   optionLabelProp="displayLabel"
                   popupClassName="report-user-filter-dropdown"
+                  optionRender={(option) => {
+                    const raw = option?.data ?? option ?? {};
+                    const label = String(raw?.displayLabel ?? raw?.label ?? "");
+                    const isVisitorOption = String(raw?.isVisitor ?? "") === "true" || label.toLowerCase().includes("visitor");
+
+                    return (
+                      <div className="flex items-center gap-2 leading-tight">
+                        <span className="report-user-option-name text-[13px] font-semibold text-[#1a1f36]">{label}</span>
+                        {isVisitorOption ? <VisitorPill className="ml-1" /> : null}
+                      </div>
+                    );
+                  }}
                 />
               </div>
             ) : (

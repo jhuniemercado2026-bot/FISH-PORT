@@ -13,15 +13,25 @@ export const getBfarReportQueryOptions = ({
   selectedMonth,
   selectedYear,
   userId,
+  boatId,
+  sourceType,
+  sourceId,
 } = {}) => ({
-  queryKey: ["bfar-report", { filterType, selectedDate, selectedMonth, selectedYear, userId }],
+  queryKey: ["bfar-report", { filterType, selectedDate, selectedMonth, selectedYear, userId, boatId, sourceType, sourceId }],
   queryFn: async ({ signal }) => {
     const withUser = (params) => (userId && userId !== "all" ? { ...params, user_id: userId } : params);
+    const withBoatFilter = (params) => {
+      const next = { ...params };
+      if (boatId && boatId !== "all") next.boat_id = boatId;
+      if (sourceType && sourceType !== "all") next.source_type = sourceType;
+      if (sourceId && sourceId !== "all") next.source_id = sourceId;
+      return next;
+    };
 
     if (filterType === "daily") {
       if (!selectedDate) return extractBfarReportPayload(null);
       const response = await api.get("/bfar-reports/daily", {
-        params: withUser({ date: selectedDate }),
+        params: withUser(withBoatFilter({ date: selectedDate })),
         signal,
       });
       return extractBfarReportPayload(response.data);
@@ -30,7 +40,7 @@ export const getBfarReportQueryOptions = ({
     if (filterType === "monthly") {
       if (!selectedMonth || !selectedYear) return extractBfarReportPayload(null);
       const response = await api.get("/bfar-reports/monthly", {
-        params: withUser({ month: String(selectedMonth).split("-")[1], year: selectedYear }),
+        params: withUser(withBoatFilter({ month: String(selectedMonth).split("-")[1], year: selectedYear })),
         signal,
       });
       return extractBfarReportPayload(response.data);
@@ -39,7 +49,7 @@ export const getBfarReportQueryOptions = ({
     if (filterType === "yearly") {
       if (!selectedYear) return extractBfarReportPayload(null);
       const response = await api.get("/bfar-reports/yearly", {
-        params: withUser({ year: selectedYear }),
+        params: withUser(withBoatFilter({ year: selectedYear })),
         signal,
       });
       return extractBfarReportPayload(response.data);
