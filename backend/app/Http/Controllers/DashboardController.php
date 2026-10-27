@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Events\MasterDataUpdated;
 use App\Models\BanyeraTransaction;
 use App\Models\Bill;
+use App\Models\BillPenalty;
 use App\Models\Boat;
 use App\Models\Docking;
 use App\Models\MonthlyTarget;
@@ -21,6 +22,7 @@ class DashboardController extends Controller
     public function index()
     {
         return response()->json([
+            'penalties' => $this->penaltyRevenueData(),
             'boats' => Boat::query()
                 ->select(['boat_id', 'boat_name', 'boat_type_id'])
                 ->with(['boatType:boat_type_id,type_name'])
@@ -121,16 +123,7 @@ class DashboardController extends Controller
                         'amount' => (float) $item->amount,
                     ])->values(),
                 ]),
-            'payments' => Payment::query()
-                ->select(['payment_id', 'bill_id', 'amount_paid', 'payment_date', 'created_at'])
-                ->get()
-                ->map(fn (Payment $payment) => [
-                    'payment_id' => $payment->payment_id,
-                    'bill_id' => $payment->bill_id,
-                    'amount_paid' => (float) $payment->amount_paid,
-                    'payment_date' => optional($payment->payment_date)->toDateString(),
-                    'created_at' => optional($payment->created_at)->toIso8601String(),
-                ]),
+            'payments' => $this->paymentRevenueData(),
             'remittances' => Remittance::query()
                 ->select(['remittance_id', 'date', 'amount', 'status', 'created_at'])
                 ->get()
@@ -191,6 +184,38 @@ class DashboardController extends Controller
                     (string) $target->target_year => (float) $target->amount,
                 ]),
         ]);
+    }
+
+    protected function penaltyRevenueData(): array
+    {
+        return BillPenalty::query()
+            ->join('bills', 'bills.bill_id', '=', 'bill_penalties.bill_id')
+            ->whereNotNull('bills.boat_id')
+            ->whereColumn('bill_penalties.amount', '>', 'bill_penalties.suspended_amount')
+            ->select(['bill_penalties.id', 'bill_penalties.bill_id', 'bill_penalties.amount', 'bill_penalties.suspended_amount', 'bill_penalties.period_ended_at', 'bills.created_at as fiscal_date'])
+            ->orderBy('bill_penalties.period_ended_at')
+            ->get()->map(fn (BillPenalty $penalty) => [
+                'id' => $penalty->id,
+                'bill_id' => $penalty->bill_id,
+                'amount' => (float) $penalty->effective_amount,
+                'date' => $penalty->period_ended_at->toDateString(),
+                'fiscal_date' => substr((string) $penalty->fiscal_date, 0, 10),
+            ])->all();
+    }
+
+    protected function paymentRevenueData(): array
+    {
+        return Payment::query()
+            ->select(['payment_id', 'bill_id', 'amount_paid', 'payment_date', 'created_at'])
+            ->selectSub(Bill::query()->select('created_at')->whereColumn('bills.bill_id', 'payments.bill_id'), 'fiscal_date')
+            ->get()->map(fn (Payment $payment) => [
+                'payment_id' => $payment->payment_id,
+                'bill_id' => $payment->bill_id,
+                'amount_paid' => (float) $payment->amount_paid,
+                'payment_date' => optional($payment->payment_date)->toDateString(),
+                'created_at' => optional($payment->created_at)->toIso8601String(),
+                'fiscal_date' => $payment->fiscal_date ? substr((string) $payment->fiscal_date, 0, 10) : null,
+            ])->all();
     }
 
     public function saveMonthlyTarget(Request $request)

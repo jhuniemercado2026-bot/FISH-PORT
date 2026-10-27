@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
-import { Pressable, ScrollView, StatusBar, Text, TextInput, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StatusBar, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -12,10 +12,12 @@ import { useHistoryStore } from "../../../store/historyStore";
 import type { SyncedHistoryTransaction } from "../../../store/historyStore";
 import OptionModal, { HistoryStatusFilter } from "../../../components/OptionModal";
 import { getOfflineResource, saveOfflineResource } from "../../../utils/offlineMasterData";
+import { usePullRefreshIndicator } from "../../../utils/usePullRefreshIndicator";
 import {
   getOfflineTransactionDrafts,
 } from "../../../utils/offlineTransactionQueue";
 import type { OfflineTransactionDraft } from "../../../utils/offlineTransactionQueue";
+import { isRecordOwnedByUser } from "../../../utils/historyOwnership";
 
 type TransactionType = "all" | "docking" | "banyera" | "tickets" | "remittance";
 type TransactionCardType = Exclude<TransactionType, "all">;
@@ -289,32 +291,8 @@ const upsertTransaction = (items: any[], type: TransactionCardType, nextItem: an
   return nextItems;
 };
 
-const isOwnedByCurrentUser = (record: any, currentUserId?: number | string | null) => {
-  if (!currentUserId) return false;
-
-  const currentUserIdString = String(currentUserId);
-  const ownerCandidates = [
-    record?.created_by,
-    record?.created_by?.user_id,
-    record?.created_by?.id,
-    record?.created_by_id,
-    record?.createdBy?.user_id,
-    record?.createdBy?.id,
-    record?.createdBy,
-    record?.user_id,
-    record?.user?.user_id,
-    record?.user?.id,
-    record?.owner_id,
-    record?.submitted_by,
-    record?.submittedBy?.user_id,
-    record?.submittedBy?.id,
-  ];
-
-  return ownerCandidates.some((value) => value !== undefined && value !== null && String(value) === currentUserIdString);
-};
-
 const filterRecordsByCurrentUser = (records: any[], currentUserId?: number | string | null) =>
-  records.filter((record: any) => isOwnedByCurrentUser(record, currentUserId));
+  records.filter((record: any) => isRecordOwnedByUser(record, currentUserId));
 
 const normalizeTransactionListPayload = (payload: any, keys: string[] = []) => {
   if (Array.isArray(payload)) return payload;
@@ -337,28 +315,28 @@ const mergeSyncedTransactionsIntoHistory = (
   syncedTransactions.reduce<HistoryCacheData>((nextHistory, transaction) => {
     const data = unwrapSyncedTransactionData(transaction.data);
 
-    if (transaction.type === "docking" && isOwnedByCurrentUser(data, currentUserId)) {
+    if (transaction.type === "docking" && isRecordOwnedByUser(data, currentUserId)) {
       return {
         ...nextHistory,
         docking: upsertTransaction(nextHistory.docking, "docking", data),
       };
     }
 
-    if (transaction.type === "banyera" && isOwnedByCurrentUser(data, currentUserId)) {
+    if (transaction.type === "banyera" && isRecordOwnedByUser(data, currentUserId)) {
       return {
         ...nextHistory,
         banyera: upsertTransaction(nextHistory.banyera, "banyera", data),
       };
     }
 
-    if (transaction.type === "tickets" && isOwnedByCurrentUser(data, currentUserId)) {
+    if (transaction.type === "tickets" && isRecordOwnedByUser(data, currentUserId)) {
       return {
         ...nextHistory,
         tickets: upsertTransaction(nextHistory.tickets, "tickets", data),
       };
     }
 
-    if (transaction.type === "remittance" && isOwnedByCurrentUser(data, currentUserId)) {
+    if (transaction.type === "remittance" && isRecordOwnedByUser(data, currentUserId)) {
       return {
         ...nextHistory,
         remittance: upsertTransaction(nextHistory.remittance, "remittance", data),
@@ -853,8 +831,25 @@ export default function HistoryScreen() {
   const [offlineDrafts, setOfflineDrafts] = useState<OfflineTransactionDraft[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasLoadedTransactions, setHasLoadedTransactions] = useState(false);
+  const {
+    isRefreshing,
+    beginRefresh,
+    finishRefresh,
+  } = usePullRefreshIndicator();
   const authSession = getAuthSession();
   const currentUserId = authSession?.user?.user_id;
+  const historyTabsScrollRef = useRef<ScrollView | null>(null);
+  const historyTabOffsetsRef = useRef<Partial<Record<TransactionType, number>>>({});
+
+  const scrollToHistoryTab = useCallback((tab: TransactionType) => {
+    const tabOffset = historyTabOffsetsRef.current[tab];
+    if (tabOffset === undefined) return;
+
+    historyTabsScrollRef.current?.scrollTo({
+      x: Math.max(0, tabOffset - 20),
+      animated: true,
+    });
+  }, []);
 
   const navigateToDetails = (transaction: {
     type: TransactionCardType;
@@ -881,9 +876,11 @@ export default function HistoryScreen() {
   };
 
   const loadOfflineDrafts = useCallback(async () => {
-    const drafts = await getOfflineTransactionDrafts();
+    const drafts = (await getOfflineTransactionDrafts()).filter(
+      (draft) => Boolean(currentUserId) && String(draft.owner_user_id ?? "") === String(currentUserId)
+    );
     setOfflineDrafts(drafts);
-  }, []);
+  }, [currentUserId]);
 
   const loadOfflineHistoryCache = useCallback(async () => {
     const resource = await getOfflineResource<{
@@ -927,7 +924,11 @@ export default function HistoryScreen() {
 
   useEffect(() => {
     const nextQueuedDrafts = queuedDrafts.filter((draft) => {
-      return !handledQueuedDraftIdsRef.current.has(draft.local_id);
+      return (
+        Boolean(currentUserId) &&
+        String(draft.owner_user_id ?? "") === String(currentUserId) &&
+        !handledQueuedDraftIdsRef.current.has(draft.local_id)
+      );
     });
 
     if (nextQueuedDrafts.length === 0) {
@@ -943,7 +944,7 @@ export default function HistoryScreen() {
       const draftsToAdd = nextQueuedDrafts.filter((draft) => !currentIds.has(draft.local_id));
       return [...draftsToAdd, ...current];
     });
-  }, [queuedDrafts]);
+  }, [currentUserId, queuedDrafts]);
 
   useEffect(() => {
     const nextSyncedTransactions = syncedTransactions.filter((transaction) => {
@@ -971,19 +972,19 @@ export default function HistoryScreen() {
     nextSyncedTransactions.forEach((transaction) => {
       const data = unwrapSyncedTransactionData(transaction.data);
 
-      if (transaction.type === "docking" && isOwnedByCurrentUser(data, currentUserId)) {
+      if (transaction.type === "docking" && isRecordOwnedByUser(data, currentUserId)) {
         setDockingTransactions((current) => upsertTransaction(current, "docking", data));
       }
 
-      if (transaction.type === "banyera" && isOwnedByCurrentUser(data, currentUserId)) {
+      if (transaction.type === "banyera" && isRecordOwnedByUser(data, currentUserId)) {
         setBanyeraTransactions((current) => upsertTransaction(current, "banyera", data));
       }
 
-      if (transaction.type === "tickets" && isOwnedByCurrentUser(data, currentUserId)) {
+      if (transaction.type === "tickets" && isRecordOwnedByUser(data, currentUserId)) {
         setTicketTransactions((current) => upsertTransaction(current, "tickets", data));
       }
 
-      if (transaction.type === "remittance" && isOwnedByCurrentUser(data, currentUserId)) {
+      if (transaction.type === "remittance" && isRecordOwnedByUser(data, currentUserId)) {
         setRemittanceTransactions((current) => upsertTransaction(current, "remittance", data));
       }
     });
@@ -996,6 +997,10 @@ export default function HistoryScreen() {
         : "all";
     setSelectedTab(nextTab as TransactionType);
   }, [params.tab]);
+
+  useEffect(() => {
+    scrollToHistoryTab(selectedTab);
+  }, [scrollToHistoryTab, selectedTab]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1092,7 +1097,7 @@ export default function HistoryScreen() {
           fetchTransactionList("/vehicle-tickets?all=true", ["tickets", "vehicleTickets"], cachedHistory.tickets),
           fetchTransactionList("/remittances?all=true", ["remittances"], cachedHistory.remittance),
         ]);
-        const ownedByCurrentUser = (record: any) => isOwnedByCurrentUser(record, currentUserId);
+        const ownedByCurrentUser = (record: any) => isRecordOwnedByUser(record, currentUserId);
 
         const nextHistory = mergeSyncedTransactionsIntoHistory(
           {
@@ -1134,6 +1139,15 @@ export default function HistoryScreen() {
     },
     [authToken, currentUserId, loadOfflineDrafts, loadOfflineHistoryCache, showToast, syncedTransactions]
   );
+
+  const handleRefresh = useCallback(async () => {
+    if (!beginRefresh()) return;
+    try {
+      await loadTransactions();
+    } finally {
+      finishRefresh();
+    }
+  }, [beginRefresh, finishRefresh, loadTransactions]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1208,6 +1222,8 @@ export default function HistoryScreen() {
         ...offlineDrafts
           .filter(
             (draft) =>
+              Boolean(currentUserId) &&
+              String(draft.owner_user_id ?? "") === String(currentUserId) &&
               !syncedLocalIds.has(draft.local_id) &&
               (selectedTab === "all" || draft.type === selectedTab)
           )
@@ -1391,8 +1407,17 @@ export default function HistoryScreen() {
 
       <ScrollView
         className="flex-1"
+        alwaysBounceVertical
         contentContainerStyle={{ paddingBottom: 28, paddingTop: 20 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor="#2563EB"
+            colors={["#2563EB"]}
+          />
+        }
       >
         <View className="px-5 pt-0">
           {/* Search Bar */}
@@ -1415,6 +1440,7 @@ export default function HistoryScreen() {
 
           {/* Tabs */}
           <ScrollView
+            ref={historyTabsScrollRef}
             horizontal
             showsHorizontalScrollIndicator={false}
             className="-mx-5 mb-4"
@@ -1427,6 +1453,12 @@ export default function HistoryScreen() {
                   <Pressable
                     key={tab.key}
                     onPress={() => setSelectedTab(tab.key)}
+                    onLayout={({ nativeEvent }) => {
+                      historyTabOffsetsRef.current[tab.key] = nativeEvent.layout.x;
+                      if (selectedTab === tab.key) {
+                        scrollToHistoryTab(tab.key);
+                      }
+                    }}
                     className={`flex-row items-center rounded-[8px] px-4 py-2 ${
                       isActive
                         ? "bg-[#1A1F36]"

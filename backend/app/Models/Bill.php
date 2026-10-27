@@ -20,6 +20,7 @@ class Bill extends Model
 
     protected $casts = [
         'total_amount' => 'decimal:2',
+        'penalty_amount' => 'decimal:2',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
@@ -48,6 +49,25 @@ class Bill extends Model
         return $this->hasMany(Payment::class, 'bill_id', 'bill_id');
     }
 
+    public function penalties()
+    {
+        return $this->hasMany(BillPenalty::class, 'bill_id', 'bill_id')->orderBy('period_number');
+    }
+
+    public function hasOverdueMonthlyPenalty(float $totalPaid): bool
+    {
+        if (round((float) $this->total_amount * 100) <= round($totalPaid * 100)) return false;
+
+        // Assessments are created by the server only when the configured full
+        // monthly interval has ended, using the bill's original creation date.
+        $now = now('Asia/Manila');
+        return $this->penalties->contains(fn (BillPenalty $penalty) =>
+            $penalty->interval_unit === 'months'
+            && $penalty->effective_amount > 0
+            && $penalty->period_ended_at?->lessThanOrEqualTo($now)
+        );
+    }
+
     public function createdBy()
     {
         return $this->belongsTo(User::class, 'created_by', 'user_id');
@@ -57,8 +77,9 @@ class Bill extends Model
     public function scopeForTableIndex(Builder $query): Builder
     {
         return $query
-            ->select('bill_id', 'bill_reference_no', 'boat_id', 'total_amount', 'created_by', 'created_at', 'updated_at')
+            ->select('bill_id', 'bill_reference_no', 'boat_id', 'total_amount', 'penalty_amount', 'created_by', 'created_at', 'updated_at')
             ->with([
+                'penalties',
                 'boat' => fn ($query) => $query
                     ->select('boat_id', 'boat_name', 'owner_id', 'boat_type_id'),
                 'boat.owner' => fn ($query) => $query
@@ -147,6 +168,7 @@ class Bill extends Model
     public static function tableRelations(): array
     {
         return [
+            'penalties',
             'boat' => fn ($query) => $query
                 ->select('boat_id', 'boat_name', 'owner_id', 'boat_type_id'),
             'boat.owner' => fn ($query) => $query

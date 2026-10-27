@@ -1,9 +1,11 @@
+import { drawStatementSignature } from "./statementSignature";
 import {
   PDFDocument,
   StandardFonts,
   rgb,
 } from "pdf-lib";
 import { getHeaderPngBytes } from "./pdfHeader";
+import { drawPdfPenaltyRow, getPenaltyAmount } from "./billPenalty";
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
@@ -294,100 +296,29 @@ const createPdfComposer = async () => {
 };
 
 const drawStatementFooter = (composer, balanceText) => {
-  composer.ensureSpace(70);
-  composer.drawRect(
-    MARGIN_X,
-    composer.cursorY - 24,
-    CONTENT_WIDTH,
-    24,
-    {
-      borderColor: COLORS.brand,
-      fillColor: COLORS.brand,
-    },
-  );
-  composer.drawText(
-    `Account Current Balance: ${balanceText}`,
-    MARGIN_X + 10,
-    composer.cursorY - 15,
-    {
-      fontSize: 10,
-      bold: true,
-      color: COLORS.white,
-    },
-  );
+  composer.ensureSpace(180);
+  composer.drawRect(MARGIN_X, composer.cursorY - 24, CONTENT_WIDTH, 24, {
+    borderColor: COLORS.black,
+    fillColor: COLORS.mediumGray,
+    borderWidth: 1.5,
+  });
+  drawRightAlignedCellText(composer, `Account Current Balance: ${balanceText}`, MARGIN_X, CONTENT_WIDTH,
+    composer.cursorY - 15, { fontSize: 10, bold: true, color: COLORS.black });
   composer.cursorY -= 36;
-  composer.drawText(
-    "If you have questions about this document, please contact the port office.",
-    MARGIN_X,
-    composer.cursorY - 9,
-    {
-      fontSize: 9,
-      color: COLORS.muted,
-    },
-  );
-  composer.cursorY -= 16;
-  composer.drawText(
-    "Thank you for your business!",
-    MARGIN_X,
-    composer.cursorY - 11,
-    {
-      fontSize: 11,
-      bold: true,
-    },
-  );
-  composer.cursorY -= 18;
+  drawStatementSignature(composer, { marginX: MARGIN_X, marginY: MARGIN_Y, contentWidth: CONTENT_WIDTH });
 };
 
 const drawBillingStatementFooter = (composer, balanceText) => {
-  const footerHeight = 72;
-  const balanceRowHeight = 24;
-  const footerGap = 10;
-  const textBlockHeight = footerHeight - balanceRowHeight - footerGap;
-  const balanceRowBottom = composer.cursorY - balanceRowHeight;
-  const textBlockTop = balanceRowBottom - footerGap;
-  const textBlockBottom = textBlockTop - textBlockHeight;
-  const textBlockCenterY = textBlockTop - textBlockHeight / 2;
-  const footerTextTopY = textBlockCenterY + 4;
-  const footerTextBottomY = textBlockCenterY - 10;
-
-  composer.ensureSpace(footerHeight);
-  composer.drawRect(MARGIN_X, balanceRowBottom, CONTENT_WIDTH, balanceRowHeight, {
+  composer.ensureSpace(180);
+  composer.drawRect(MARGIN_X, composer.cursorY - 24, CONTENT_WIDTH, 24, {
     borderColor: COLORS.black,
-    borderWidth: 1.5,
     fillColor: COLORS.mediumGray,
-  });
-  composer.drawRect(MARGIN_X, textBlockBottom, CONTENT_WIDTH, textBlockHeight, {
-    borderColor: COLORS.black,
     borderWidth: 1.5,
   });
-  drawRightAlignedCellText(
-    composer,
-    `Account Current Balance: ${balanceText}`,
-    MARGIN_X,
-    CONTENT_WIDTH,
-    composer.cursorY - 15,
-    { fontSize: 10, bold: true, color: COLORS.black },
-  );
-  composer.drawCenteredText(
-    "If you have questions about this document, please contact the port office.",
-    MARGIN_X + CONTENT_WIDTH / 2,
-    footerTextTopY,
-    {
-      fontSize: 9,
-      color: COLORS.black,
-    },
-  );
-  composer.drawCenteredText(
-    "Thank you for your business!",
-    MARGIN_X + CONTENT_WIDTH / 2,
-    footerTextBottomY,
-    {
-      fontSize: 11,
-      bold: true,
-      color: COLORS.black,
-    },
-  );
-  composer.cursorY = textBlockBottom - 18;
+  drawRightAlignedCellText(composer, `Account Current Balance: ${balanceText}`, MARGIN_X, CONTENT_WIDTH,
+    composer.cursorY - 15, { fontSize: 10, bold: true, color: COLORS.black });
+  composer.cursorY -= 36;
+  drawStatementSignature(composer, { marginX: MARGIN_X, marginY: MARGIN_Y, contentWidth: CONTENT_WIDTH });
 };
 
 const drawTableHeader = (composer, columns, fontSize = 9, options = {}) => {
@@ -645,6 +576,11 @@ export const buildBillingStatementPdf = async ({
       composer.cursorY -= rowHeightDynamic;
     });
 
+    drawPdfPenaltyRow(composer, {
+      amount: getPenaltyAmount(bill), x: MARGIN_X, width: CONTENT_WIDTH,
+      amountWidth: columns[columns.length - 1].width,
+      borderColor: COLORS.black, textColor: COLORS.black, formatMoney: formatPdfMoney,
+    });
     const amountColumnWidth = columns[columns.length - 1].width;
     composer.drawRect(MARGIN_X, composer.cursorY - 22, CONTENT_WIDTH - amountColumnWidth, 22, {
       borderColor: COLORS.black,
@@ -678,6 +614,11 @@ export const buildBillingStatementPdf = async ({
     composer.cursorY -= 34;
   }
 
+  if (!chargeItems.length) drawPdfPenaltyRow(composer, {
+    amount: getPenaltyAmount(bill), x: MARGIN_X, width: CONTENT_WIDTH,
+    amountWidth: columns[columns.length - 1].width,
+    borderColor: COLORS.black, textColor: COLORS.black, formatMoney: formatPdfMoney,
+  });
   drawBillingStatementFooter(composer, formatPdfMoney(bill?.total_amount || 0));
   return composer.pdfDoc.save();
 };
@@ -815,6 +756,7 @@ export const buildStatementOfAccountPdf = async ({
   const accountSecondRowItems = [
     ["Credits", formatPdfMoney(record?.total_paid || 0)],
     ["New Charges", formatPdfMoney(record?.total_billed || 0)],
+    ["Penalty", formatPdfMoney(getPenaltyAmount(record))],
     ["Total Balance Due", formatPdfMoney(record?.balance_due || 0)],
   ];
   const accountFirstColWidth = CONTENT_WIDTH / accountFirstRowItems.length;
@@ -1004,6 +946,12 @@ export const buildStatementOfAccountPdf = async ({
       composer.cursorY -= rowHeightDynamic;
     });
 
+    drawPdfPenaltyRow(composer, {
+      amount: getPenaltyAmount(record), x: MARGIN_X, width: tableWidth,
+      amountWidth: columns[columns.length - 1].width,
+      borderColor: COLORS.black, textColor: COLORS.black, borderWidth: soaBorderWidth,
+      fontSize: 8, formatMoney: formatPdfMoneyValue,
+    });
     const amountColumnWidth = columns[columns.length - 2].width;
     const totalColumnWidth = columns[columns.length - 1].width;
     composer.drawRect(MARGIN_X, composer.cursorY - 22, tableWidth - amountColumnWidth - totalColumnWidth, 22, {
@@ -1051,6 +999,12 @@ export const buildStatementOfAccountPdf = async ({
     composer.cursorY -= 34;
   }
 
+  if (!transactions.length) drawPdfPenaltyRow(composer, {
+    amount: getPenaltyAmount(record), x: MARGIN_X, width: tableWidth,
+    amountWidth: columns[columns.length - 1].width,
+    borderColor: COLORS.black, textColor: COLORS.black, borderWidth: soaBorderWidth,
+    fontSize: 8, formatMoney: formatPdfMoneyValue,
+  });
   drawBillingStatementFooter(composer, formatPdfMoney(record?.balance_due || 0));
   return composer.pdfDoc.save();
 };

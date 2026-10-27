@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { getPreparerPosition } from "./preparerPosition";
 
 const getExportValue = (value) => {
   if (value === undefined || value === null) return "";
@@ -212,6 +213,8 @@ export const createExcelExportBlob = async ({
   sheetName,
   reportHeader,
   reportSummary,
+  preparedBy,
+  preparedPosition = getPreparerPosition(),
 }) => {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet(sheetName || "Report", {
@@ -583,6 +586,44 @@ export const createExcelExportBlob = async ({
       row.height = 18;
     }
   });
+
+  if (preparedBy) {
+    worksheet.addRow([]).height = 24;
+    const signatureStartColumn = columns.length - Math.max(1, Math.ceil(columns.length / 3)) + 1;
+    const addSignatureRow = (value, height, { bold = false, line = false, size = defaultFont.size } = {}) => {
+      const row = worksheet.addRow(Array(columns.length).fill(null));
+      row.height = height;
+      worksheet.mergeCells(row.number, signatureStartColumn, row.number, columns.length);
+      const cell = row.getCell(signatureStartColumn);
+      cell.value = value || null;
+      cell.font = { ...defaultFont, size, bold, color: { argb: "FF000000" } };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      if (line) cell.border = { bottom: { style: "thin", color: { argb: "FF000000" } } };
+      return row;
+    };
+    const labelRow = addSignatureRow("Prepared By:", 18, { bold: true });
+    addSignatureRow("", 36, { line: true });
+    addSignatureRow(preparedBy, 24, { bold: true });
+    if (preparedPosition) addSignatureRow(preparedPosition, 18, { size: 9 });
+
+    // Excel ignores manual breaks in "Fit to page" mode. Use an equivalent
+    // fixed scale that fits the sheet width so the signing block stays together.
+    const printableWidth = 841.89 - 2 * A4_MARGIN_INCHES * 72;
+    const sheetWidth = getColumnRangePixelWidth(worksheet, 1, columns.length) * 72 / 96;
+    const printScale = Math.max(10, Math.min(100, Math.floor(printableWidth / sheetWidth * 100)));
+    worksheet.pageSetup.fitToPage = false;
+    worksheet.pageSetup.scale = printScale;
+    delete worksheet.pageSetup.fitToWidth;
+    delete worksheet.pageSetup.fitToHeight;
+    const printableHeight = (595.28 - 2 * A4_MARGIN_INCHES * 72) * 100 / printScale;
+    let precedingHeight = 0;
+    for (let number = 1; number < labelRow.number; number += 1) {
+      precedingHeight += worksheet.getRow(number).height || 15;
+    }
+    const remainingHeight = printableHeight - precedingHeight % printableHeight;
+    if (remainingHeight < (preparedPosition ? 96 : 78)) worksheet.getRow(labelRow.number - 1).addPageBreak();
+    worksheet.pageSetup.printArea = `A1:${worksheet.getColumn(columns.length).letter}${worksheet.rowCount}`;
+  }
 
   const arrayBuffer = await workbook.xlsx.writeBuffer();
   return new Blob([arrayBuffer], {

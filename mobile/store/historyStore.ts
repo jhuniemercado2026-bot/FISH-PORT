@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getServerTimeMs } from "../utils/serverClock";
 import type {
   OfflineSyncProgress,
   OfflineTransactionDraft,
@@ -17,9 +18,28 @@ export type TransactionLockState = {
   date?: string | null;
   applies_to?: string | null;
   lock_scope?: string | null;
+  remittance_id?: number | string | null;
   submitted_by?: number | string | null;
   unlock_at?: string | null;
   remittance_reference_no?: string | null;
+};
+
+export const isTransactionLockActive = (lock?: TransactionLockState | null) => {
+  if (!lock?.is_locked) return false;
+  if (!lock.unlock_at) return true;
+
+  const unlockTime = Date.parse(lock.unlock_at);
+  const now = getServerTimeMs();
+  return now === null || !Number.isFinite(unlockTime) || unlockTime > now;
+};
+
+let transactionLockExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+
+const clearTransactionLockExpiryTimer = () => {
+  if (transactionLockExpiryTimer) {
+    clearTimeout(transactionLockExpiryTimer);
+    transactionLockExpiryTimer = null;
+  }
 };
 
 type HistoryStore = {
@@ -38,6 +58,7 @@ type HistoryStore = {
   setOfflineSyncModalVisible: (visible: boolean) => void;
   cacheTransactionDetail: (type: OfflineTransactionType, id: string | number, data: Record<string, any>) => void;
   setTransactionLock: (transactionLock: TransactionLockState | null) => void;
+  clearTransactionLock: () => void;
 };
 
 const unwrapSyncedTransactionData = (data: Record<string, any>) => {
@@ -67,7 +88,7 @@ const transactionIdentity = (transaction: SyncedHistoryTransaction) => {
 const transactionLocalIdentity = (transaction: SyncedHistoryTransaction) =>
   `${transaction.type}:local:${transaction.local_id}`;
 
-export const useHistoryStore = create<HistoryStore>((set) => ({
+export const useHistoryStore = create<HistoryStore>((set, get) => ({
   refreshKey: Date.now(),
   syncedTransactions: [],
   queuedDrafts: [],
@@ -152,5 +173,39 @@ export const useHistoryStore = create<HistoryStore>((set) => ({
         },
       };
     }),
-  setTransactionLock: (transactionLock) => set({ transactionLock }),
+  setTransactionLock: (transactionLock) => {
+    const currentLock = get().transactionLock;
+
+    if (isTransactionLockActive(transactionLock)) {
+      clearTransactionLockExpiryTimer();
+      set({ transactionLock });
+
+      const unlockTime = transactionLock?.unlock_at ? Date.parse(transactionLock.unlock_at) : Number.NaN;
+      const now = getServerTimeMs();
+      if (Number.isFinite(unlockTime) && now !== null) {
+        const remittanceId = transactionLock?.remittance_id;
+        transactionLockExpiryTimer = setTimeout(() => {
+          const latestLock = get().transactionLock;
+          if (
+            String(latestLock?.remittance_id ?? "") === String(remittanceId ?? "") &&
+            !isTransactionLockActive(latestLock)
+          ) {
+            transactionLockExpiryTimer = null;
+            set({ transactionLock: null });
+          }
+        }, Math.max(0, unlockTime - now + 100));
+      }
+
+      return;
+    }
+
+    if (isTransactionLockActive(currentLock)) return;
+
+    clearTransactionLockExpiryTimer();
+    set({ transactionLock });
+  },
+  clearTransactionLock: () => {
+    clearTransactionLockExpiryTimer();
+    set({ transactionLock: null });
+  },
 }));

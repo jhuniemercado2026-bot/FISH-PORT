@@ -1,3 +1,4 @@
+import { getServerCalendarDate } from "../utils/serverClock";
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -123,7 +124,7 @@ export default function DatePicker({
   const dayScrollRef = useRef<ScrollView | null>(null);
   const yearScrollRef = useRef<ScrollView | null>(null);
 
-  const currentYear = new Date().getFullYear();
+  const currentYear = getServerCalendarDate().getFullYear();
   const currentYearStart = new Date(currentYear, 0, 1);
   const currentYearEnd = new Date(currentYear, 11, 31, 23, 59, 59, 999);
   const effectiveMinDate = minDate ?? currentYearStart;
@@ -142,7 +143,7 @@ export default function DatePicker({
   }, [defaultValue, effectiveMaxDate, effectiveMinDate, value]);
 
   const fallbackDate = useMemo(
-    () => clampDate(new Date(), effectiveMinDate, effectiveMaxDate),
+    () => clampDate(getServerCalendarDate(), effectiveMinDate, effectiveMaxDate),
     [effectiveMaxDate, effectiveMinDate]
   );
 

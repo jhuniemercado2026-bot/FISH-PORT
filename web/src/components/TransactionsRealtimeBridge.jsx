@@ -15,6 +15,8 @@ import {
   upsertVehicleTicketInCache,
 } from "../utils/ticketsCache";
 import { invalidateTodayCollection } from "../utils/remittanceCollectionCache";
+import api from "../api/axios";
+import { syncPenaltySettings } from "../utils/penaltySettingsSync";
 
 const invalidateActiveTransactionQueries = (queryClient, queryKeys) => {
   queryKeys.forEach((queryKey) => {
@@ -111,6 +113,8 @@ const invalidateBanyeraQueries = (queryClient) => {
 
 const invalidateBillingQueries = (queryClient) => {
   invalidateActiveTransactionQueries(queryClient, [
+    ["bill-penalty-entries"],
+    ["bill-penalty-rules"],
     ["billing-data"],
     ["billing-form-lookups"],
     ["billing-boats"],
@@ -199,6 +203,34 @@ export default function TransactionsRealtimeBridge() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    let cancelled = false;
+    let pending = false;
+    const refreshPenaltyState = async () => {
+      const token = sessionStorage.getItem("token");
+      if (!token || pending || document.hidden) return;
+      pending = true;
+      const previousState = queryClient.getQueryData(["bill-penalty-state"]);
+      try {
+        const response = await api.get("/settings/bill-penalty/state");
+        if (!cancelled && sessionStorage.getItem("token") === token
+          && queryClient.getQueryData(["bill-penalty-state"]) === previousState) {
+          await syncPenaltySettings(queryClient, response.data.data);
+        }
+      } catch { /* Realtime or the next poll will retry after a connection failure. */ }
+      finally { pending = false; }
+    };
+    // Shared hosting may not have a websocket connection; keep open sessions live.
+    void refreshPenaltyState();
+    const timer = window.setInterval(refreshPenaltyState, 5000);
+    document.addEventListener("visibilitychange", refreshPenaltyState);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshPenaltyState);
+    };
+  }, [queryClient]);
+
+  useEffect(() => {
     const echo = getEcho();
     if (!echo) return undefined;
 
@@ -218,6 +250,10 @@ export default function TransactionsRealtimeBridge() {
           updateDockingStatsInCache(queryClient, record, "add");
         }
         invalidateDockingQueries(queryClient);
+        invalidateTodayCollection(
+          queryClient,
+          record.docking_date || record.transaction_date || record.created_at
+        );
         return;
       }
 
@@ -228,6 +264,10 @@ export default function TransactionsRealtimeBridge() {
           updateBanyeraStatsInCache(queryClient, record, "add");
         }
         invalidateBanyeraQueries(queryClient);
+        invalidateTodayCollection(
+          queryClient,
+          record.transaction_date || record.created_at
+        );
         return;
       }
 
@@ -278,16 +318,29 @@ export default function TransactionsRealtimeBridge() {
       const type = payload?.type;
       const record = payload?.record;
 
+      if (type === "bill-penalty-settings" && record) {
+        void syncPenaltySettings(queryClient, record);
+        return;
+      }
+
       if (type === "docking" && record) {
         upsertDockingInDataCache(queryClient, record);
         syncDockingCalendarCache(queryClient, record, undefined, (docking) => Boolean(docking?.is_voided || docking?.voided_at));
         invalidateDockingQueries(queryClient);
+        invalidateTodayCollection(
+          queryClient,
+          record.docking_date || record.transaction_date || record.created_at
+        );
         return;
       }
 
       if (type === "banyera" && record) {
         upsertBanyeraTransactionInDataCache(queryClient, record);
         invalidateBanyeraQueries(queryClient);
+        invalidateTodayCollection(
+          queryClient,
+          record.transaction_date || record.created_at
+        );
         return;
       }
 

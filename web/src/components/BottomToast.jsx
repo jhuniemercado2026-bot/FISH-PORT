@@ -5,6 +5,7 @@ import {
   IoInformationCircleOutline,
 } from "react-icons/io5";
 import { hideBottomToast, useBottomToastStore } from "../store/bottomToastStore";
+import { usePenaltyToggleStore } from "../store/penaltyToggleStore";
 
 const FONT = "'Montserrat', sans-serif";
 const NO_CHANGES_TITLE = "No Changes Made";
@@ -14,6 +15,7 @@ const BOAT_UPDATED_MESSAGE = "Boat details have been updated successfully.";
 
 const BottomToast = () => {
   const { open, type, title, message } = useBottomToastStore();
+  const penaltyProgressVisible = usePenaltyToggleStore((state) => Boolean(state.operation));
 
   if (!open) return null;
 
@@ -41,7 +43,7 @@ const BottomToast = () => {
     <div
       className="fixed z-[9999] flex items-center gap-4"
       style={{
-        bottom: 32,
+        bottom: penaltyProgressVisible ? 240 : 32,
         right: 32,
         minWidth: 340,
         maxWidth: 420,

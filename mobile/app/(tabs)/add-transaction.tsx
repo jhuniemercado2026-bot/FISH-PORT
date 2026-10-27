@@ -1,13 +1,18 @@
+import { getServerNow, getServerCalendarDate } from "../../utils/serverClock";
+import { useServerClockVersion } from "../../utils/useServerClockVersion";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import * as ImagePicker from "expo-image-picker";
+import { useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router/react-navigation";
 import { usePreventScreenCapture } from "expo-screen-capture";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
   Pressable,
+  RefreshControl,
   ScrollView,
   StatusBar,
   Text,
@@ -230,7 +235,7 @@ function getManilaDateParts() {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-  }).formatToParts(new Date());
+  }).formatToParts(getServerNow());
 
   const map = Object.fromEntries(
     parts
@@ -397,7 +402,7 @@ function isBanyeraFee(fee?: FeeOption | null) {
 }
 
 function getManilaDateString() {
-  return new Date().toLocaleDateString("en-CA", {
+  return getServerNow().toLocaleDateString("en-CA", {
     timeZone: "Asia/Manila",
   });
 }
@@ -955,8 +960,11 @@ function unwrapSavedTransactionData(data: any) {
 }
 
 export default function AddTransactionScreen() {
+  const serverClockVersion = useServerClockVersion();
   usePreventScreenCapture();
 
+  const router = useRouter();
+  const addTransactionScrollRef = useRef<ScrollView | null>(null);
   const manilaNow = getManilaDateParts();
   const authToken = getAuthToken();
   const showToast = useToastStore((state) => state.showToast);
@@ -965,9 +973,29 @@ export default function AddTransactionScreen() {
   const addQueuedDrafts = useHistoryStore((state) => state.addQueuedDrafts);
   const realtimeTransactionLock = useHistoryStore((state) => state.transactionLock);
   const setRealtimeTransactionLock = useHistoryStore((state) => state.setTransactionLock);
+  const clearRealtimeTransactionLock = useHistoryStore((state) => state.clearTransactionLock);
   const masterDataRefreshKey = useMasterDataStore((state) => state.refreshKey);
+  const triggerMasterDataRefresh = useMasterDataStore((state) => state.triggerRefresh);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedType, setSelectedType] =
     useState<TransactionType>("docking");
+  const scrollToAddTransactionTop = useCallback(() => {
+    requestAnimationFrame(() => {
+      addTransactionScrollRef.current?.scrollTo({ y: 0, animated: true });
+    });
+  }, []);
+  const navigateToHistory = useCallback((tab: TransactionType) => {
+    router.navigate({
+      pathname: "/(tabs)/history",
+      params: { tab },
+    });
+  }, [router]);
+
+  useFocusEffect(
+    useCallback(() => {
+      scrollToAddTransactionTop();
+    }, [scrollToAddTransactionTop])
+  );
   const [boatId, setBoatId] = useState("");
   const [transactionDate, setTransactionDate] = useState("");
   const [documentationPath, setDocumentationPath] = useState("");
@@ -1248,6 +1276,14 @@ export default function AddTransactionScreen() {
     [authToken, selectedRemittanceDate, selectedType]
   );
 
+  const handleRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    triggerMasterDataRefresh();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    setIsRefreshing(false);
+  }, [isRefreshing, triggerMasterDataRefresh]);
+
   useEffect(() => {
     function refreshAutoClockFields() {
       const nextNow = getManilaDateParts();
@@ -1307,6 +1343,7 @@ export default function AddTransactionScreen() {
     isRemittanceDateAuto,
     isTicketDateAuto,
     isTicketTimeAuto,
+    serverClockVersion,
   ]);
 
   useEffect(() => {
@@ -1323,40 +1360,42 @@ export default function AddTransactionScreen() {
     setTransactionLock(realtimeTransactionLock ?? null);
   }, [realtimeTransactionLock]);
 
-  useEffect(() => {
-    let isMounted = true;
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
 
-    async function loadTransactionLockState() {
-      if (!authToken) {
-        setTransactionLock(null);
-        return;
-      }
-
-      try {
-        const response = await fetch(`${getApiBaseUrl()}/transaction-lock?resource=transactions`, {
-          headers: buildApiHeaders(authToken),
-        });
-        const json = await response.json().catch(() => null);
-        const lock = json?.transaction_lock;
-
-        if (lock && (lock.is_locked || lock.message)) {
-          setTransactionLock(lock);
-          setRealtimeTransactionLock(lock);
-        } else {
+      async function loadTransactionLockState() {
+        if (!authToken) {
+          clearRealtimeTransactionLock();
           setTransactionLock(null);
-          setRealtimeTransactionLock(null);
+          return;
         }
-      } catch {
-        setTransactionLock(null);
+
+        try {
+          const response = await fetch(`${getApiBaseUrl()}/transaction-lock?resource=transactions`, {
+            headers: buildApiHeaders(authToken),
+          });
+          if (!response.ok || !isMounted) return;
+
+          const json = await response.json().catch(() => null);
+          if (!isMounted || !json || !Object.prototype.hasOwnProperty.call(json, "transaction_lock")) {
+            return;
+          }
+
+          setRealtimeTransactionLock(json.transaction_lock ?? null);
+          setTransactionLock(useHistoryStore.getState().transactionLock);
+        } catch {
+          // Keep the last known lock during temporary network failures.
+        }
       }
-    }
 
-    loadTransactionLockState();
+      void loadTransactionLockState();
 
-    return () => {
-      isMounted = false;
-    };
-  }, [authToken, setRealtimeTransactionLock]);
+      return () => {
+        isMounted = false;
+      };
+    }, [authToken, clearRealtimeTransactionLock, setRealtimeTransactionLock])
+  );
 
   useEffect(() => {
     refreshRemittanceCollection({ hydrateCache: true });
@@ -2264,7 +2303,7 @@ export default function AddTransactionScreen() {
       return;
     }
 
-    const signedAt = new Date().toISOString();
+    const signedAt = getServerNow().toISOString();
 
     setIsSavingBanyeraSignature(true);
 
@@ -2479,6 +2518,8 @@ export default function AddTransactionScreen() {
           setHasSubmittedRemittance(true);
           showToast("success", "Remittance saved as offline draft.");
           resetRemittanceForm();
+          scrollToAddTransactionTop();
+          navigateToHistory("remittance");
           return;
         }
 
@@ -2514,6 +2555,8 @@ export default function AddTransactionScreen() {
           triggerHistoryRefresh();
         }
         resetRemittanceForm();
+        scrollToAddTransactionTop();
+        navigateToHistory("remittance");
         return;
       }
 
@@ -2637,7 +2680,7 @@ export default function AddTransactionScreen() {
             ? {
                 owner_signature_data_url:
                   banyeraOwnerSignature || selectedBanyeraBoatOwnerSignature,
-                owner_signature_signed_at: new Date().toISOString(),
+                owner_signature_signed_at: getServerNow().toISOString(),
                 owner_signature_save_for_future: banyeraOwnerSignatureSaveForFuture,
               }
             : {}),
@@ -2678,6 +2721,8 @@ export default function AddTransactionScreen() {
           }
           showToast("success", "Banyera saved as offline draft.");
           resetBanyeraForm();
+          scrollToAddTransactionTop();
+          navigateToHistory("banyera");
           return;
         }
 
@@ -2702,6 +2747,8 @@ export default function AddTransactionScreen() {
           triggerHistoryRefresh();
         }
         resetBanyeraForm();
+        scrollToAddTransactionTop();
+        navigateToHistory("banyera");
         return;
       }
 
@@ -2831,6 +2878,8 @@ export default function AddTransactionScreen() {
           }
           showToast("success", "Docking saved as offline draft.");
           resetDockingForm();
+          scrollToAddTransactionTop();
+          navigateToHistory("docking");
           return;
         }
 
@@ -2855,6 +2904,8 @@ export default function AddTransactionScreen() {
           triggerHistoryRefresh();
         }
         resetDockingForm();
+        scrollToAddTransactionTop();
+        navigateToHistory("docking");
         return;
       }
 
@@ -2976,6 +3027,8 @@ export default function AddTransactionScreen() {
           }
           showToast("success", "Vehicle ticket saved as offline draft.");
           resetTicketForm();
+          scrollToAddTransactionTop();
+          navigateToHistory("tickets");
           return;
         }
 
@@ -3010,6 +3063,8 @@ export default function AddTransactionScreen() {
           triggerHistoryRefresh();
         }
         resetTicketForm();
+        scrollToAddTransactionTop();
+        navigateToHistory("tickets");
         return;
       }
     } catch {
@@ -3060,10 +3115,20 @@ export default function AddTransactionScreen() {
       </SafeAreaView>
 
       <ScrollView
+        ref={addTransactionScrollRef}
         className="flex-1"
+        alwaysBounceVertical
         contentContainerStyle={{ paddingBottom: 28, paddingTop: 20 }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor="#2563EB"
+            colors={["#2563EB"]}
+          />
+        }
       >
         <View className="px-5 pt-0">
           <View className="mt-2 flex-row flex-wrap justify-between">
@@ -3412,7 +3477,7 @@ export default function AddTransactionScreen() {
                     errorVariant="card"
                     placeholder="Select docking date"
                     precision="day"
-                    maxDate={new Date()}
+                    maxDate={getServerCalendarDate()}
                     value={
                       dockingYear && dockingMonth && dockingDay
                         ? new Date(
@@ -3755,7 +3820,7 @@ export default function AddTransactionScreen() {
                     errorVariant="card"
                     placeholder="Select banyera date"
                     precision="day"
-                    maxDate={new Date()}
+                    maxDate={getServerCalendarDate()}
                     value={banyeraDateValue}
                     onChange={(nextDate) => {
                       setIsBanyeraDateAuto(false);
@@ -4280,7 +4345,7 @@ export default function AddTransactionScreen() {
                     errorVariant="card"
                     placeholder="Select ticket date"
                     precision="day"
-                    maxDate={new Date()}
+                    maxDate={getServerCalendarDate()}
                     value={ticketDateValue}
                     onChange={(nextDate) => {
                       setIsTicketDateAuto(false);

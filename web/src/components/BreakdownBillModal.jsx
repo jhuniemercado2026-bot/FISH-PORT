@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import Modal from "./Modal";
 import { formatMoneyValue, parseMoneyValue } from "../utils/money";
+import { getPenaltyAmount } from "../lib/billPenalty";
 
 const FONT = "'Montserrat', sans-serif";
 
@@ -153,6 +154,10 @@ const BreakdownBillModal = ({ open, bill, onClose }) => {
       showFooterActions={false}
       footerLeftContent={
         <div className="text-left">
+          <div className="mb-3 flex items-center justify-between gap-8 text-[13px] font-medium text-[#1a1f36]">
+            <span>Penalty (₱)</span>
+            <span>{formatMoneyValue(getPenaltyAmount(bill))}</span>
+          </div>
           <p
             className="m-0 text-left text-[11px] font-semibold uppercase"
             style={{ color: "#6F6F82", fontFamily: FONT }}

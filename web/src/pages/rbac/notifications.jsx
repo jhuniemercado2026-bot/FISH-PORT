@@ -22,6 +22,7 @@ import NoDataFound from "../../components/NoDataFound";
 import { useSidebar } from "../../store/sidebarStore";
 import { useNotificationsDataQuery } from "../../hooks/useNotificationsDataQuery";
 import api from "../../api/axios";
+import { getFrequentVisitRegistrationTarget } from "../../lib/frequentVisitRegistration";
 
 const FONT = "'Montserrat', sans-serif";
 const PAGE_SIZE = 10;
@@ -244,6 +245,8 @@ const NotificationsPage = () => {
   });
 
   const getNotificationNavigationTarget = (notification) => {
+    const registrationTarget = getFrequentVisitRegistrationTarget(notification);
+    if (registrationTarget) return registrationTarget;
     const relatedType = String(notification?.related_type || "").trim().toLowerCase();
     const relatedId = notification?.related_id;
 

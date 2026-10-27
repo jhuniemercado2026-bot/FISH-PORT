@@ -1,3 +1,4 @@
+import { drawPreparedBySignature, REPORT_SIGNATURE_SPACE } from "./reportSignature";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { getHeaderPngBytes } from "./pdfHeader";
 
@@ -362,7 +363,6 @@ export const buildDockingPdf = async ({
     ["Report Type", reportTypeLabel],
     ["Coverage", reportDateLabel],
     ...(filterType === "daily" ? [["Day", reportDayLabel]] : []),
-    ["Prepared By", preparedBy],
   ];
   const secondRowItems = [
     ["Municipality", "Opol"],
@@ -467,7 +467,7 @@ export const buildDockingPdf = async ({
 
   const detailRowHeight = 24;
   displayRows.forEach((row) => {
-    if (composer.cursorY - detailRowHeight < MARGIN_Y + 36) {
+    if (composer.cursorY - detailRowHeight < MARGIN_Y + REPORT_SIGNATURE_SPACE + 36) {
       composer.addPage();
       drawTableHeader(composer, columns);
     }
@@ -525,5 +525,6 @@ export const buildDockingPdf = async ({
     { fontSize: 10, bold: true },
   );
 
+  drawPreparedBySignature(composer, preparedBy, { marginX: MARGIN_X, marginY: MARGIN_Y, contentWidth: CONTENT_WIDTH });
   return composer.pdfDoc.save();
 };

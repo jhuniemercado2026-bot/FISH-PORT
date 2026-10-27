@@ -14,6 +14,7 @@ import { getStoredToken, getStoredUser, normalizeRole } from "../pages/login/aut
 import { logoutUser } from "../pages/login/logout";
 import { showBottomToast } from "../store/bottomToastStore";
 import { syncUsersQueryCache } from "../hooks/useUsersQuery";
+import { SETTINGS_QUERY_KEY } from "../hooks/useSettingsQuery";
 import { useQueryClient } from "@tanstack/react-query";
 
 const FONT = "'Montserrat', sans-serif";
@@ -183,13 +184,19 @@ export default function FirstLoginCompletionModal() {
         password: form.password,
         password_confirmation: form.password_confirmation,
       });
-      const updatedUser = response.data?.data ? { ...user, ...response.data.data } : {
+      const responseUser = response.data?.data ?? {};
+      const firstName = String(responseUser.first_name ?? form.first_name).trim();
+      const lastName = String(responseUser.last_name ?? form.last_name).trim();
+      const updatedUser = {
         ...user,
-        first_name: form.first_name.trim(),
-        last_name: form.last_name.trim(),
+        ...responseUser,
+        first_name: firstName,
+        last_name: lastName,
+        full_name: String(responseUser.full_name || `${firstName} ${lastName}`).trim(),
       };
 
       sessionStorage.setItem("user", JSON.stringify(updatedUser));
+      queryClient.setQueryData(SETTINGS_QUERY_KEY, { user: updatedUser });
       syncUsersQueryCache(queryClient, updatedUser);
       setUser(updatedUser);
       setForm({

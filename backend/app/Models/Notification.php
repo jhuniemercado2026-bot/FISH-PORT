@@ -17,6 +17,7 @@ class Notification extends Model
         'sender_user_id',
         'related_type',
         'related_id',
+        'deduplication_key',
         'is_read',
         'read_at',
     ];

@@ -5,7 +5,11 @@ import { Montserrat_600SemiBold } from "@expo-google-fonts/montserrat/600SemiBol
 import { Montserrat_800ExtraBold } from "@expo-google-fonts/montserrat/800ExtraBold";
 import { Stack, router } from "expo-router";
 import { useFonts } from "expo-font";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, AppState, Pressable, Text, View } from "react-native";
+import NetInfo from "@react-native-community/netinfo";
+import { hasServerTime, syncServerClock } from "../utils/serverClock";
+import { useServerClockVersion } from "../utils/useServerClockVersion";
 import { GlobalToast } from "../components/toast";
 import OfflineSyncModal from "../components/OfflineSyncModal";
 import FirstLoginCompletionModal from "../components/FirstLoginCompletionModal";
@@ -13,6 +17,7 @@ import {
   startOfflineTransactionSync,
 } from "../utils/offlineTransactionQueue";
 import { getAuthSession, setAuthSession } from "../api/auth";
+import { buildApiHeaders, getApiBaseUrl } from "../api/axios";
 import { useHistoryStore } from "../store/historyStore";
 import { useMasterDataStore } from "../store/masterDataStore";
 import { useToastStore } from "../store/toastStore";
@@ -30,7 +35,29 @@ const currentUserMatchesRecord = (record: Record<string, unknown> | null | undef
   return currentUserId !== "" && currentUserId === recordUserId;
 };
 
+const currentUserHasAffectedRole = (record: Record<string, unknown> | null | undefined) => {
+  const userId = getAuthSession()?.user?.user_id;
+  if (userId == null) return false;
+  if (record?.excluded_user_id != null) {
+    return String(userId) !== String(record.excluded_user_id);
+  }
+  const currentRole = String(getAuthSession()?.user?.role ?? "").trim().toLowerCase();
+  const rawAffectedRoles = Array.isArray(record?.affected_roles)
+    ? record.affected_roles
+    : typeof record?.affected_roles === "string"
+      ? [record.affected_roles]
+      : [];
+  const affectedRoles = rawAffectedRoles
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  return currentRole !== "" && affectedRoles.includes(currentRole);
+};
+
 export default function RootLayout() {
+  const serverClockVersion = useServerClockVersion();
+  const [clockSyncFailed, setClockSyncFailed] = useState(false);
   const showToast = useToastStore((state) => state.showToast);
   const triggerHistoryRefresh = useHistoryStore((state) => state.triggerRefresh);
   const addSyncedTransactions = useHistoryStore((state) => state.addSyncedTransactions);
@@ -65,6 +92,75 @@ export default function RootLayout() {
     triggerHistoryRefresh,
     triggerMasterDataRefresh,
   };
+
+  useEffect(() => {
+    let disposed = false;
+    const refreshClock = async () => {
+      const synced = await syncServerClock(true);
+      if (!disposed) setClockSyncFailed(!synced);
+    };
+    void refreshClock();
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active") void refreshClock();
+    }, 60000);
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refreshClock();
+    });
+    const unsubscribeNetwork = NetInfo.addEventListener((state) => {
+      if (state.isConnected && state.isInternetReachable !== false) void refreshClock();
+    });
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+      appState.remove();
+      unsubscribeNetwork();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (serverClockVersion > 0) {
+      const store = useHistoryStore.getState();
+      store.setTransactionLock(store.transactionLock);
+    }
+  }, [serverClockVersion]);
+
+  useEffect(() => {
+    let checking = false;
+    let disposed = false;
+    const checkSession = async () => {
+      const token = getAuthSession()?.token;
+      if (!token || checking || AppState.currentState !== "active") return;
+      checking = true;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/me?session_check=${Date.now()}`, {
+          headers: buildApiHeaders(token),
+          signal: controller.signal,
+        });
+        if (!disposed && response.status === 401 && getAuthSession()?.token === token) {
+          setAuthSession(null);
+          callbacksRef.current.showToast("error", "Your session has ended. Please sign in again to refresh your data.");
+          router.replace("/(login)/login");
+        }
+      } catch {
+        // Temporary network failures must not end a valid session.
+      } finally {
+        clearTimeout(timeout);
+        checking = false;
+      }
+    };
+    const timer = setInterval(checkSession, 15000);
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void checkSession();
+    });
+    void checkSession();
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     return startOfflineTransactionSync({
@@ -160,8 +256,19 @@ export default function RootLayout() {
         const status = String(record?.status ?? "").toLowerCase();
 
         if (
+          resource === "database"
+          && String(payload?.action ?? "").toLowerCase() === "restored"
+          && currentUserHasAffectedRole(record)
+        ) {
+          callbacksRef.current.showToast("error", String(record?.message || "The database was restored. Please sign in again to refresh your data."));
+          setAuthSession(null);
+          router.replace("/(login)/login");
+          return;
+        }
+
+        if (
           resource === "users" &&
-          status === "deactivated" &&
+          (status === "deactivated" || record?.force_logout === true) &&
           currentUserMatchesRecord(record)
         ) {
           callbacksRef.current.showToast("error", FORCED_LOGOUT_MESSAGE);
@@ -243,6 +350,25 @@ export default function RootLayout() {
 
   if (!fontsLoaded) {
     return null;
+  }
+
+  if (!hasServerTime()) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 32, backgroundColor: "white" }}>
+        {!clockSyncFailed && <ActivityIndicator size="large" color="#2563EB" />}
+        <Text style={{ marginTop: 16, textAlign: "center", color: "#334155" }}>
+          {clockSyncFailed ? "Unable to connect to the server. Please check your connection and try again." : "Connecting to the server..."}
+        </Text>
+        {clockSyncFailed && (
+          <Pressable style={{ marginTop: 20, padding: 12 }} onPress={() => {
+            setClockSyncFailed(false);
+            void syncServerClock(true).then((synced) => setClockSyncFailed(!synced));
+          }}>
+            <Text style={{ color: "#2563EB", fontWeight: "600" }}>Try again</Text>
+          </Pressable>
+        )}
+      </View>
+    );
   }
 
   return (

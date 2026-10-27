@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Modal as NativeModal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StatusBar,
   Text,
@@ -20,6 +21,7 @@ import {
   getOfflineResourceArray,
   saveOfflineResource,
 } from "../../utils/offlineMasterData";
+import { usePullRefreshIndicator } from "../../utils/usePullRefreshIndicator";
 
 type NotificationItem = {
   notification_id: number | null;
@@ -219,6 +221,7 @@ export default function NotificationsScreen() {
   const setUnreadCount = useNotificationStore((state) => state.setUnreadCount);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const { isRefreshing, beginRefresh, finishRefresh } = usePullRefreshIndicator();
   const [hasLoadedNotifications, setHasLoadedNotifications] = useState(false);
   const hasLoadedNotificationsRef = useRef(false);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
@@ -288,6 +291,15 @@ export default function NotificationsScreen() {
     },
     [authToken, setUnreadCount, showToast]
   );
+
+  const handleRefresh = useCallback(async () => {
+    if (!beginRefresh()) return;
+    try {
+      await loadNotifications();
+    } finally {
+      finishRefresh();
+    }
+  }, [beginRefresh, finishRefresh, loadNotifications]);
 
   useEffect(() => {
     setUnreadCount(notifications.filter((item) => !item.is_read).length);
@@ -396,12 +408,21 @@ export default function NotificationsScreen() {
 
       <ScrollView
         className="flex-1"
+        alwaysBounceVertical
         contentContainerStyle={{
           flexGrow: shouldShowEmptyState ? 1 : undefined,
           paddingBottom: 28,
           paddingTop: shouldShowEmptyState ? 0 : 20,
         }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor="#2563EB"
+            colors={["#2563EB"]}
+          />
+        }
       >
         <View className={`px-5 ${shouldShowEmptyState ? "flex-1 justify-center" : ""}`}>
           {shouldShowSkeleton ? (

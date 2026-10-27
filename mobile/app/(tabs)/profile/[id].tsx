@@ -1,3 +1,4 @@
+import { getServerCalendarDate } from "../../../utils/serverClock";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { getAuthToken, updateAuthUser } from "../../../api/auth";
@@ -199,7 +200,7 @@ export default function PersonalDetailsScreen() {
       return "Birthday is required.";
     }
 
-    const cutoff = new Date();
+    const cutoff = getServerCalendarDate();
     cutoff.setFullYear(cutoff.getFullYear() - 15);
 
     return value <= cutoff ? "" : "Users must be at least 15 years old.";
@@ -1030,7 +1031,7 @@ export default function PersonalDetailsScreen() {
                 errorVariant="card"
                 placeholder="Select birthday"
                 value={birthday}
-                maxDate={new Date()}
+                maxDate={getServerCalendarDate()}
                 onChange={(value) => {
                   setBirthday(value);
                   if (birthdayError) {

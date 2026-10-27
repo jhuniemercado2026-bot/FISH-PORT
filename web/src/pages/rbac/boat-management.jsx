@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { ConfigProvider, Drawer as AntDrawer, Select, Tooltip } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
+import { getVisitingBoatRegistrationData } from "../../lib/frequentVisitRegistration";
 import "typeface-montserrat";
 import {
   IoAddOutline,
@@ -72,6 +73,8 @@ import { cacheTab, getCachedTab } from "../../utils/tabSession";
 
 const RB_PAGE_SIZE = 10;
 const RB_FONT = "'Montserrat', sans-serif";
+const MAX_BOAT_IMAGE_SIZE_KB = 50000;
+const MAX_BOAT_IMAGE_SIZE_BYTES = MAX_BOAT_IMAGE_SIZE_KB * 1024;
 
 const RB_getOwnerName = (owner) =>
   `${owner?.owner_firstname ?? ""} ${owner?.owner_lastname ?? ""}`.trim() || "-";
@@ -576,6 +579,16 @@ const RB_EditBoatDrawer = ({ boat, open, onClose, onSuccess, onImageUploaded, on
 
   const handleImageChange = (file) => {
     if (!file) return;
+
+    if (file.size > MAX_BOAT_IMAGE_SIZE_BYTES) {
+      showBottomToast(
+        "error",
+        "Image Too Large",
+        `Boat image must be ${MAX_BOAT_IMAGE_SIZE_KB} KB or less.`
+      );
+      return;
+    }
+
     setImageFile(file);
     const reader = new FileReader();
     reader.onload = (e) => setImagePreview(e.target.result);
@@ -898,6 +911,7 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
   const [editingBoat,    setEditingBoat]    = useState(null);
   const [deleteModal,    setDeleteModal]    = useState({ open: false, boat: null });
   const [addBoatModalOpen, setAddBoatModalOpen] = useState(false);
+  const [registrationInitialData, setRegistrationInitialData] = useState(null);
   const isHeadViewOnly = isHeadRole();
   const urlFiltersKeyRef = useRef(null);
 
@@ -925,9 +939,29 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
   useEffect(() => {
     if (!openAddBoatOnMount) return;
     if (isHeadViewOnly) return;
-    setAddBoatModalOpen(true);
-    navigate("/registered-boats", { replace: true });
-  }, [isHeadViewOnly, navigate, openAddBoatOnMount]);
+    let cancelled = false;
+    const visit = location.state?.registrationVisit;
+    const openRegistration = async () => {
+      try {
+        let initialData = null;
+        if (visit && ["docking", "banyera"].includes(visit.source) && Number.isSafeInteger(Number(visit.id))) {
+          const endpoint = visit.source === "docking" ? "dockings" : "banyera-transactions";
+          const response = await api.get(`/${endpoint}/${Number(visit.id)}`);
+          initialData = getVisitingBoatRegistrationData(response.data);
+          if (!initialData) throw new Error("This visit is no longer available for boat registration.");
+        }
+        if (cancelled) return;
+        setRegistrationInitialData(initialData);
+        setAddBoatModalOpen(true);
+      } catch (error) {
+        if (!cancelled) showBottomToast("error", "Registration Unavailable", error.response?.data?.message || error.message);
+      } finally {
+        if (!cancelled) navigate("/registered-boats", { replace: true });
+      }
+    };
+    void openRegistration();
+    return () => { cancelled = true; };
+  }, [isHeadViewOnly, navigate, openAddBoatOnMount, location.state]);
   const boatsQuery = useRegisteredBoatsDataQuery(
     {
       boatsPage: currentPage,
@@ -1383,12 +1417,15 @@ const RB_RegisteredBoats = ({ activeBoatTab, onBoatTabChange, openAddBoatOnMount
       /> : null}
       {!isHeadViewOnly ? <BA_AddBoatModal
         open={addBoatModalOpen}
-        onClose={() => setAddBoatModalOpen(false)}
+        initialData={registrationInitialData}
+        onClose={() => { setAddBoatModalOpen(false); setRegistrationInitialData(null); }}
+        onImageUploaded={handleBoatImageUploaded}
         boatTypes={boatTypes}
         owners={owners}
         loading={boatsQuery.isLoading && !boatsQuery.data}
         onSuccess={(createdBoat) => {
           setAddBoatModalOpen(false);
+          setRegistrationInitialData(null);
           if (createdBoat?.boat_id) {
             setBoats((prev) => [
               createdBoat,
@@ -2277,6 +2314,15 @@ const BO_OWNER_STATUS_OPTIONS = [
 ];
 const BO_getFullName = (owner) =>
   `${owner?.owner_firstname ?? ""} ${owner?.owner_lastname ?? ""}`.trim() || "-";
+const BO_normalizeOwnerName = (firstName, lastName) => {
+  const normalized = [firstName, lastName]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+
+  return normalized.toLowerCase();
+};
+
 const BO_getUsageCount = (owner) => Number(owner?.boats_count ?? 0);
 const BO_getUsageCountLabel = (owner) => {
   const count = BO_getUsageCount(owner);
@@ -2328,7 +2374,7 @@ const BO_TailDropdown = ({ value, onChange, options, height = 38 }) => (
   <FilterButton value={value} onChange={onChange} options={options} height={height} width={160} />
 );
 
-const BO_OwnerDrawer = ({ owner, open, onClose, onSave, onNoChanges, saving }) => {
+const BO_OwnerDrawer = ({ owner, open, onClose, onSave, onNoChanges, saving, owners = [] }) => {
   const isEdit = !!owner;
   const [form, setForm] = useState({
     owner_firstname: owner?.owner_firstname || "",
@@ -2360,12 +2406,29 @@ const BO_OwnerDrawer = ({ owner, open, onClose, onSave, onNoChanges, saving }) =
 
   const validate = () => {
     const e = {};
-    if (!form.owner_firstname.trim()) e.owner_firstname = "First name is required.";
-    if (!form.owner_lastname.trim())  e.owner_lastname  = "Last name is required.";
-    if (!form.address.trim())         e.address         = "Address is required.";
+    const firstName = form.owner_firstname.trim();
+    const lastName = form.owner_lastname.trim();
+
+    if (!firstName) e.owner_firstname = "First name is required.";
+    if (!lastName) e.owner_lastname = "Last name is required.";
+    if (!form.address.trim()) e.address = "Address is required.";
     if (form.contact_number.trim() && !/^\d{11}$/.test(form.contact_number.trim())) {
       e.contact_number = "Contact number must be 11 digits.";
     }
+
+    const normalizedName = BO_normalizeOwnerName(firstName, lastName);
+    if (normalizedName && !e.owner_firstname && !e.owner_lastname) {
+      const duplicateOwner = owners.some((existingOwner) => {
+        if (isEdit && String(existingOwner.owner_id) === String(owner?.owner_id)) return false;
+        return BO_normalizeOwnerName(existingOwner?.owner_firstname, existingOwner?.owner_lastname) === normalizedName;
+      });
+
+      if (duplicateOwner) {
+        e.owner_firstname = "An owner with this first and last name already exists.";
+        e.owner_lastname = "An owner with this first and last name already exists.";
+      }
+    }
+
     return e;
   };
 
@@ -3226,6 +3289,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
         onClose={() => setAddModal(false)}
         onSave={handleAdd}
         saving={saving}
+        owners={owners}
       /> : null}
 
       {!isHeadViewOnly ? <BO_OwnerDrawer
@@ -3238,6 +3302,7 @@ const BO_BoatOwners = ({ activeBoatTab, onBoatTabChange }) => {
         }}
         onSave={handleEdit}
         saving={saving}
+        owners={owners}
       /> : null}
 
       {/* Archive Confirmation Modal */}
@@ -3320,7 +3385,7 @@ const BA_FieldError = ({ msg }) =>
   ) : null;
 
 const BA_Lightbox = ({ src, onClose }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm" onClick={onClose}>
+  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm" onClick={onClose}>
     <div className="relative w-full max-w-5xl" onClick={(e) => e.stopPropagation()}>
       <img src={src} alt="Boat preview" className="w-full rounded-[10px] object-contain shadow-2xl" style={{ maxHeight: "85vh" }} />
       <button
@@ -3333,7 +3398,7 @@ const BA_Lightbox = ({ src, onClose }) => (
   </div>
 );
 
-const BA_AddBoatModal = ({ open, onClose, onSuccess, boatTypes = [], owners = [], loading = false }) => {
+const BA_AddBoatModal = ({ open, initialData = null, onClose, onSuccess, onImageUploaded, boatTypes = [], owners = [], loading = false }) => {
   const queryClient = useQueryClient();
   const { isTransactionLocked, transactionLockMessage } = useTransactionLockQuery("boat-management");
   const [submitting, setSubmitting] = useState(false);
@@ -3373,6 +3438,10 @@ const BA_AddBoatModal = ({ open, onClose, onSuccess, boatTypes = [], owners = []
     handleReset();
   }, [handleReset, open]);
 
+  useEffect(() => {
+    if (open && initialData) setForm((current) => ({ ...current, ...initialData }));
+  }, [open, initialData]);
+
   if (!open) return null;
 
   const selectedOwner = owners.find((owner) => String(owner.owner_id) === String(form.owner_id));
@@ -3395,6 +3464,16 @@ const BA_AddBoatModal = ({ open, onClose, onSuccess, boatTypes = [], owners = []
 
   const handleImageFile = (file) => {
     if (!file) return;
+
+    if (file.size > MAX_BOAT_IMAGE_SIZE_BYTES) {
+      showBottomToast(
+        "error",
+        "Image Too Large",
+        `Boat image must be ${MAX_BOAT_IMAGE_SIZE_KB} KB or less.`
+      );
+      return;
+    }
+
     setImageFile(file);
     const reader = new FileReader();
     reader.onload = (event) =>
@@ -3462,7 +3541,7 @@ const BA_AddBoatModal = ({ open, onClose, onSuccess, boatTypes = [], owners = []
         queryClient,
         boat: createdBoat,
         imageFile,
-        onUploaded: onSuccess,
+        onUploaded: onImageUploaded,
       });
     } catch (error) {
       showBottomToast("error", "Registration Failed", error.response?.data?.message ?? "Failed to register boat. Please try again.");

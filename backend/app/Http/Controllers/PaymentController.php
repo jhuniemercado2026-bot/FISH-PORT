@@ -210,6 +210,7 @@ class PaymentController extends Controller
         }
 
         $payment = DB::transaction(function () use ($validated) {
+            \App\Models\Bill::whereKey($validated['bill_id'])->lockForUpdate()->firstOrFail();
             $payment = Payment::create([
                 'bill_id' => $validated['bill_id'],
                 'amount_paid' => $validated['amount_paid'],
@@ -284,6 +285,7 @@ class PaymentController extends Controller
         }
 
         $createdPayments = DB::transaction(function () use ($bills, $validated) {
+            \App\Models\Bill::whereIn('bill_id', $bills->pluck('bill_id'))->orderBy('bill_id')->lockForUpdate()->get();
             return $bills->map(function ($bill) use ($validated) {
                 return Payment::create([
                     'bill_id' => $bill->bill_id,
@@ -383,6 +385,7 @@ class PaymentController extends Controller
         $allocations = $this->buildSelectedBillAllocations($bills, $amountPaid);
 
         $createdPayments = DB::transaction(function () use ($allocations, $validated) {
+            \App\Models\Bill::whereIn('bill_id', collect($allocations)->pluck('bill.bill_id'))->orderBy('bill_id')->lockForUpdate()->get();
             return collect($allocations)->map(function ($entry) use ($validated) {
                 $bill = $entry['bill'];
 
@@ -702,6 +705,7 @@ class PaymentController extends Controller
                 'b.bill_reference_no',
                 'b.boat_id',
                 'b.total_amount',
+                'b.penalty_amount',
                 'b.created_at as bill_date',
                 'boat.boat_name',
                 'owner.owner_firstname',
@@ -813,6 +817,7 @@ class PaymentController extends Controller
             'transaction_summary' => $bill->transaction_summary,
             'bill_date' => $bill->bill_date,
             'amount_due' => (float) $bill->total_amount,
+            'penalty_amount' => (float) ($bill->penalty_amount ?? 0),
             'total_paid' => (float) $bill->total_paid,
             'balance' => (float) $bill->balance,
             'payment_transactions_history' => $paymentTransactionsHistory,

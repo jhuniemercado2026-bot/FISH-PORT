@@ -1,4 +1,4 @@
-<?php
+<!-- <?php
 
 namespace Database\Seeders;
 
@@ -268,3 +268,4 @@ class SeedersFor2025 extends Seeder
         }
     }
 }
+ -->

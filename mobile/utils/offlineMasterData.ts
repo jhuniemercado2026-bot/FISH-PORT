@@ -1,3 +1,4 @@
+import { getServerNow } from "./serverClock";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const OFFLINE_BOATS_KEY = "opol_fish_port.offline_boats";
@@ -31,7 +32,7 @@ function normalizeArrayResource<T>(value: unknown): T[] {
 export async function saveOfflineResource(key: OfflineResourceKey, data: unknown) {
   const envelope: OfflineResourceEnvelope = {
     data,
-    saved_at: new Date().toISOString(),
+    saved_at: getServerNow().toISOString(),
   };
 
   await AsyncStorage.setItem(resourceKey(key), JSON.stringify(envelope));

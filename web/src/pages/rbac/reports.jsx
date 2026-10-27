@@ -56,6 +56,7 @@ import {
 } from "../../hooks/useStatementOfAccountDataQuery";
 import { useFiscalYearStore, getFiscalYearOptions } from "../../store/fiscalYearStore";
 import { showBottomToast } from "../../store/bottomToastStore";
+import { PENALTY_SETTINGS_EVENT } from "../../utils/penaltySettingsSync";
 import { cacheTab, getCachedTab } from "../../utils/tabSession";
 import { getStoredUser, normalizeRole } from "../login/auth";
 import VisitorPill from "../../components/VisitorPill";
@@ -98,7 +99,7 @@ const HEAD_ONLY_REPORT_KEYS = ["fees"];
 const REPORTS_TAB_STORAGE_KEY = "opol:reports:active-tab";
 const REPORTS_FILTERS_STORAGE_KEY = "opol:reports:topbar-filters";
 const REPORTS_PREVIEW_STORAGE_KEY = "opol:reports:preview-cache";
-const REPORTS_PREVIEW_CACHE_VERSION = 2;
+const REPORTS_PREVIEW_CACHE_VERSION = 15;
 
 const MONTH_OPTIONS = [
   { value: "01", label: "January" },
@@ -234,16 +235,16 @@ const buildBoatStatementTransactions = (boatDetailRecord) => {
 
   (boatDetailRecord.bills || []).forEach((bill) => {
     (Array.isArray(bill.line_items) ? bill.line_items : [])
-      .filter((item) => ["docking", "banyera", "ticket"].includes(String(item.transaction_type || "").toLowerCase()))
+      .filter((item) => ["docking", "banyera", "ticket", "penalty"].includes(String(item.transaction_type || "").toLowerCase()))
       .forEach((item, index) => {
         const transactionType = String(item.transaction_type || "").toLowerCase();
         transactions.push({
           transaction_key: `charge-${bill.bill_id}-${transactionType}-${index}`,
-          date: bill.date_billed,
+          date: transactionType === "penalty" ? item.transaction_date : bill.date_billed,
           bill_reference: bill.bill_reference,
           type: "Bill",
           reference: "-",
-          description: transactionType === "ticket" ? "Vehicle Ticket Fee" : `${normalizeTransactionLabel(transactionType)} Fee`,
+          description: item.description || (transactionType === "ticket" ? "Vehicle Ticket Fee" : `${normalizeTransactionLabel(transactionType)} Fee`),
           charge: Number(item.amount || 0),
           payment: 0,
         });
@@ -3212,6 +3213,7 @@ const SuperReports = () => {
     { value: "banyera", displayLabel: "Banyera", label: "Banyera" },
     { value: "ticket", displayLabel: "Tickets", label: "Tickets" },
     { value: "registered", displayLabel: "Registered Boats", label: "Registered Boats" },
+    { value: "penalty", displayLabel: "Penalty", label: "Penalty" },
     { value: "visiting", displayLabel: "Visiting Boats", label: "Visiting Boats" },
   ], []);
 
@@ -3465,6 +3467,7 @@ const SuperReports = () => {
 
     const exportContext = {
       activeReport,
+      preparedBy,
       revenueReportData,
       remittanceReportData,
       registeredBoatsReportData,
@@ -3587,6 +3590,26 @@ const SuperReports = () => {
       reportPreviewCacheRef.current = {};
     };
   }, []);
+
+  useEffect(() => {
+    const clearPenaltyPreviews = () => {
+      Object.values(reportPreviewCacheRef.current).forEach((preview) => {
+        if (preview?.url?.startsWith("blob:")) URL.revokeObjectURL(preview.url);
+      });
+      reportPreviewCacheRef.current = {};
+      writeStoredReportPreviewCache({});
+      if (reportGenerated) {
+        setReportPdfUrl("");
+        setReportBuildKey((currentKey) => {
+          const nextBuildKey = currentKey + 1;
+          setReportBuildRequest({ key: nextBuildKey, report: activeReport });
+          return nextBuildKey;
+        });
+      }
+    };
+    window.addEventListener(PENALTY_SETTINGS_EVENT, clearPenaltyPreviews);
+    return () => window.removeEventListener(PENALTY_SETTINGS_EVENT, clearPenaltyPreviews);
+  }, [activeReport, reportGenerated]);
 
   useEffect(() => {
     if (!reportGenerated || !(isOwnerInfoReport || isOwnerSignatureReport) || !ownerInfoReportData || !isQueryDataReady) {
@@ -4329,6 +4352,9 @@ const SuperReports = () => {
                             : undefined
                   }
                   boatFilterShowSearch={
+                    isDockingReport ||
+                    isBanyeraReport ||
+                    isBfarReport ||
                     isRegisteredBoatsReport ||
                     isVisitingBoatsReport ||
                     isBoatTypesReport ||

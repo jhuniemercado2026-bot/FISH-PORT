@@ -1369,15 +1369,25 @@ const SuperCollections = ({ initialTab }) => {
                                 {remittanceProgressCountLabel}
                               </p>
                             </div>
-                            <ol className="m-0 mt-1 list-decimal space-y-1 pl-5 text-[12px] leading-5 text-slate-600">
+                            <div className="mt-2 space-y-1.5">
                               {pendingRemittanceUsers.map((user, index) => {
                                 const displayName = String(user?.name || "").trim();
                                 const displayEmail = String(user?.email || "").trim();
                                 const label = displayName || displayEmail || "Unknown user";
 
-                                return <li key={user?.user_id ?? user?.email ?? index}>{label}</li>;
+                                return (
+                                  <div
+                                    key={user?.user_id ?? user?.email ?? index}
+                                    className="flex items-center justify-between gap-3 text-[14px] leading-6 text-slate-700"
+                                  >
+                                    <span className="min-w-0 truncate font-medium">{label}</span>
+                                    <span className="shrink-0 text-[15px] font-semibold tabular-nums text-[#1a1f36]">
+                                      {formatPeso(user?.collection_amount)}
+                                    </span>
+                                  </div>
+                                );
                               })}
-                            </ol>
+                            </div>
                           </div>
                         ) : (
                           <p className="m-0 mt-2 text-right text-[11px] font-semibold uppercase text-[#6F6F82]">

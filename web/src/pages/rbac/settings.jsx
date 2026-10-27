@@ -16,10 +16,16 @@ import {
   IoCloseOutline,
   IoChevronDownOutline,
   IoChevronUpOutline,
+  IoSettingsOutline,
+  IoCashOutline,
 } from "react-icons/io5";
 import Sidebar from "../../layout/Sidebar";
 import Topbar from "../../layout/Topbar";
 import BirthdayPicker from "../../components/BirthdayPicker";
+import PenaltyRulesTab from "../../components/PenaltyRulesTab";
+import { readSettingsSection, writeSettingsSection } from "../../utils/settingsSession";
+import Tabs from "../../components/Tabs";
+import { getStoredUser, normalizeRole } from "../login/auth";
 import Modal, { ModalFieldError, ModalTextInput } from "../../components/Modal";
 import Spinner from "../../components/Spinner";
 import Breadcrumbs from "../../components/Breadcrumbs";
@@ -177,18 +183,19 @@ const DataActionCard = ({ icon: Icon, title, description, actionLabel, actionIco
 
 const getRequestErrorMessage = async (error, fallback) => {
   const data = error?.response?.data;
+  const describe = (body) => [body?.message || fallback, body?.details].filter(Boolean).join(" ");
 
   if (data instanceof Blob) {
     try {
       const text = await data.text();
       const parsed = JSON.parse(text);
-      return parsed?.message || fallback;
+      return describe(parsed);
     } catch {
       return fallback;
     }
   }
 
-  return data?.message || fallback;
+  return describe(data);
 };
 
 // -- Avatar component -------------------------------------------------
@@ -206,25 +213,26 @@ const Avatar = ({ initials, size = 80, className = "" }) => {
 };
 
 const SkeletonBlock = ({ className = "", style = {} }) => (
-  <div className={`rounded bg-slate-100 ${className}`.trim()} style={style} />
+  <div aria-hidden="true" className={`max-w-full rounded bg-slate-100 ${className}`.trim()} style={style} />
 );
 
 const getStoredUserRole = () => {
   try {
-    return String(JSON.parse(localStorage.getItem("user") || "{}")?.role || "").trim().toLowerCase();
+    const user = getStoredUser();
+    return normalizeRole(user?.role || user?.role_label);
   } catch {
     return "";
   }
 };
 
 const SettingsSkeleton = ({ showRecovery = false }) => (
-  <div className="animate-pulse">
+  <div role="status" aria-label="Loading settings" aria-busy="true" className="animate-pulse">
     <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
       <div className="overflow-hidden rounded-[10px] border border-[#1A1F36] bg-[#1A1F36]">
         <div className="flex min-h-[122px] items-center gap-5 px-7 py-5">
           <div className="h-[60px] w-[60px] flex-shrink-0 rounded-full bg-white/20" />
           <div className="min-w-0 flex-1">
-            <div className="mb-3 h-4 w-48 rounded bg-white/25" />
+            <div className="mb-3 h-4 w-48 max-w-full rounded bg-white/25" />
             <div className="h-3 w-28 rounded bg-white/20" />
           </div>
         </div>
@@ -239,45 +247,36 @@ const SettingsSkeleton = ({ showRecovery = false }) => (
     </div>
 
     <div className="mb-5 overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-        <div>
+      <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-6 py-4">
+        <div className="min-w-0 flex-1">
           <SkeletonBlock className="mb-2 h-3 w-40" />
           <SkeletonBlock className="h-3 w-56" />
         </div>
-        <SkeletonBlock className="h-9 w-9 rounded-xl" />
+        <SkeletonBlock className="h-10 w-[100px] shrink-0 rounded-[10px]" />
       </div>
-      <div className="grid grid-cols-1 gap-5 px-6 pb-5 pt-4 sm:grid-cols-2">
+      <div className="grid grid-cols-2 gap-5 px-6 pb-5 pt-4">
         {[120, 116, 94, 210, 145, 180, 260].map((width, index) => (
           <div key={`settings-personal-skeleton-${index}`}>
-            <SkeletonBlock className="mb-2 h-3 w-24" />
-            <SkeletonBlock className="h-4" style={{ width }} />
+            <SkeletonBlock className="mb-1 h-[14px] w-24" />
+            <SkeletonBlock className="h-[19px]" style={{ width }} />
           </div>
         ))}
       </div>
     </div>
 
-    <div className={`grid grid-cols-1 gap-5 ${showRecovery ? "lg:grid-cols-2" : ""}`}>
-      <div className="overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-sm">
-        <div className="flex min-h-[92px] items-center justify-between gap-4 px-6 py-4">
-          <div>
-            <SkeletonBlock className="mb-2 h-3 w-24" />
-            <SkeletonBlock className="h-3 w-48" />
-          </div>
-          <SkeletonBlock className="h-9 w-9 rounded-xl" />
-        </div>
-      </div>
-
-      {showRecovery && (
-        <div className="overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-sm">
+    <div className={`mb-5 grid grid-cols-1 gap-5 ${showRecovery ? "lg:grid-cols-3" : ""}`}>
+      {(showRecovery ? ["security", "download", "restore"] : ["security"]).map((card) => (
+        <div key={card} className="overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-sm">
           <div className="flex min-h-[92px] items-center justify-between gap-4 px-6 py-4">
-            <div>
-              <SkeletonBlock className="mb-2 h-3 w-24" />
-              <SkeletonBlock className="h-3 w-64 max-w-full" />
+            <div className="min-w-0 flex-1">
+              <SkeletonBlock className="mb-2 h-[17px] w-32" />
+              <SkeletonBlock className="h-[15px] w-64" />
+              {showRecovery && <SkeletonBlock className="mt-1 h-[15px] w-3/4" />}
             </div>
-            <SkeletonBlock className="h-9 w-28 rounded-[10px]" />
+            <SkeletonBlock className={`h-10 shrink-0 rounded-[10px] ${card === "security" ? "w-[100px]" : "w-[132px]"}`} />
           </div>
         </div>
-      )}
+      ))}
     </div>
   </div>
 );
@@ -368,7 +367,7 @@ const UserProfileTab = ({ showToast }) => {
   const initials = profile
     ? `${String(profile.first_name || "").trim().charAt(0)}${String(profile.last_name || "").trim().charAt(0)}`.toUpperCase()
     : "";
-  const normalizedProfileRole = String(profile?.role || getStoredUserRole()).trim().toLowerCase();
+  const normalizedProfileRole = normalizeRole(profile?.role || getStoredUserRole());
   const canRecoverDatabase = normalizedProfileRole === "head";
   const changePasswordRuleStatus = getPasswordRuleStatus(tmpPw.new_pass);
   const changePasswordError = getPasswordErrorMessage(tmpPw.new_pass);
@@ -908,7 +907,7 @@ const UserProfileTab = ({ showToast }) => {
           <DataActionCard
             icon={IoDownloadOutline}
             title="Download SQL"
-            description="Manually download a full SQL database backup."
+            description="Download a full SQL database backup directly from Settings."
             actionLabel="Download"
             actionIcon={IoDownloadOutline}
             loading={backupDownloading}
@@ -932,6 +931,7 @@ const UserProfileTab = ({ showToast }) => {
           />
         )}
       </div>
+
 
       {canRecoverDatabase && (
         <input
@@ -1237,15 +1237,18 @@ const UserProfileTab = ({ showToast }) => {
   );
 };
 
-// ---------------------------------------------------------------------
-// SuperSettings
-// ---------------------------------------------------------------------
 const SuperSettings = () => {
   const navigate = useNavigate();
   const [activeItem, setActiveItem] = useState("Settings");
 
   const { sidebarOpen, setSidebarOpen, sidebarCollapsed, toggleSidebar } = useSidebar();
   const settingsQuery = useSettingsQuery();
+  const isHead = normalizeRole(settingsQuery.data?.user?.role || getStoredUserRole()) === "head";
+  const [settingsSection, setSettingsSection] = useState(() => readSettingsSection(isHead));
+  const changeSettingsSection = (section) => {
+    writeSettingsSection(section, isHead);
+    setSettingsSection(section);
+  };
 
   const [contentMargin, setContentMargin] = useState(() =>
     window.innerWidth >= 900 ? 256 : 0
@@ -1309,11 +1312,20 @@ const SuperSettings = () => {
           <main className="min-w-0 flex-1 overflow-y-auto bg-white px-6 py-6 xl:px-8 settings-scroll-hide">
             <div className="mx-auto w-full max-w-[1440px]">
               <div className="mb-5 flex items-center justify-between">
-                <TitlePage title="Settings" subtitle="Manage your profile information" loading={!settingsQuery.data && settingsQuery.isLoading} />
+                <TitlePage title="Settings" subtitle={isHead ? "Manage general settings and boat bill penalties" : "Manage your profile information"} loading={!settingsQuery.data && settingsQuery.isLoading} />
                 <Breadcrumbs items={[{ label: "Dashboard", to: "/dashboard" }, { label: "Settings" }]} fontFamily={FONT} loading={!settingsQuery.data && settingsQuery.isLoading} />
               </div>
 
-              <UserProfileTab showToast={showToast} />
+              {isHead ? (
+                <Tabs tabs={[
+                  { key: "general", label: "General Setting", icon: IoSettingsOutline },
+                  { key: "penalty", label: "Penalty", icon: IoCashOutline },
+                ]} activeKey={settingsSection} onTabChange={changeSettingsSection}>
+                  {settingsSection === "penalty" ? <PenaltyRulesTab showToast={showToast} /> : (
+                    <div className="border border-slate-200 bg-white p-5"><UserProfileTab showToast={showToast} /></div>
+                  )}
+                </Tabs>
+              ) : <UserProfileTab showToast={showToast} />}
             </div>
           </main>
         </div>

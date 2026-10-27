@@ -15,7 +15,7 @@ class VoidRequestControllerTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_void_request_can_be_sent_to_offline_coordinator(): void
+    public function test_void_request_approval_notifies_requester_with_original_details(): void
     {
         $inspector = User::factory()->create(['role' => 'inspector', 'status' => 'offline']);
         $coordinator = User::factory()->create(['role' => 'coordinator', 'status' => 'offline']);
@@ -62,13 +62,33 @@ class VoidRequestControllerTest extends TestCase
             ->where('related_id', $ticket->ticket_id)
             ->count());
 
+        $requestMessage = Notification::query()
+            ->where('recipient_user_id', $coordinator->user_id)
+            ->where('related_type', 'void_request_daily_ticket')
+            ->where('related_id', $ticket->ticket_id)
+            ->value('message');
+        $this->assertStringContainsString(
+            'requested to void vehicle ticket, Test Vehicle in September 12, 2026 in 8:14 AM with ₱25.00. Reason: Wrong entry',
+            $requestMessage
+        );
+
+        $this->actingAs($coordinator, 'sanctum');
+
+        $this->patchJson('/api/vehicle-tickets/' . $ticket->ticket_id . '/void', [
+            'void_reason' => 'Wrong entry',
+        ])->assertOk();
+
+        $approvalNotification = Notification::query()
+            ->where('recipient_user_id', $inspector->user_id)
+            ->where('sender_user_id', $coordinator->user_id)
+            ->where('related_type', 'void_request_daily_ticket')
+            ->where('related_id', $ticket->ticket_id)
+            ->where('title', 'Void Request Approved')
+            ->firstOrFail();
+
         $this->assertSame(
-            'Requested to void vehicle ticket, Test Vehicle in September 12, 2026 in 8:14 AM with ₱25.00. Reason: Wrong entry',
-            Notification::query()
-                ->where('recipient_user_id', $coordinator->user_id)
-                ->where('related_type', 'void_request_daily_ticket')
-                ->where('related_id', $ticket->ticket_id)
-                ->value('message')
+            'Your request to void the vehicle ticket, Test Vehicle in September 12, 2026 in 8:14 AM with ₱25.00 has been approved by the Coordinator. Reason: Wrong entry',
+            $approvalNotification->message
         );
     }
 }

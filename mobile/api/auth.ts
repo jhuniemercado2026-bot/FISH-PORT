@@ -1,6 +1,8 @@
 import { buildApiHeaders, getApiBaseUrl } from "./axios";
 import { useHomeStore } from "../store/homeStore";
+import { useHistoryStore } from "../store/historyStore";
 import { useProfileStore } from "../store/profileStore";
+import { useMasterDataStore } from "../store/masterDataStore";
 
 export type AuthUser = {
   user_id?: number;
@@ -28,10 +30,24 @@ type AuthSession = {
 let authSession: AuthSession | null = null;
 
 export function setAuthSession(session: AuthSession | null) {
+  const previousUserId = authSession?.user?.user_id;
+  const nextUserId = session?.user?.user_id;
   authSession = session;
   useProfileStore.getState().initProfile(session?.user ?? null);
 
+  if (!session || (previousUserId && nextUserId && previousUserId !== nextUserId)) {
+    useHistoryStore.getState().clearTransactionLock();
+  }
+
   if (!session) {
+    useHistoryStore.setState({
+      syncedTransactions: [],
+      transactionDetailCache: {},
+      refreshKey: Date.now(),
+      offlineSyncProgress: null,
+      offlineSyncModalVisible: false,
+    });
+    useMasterDataStore.getState().triggerRefresh();
     useHomeStore.getState().clearHomeData();
     return;
   }

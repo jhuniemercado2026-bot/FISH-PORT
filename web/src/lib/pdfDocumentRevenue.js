@@ -1,3 +1,4 @@
+import { drawPreparedBySignature, REPORT_SIGNATURE_SPACE } from "./reportSignature";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { getHeaderPngBytes } from "./pdfHeader";
 
@@ -385,7 +386,7 @@ const drawHeader = async (composer, title) => {
   composer.cursorY = headerCardBottom - 18;
 };
 
-const drawReportDetails = (composer, config, totalRevenue, preparedBy) => {
+const drawReportDetails = (composer, config, totalRevenue) => {
   const boxTop = composer.cursorY;
   const detailsRowHeight = 28;
   const detailsContainerHeight = detailsRowHeight * 2;
@@ -393,7 +394,6 @@ const drawReportDetails = (composer, config, totalRevenue, preparedBy) => {
     ["Report Type", config.reportTypeLabel],
     [config.coverageLabel, config.coverageValue],
     ...(config.dayLabel ? [["Day", config.dayLabel]] : []),
-    ["Prepared By", preparedBy],
   ];
   const secondRowItems = [
     ["Municipality", "Opol"],
@@ -487,7 +487,7 @@ const drawDataRows = (composer, columns, rows) => {
       ...Object.values(textLinesByKey).map((lines) => lines.length * 9 + 10),
     );
 
-    if (composer.cursorY - detailRowHeight < MARGIN_Y + 36) {
+    if (composer.cursorY - detailRowHeight < MARGIN_Y + REPORT_SIGNATURE_SPACE + 36) {
       composer.addPage();
       drawTableHeader(composer, columns);
     }
@@ -537,7 +537,7 @@ const drawDataRows = (composer, columns, rows) => {
 const drawTotalsRow = (composer, columns, rows, totalRevenue) => {
   const detailRowHeight = 24;
 
-  if (composer.cursorY - detailRowHeight < MARGIN_Y + 36) {
+  if (composer.cursorY - detailRowHeight < MARGIN_Y + REPORT_SIGNATURE_SPACE + 36) {
     composer.addPage();
     drawTableHeader(composer, columns);
   }
@@ -623,7 +623,7 @@ export const buildRevenuePdf = async ({
   }
 
   await drawHeader(composer, config.title);
-  drawReportDetails(composer, config, totalRevenue, preparedBy);
+  drawReportDetails(composer, config, totalRevenue);
   drawTableHeader(composer, config.columns);
   drawDataRows(composer, config.columns, rows);
   drawTotalsRow(composer, config.columns, rows, totalRevenue);
@@ -643,5 +643,6 @@ export const buildRevenuePdf = async ({
     { fontSize: 10, bold: true },
   );
 
+  drawPreparedBySignature(composer, preparedBy, { marginX: MARGIN_X, marginY: MARGIN_Y, contentWidth: CONTENT_WIDTH });
   return composer.pdfDoc.save();
 };

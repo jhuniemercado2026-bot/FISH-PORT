@@ -521,7 +521,7 @@ const SuperStatementOfAccount = () => {
 
     (boatDetailRecord.bills || []).forEach((bill) => {
       (Array.isArray(bill.line_items) ? bill.line_items : [])
-        .filter((item) => ["docking", "banyera", "ticket"].includes(String(item.transaction_type || "").toLowerCase()))
+        .filter((item) => ["docking", "banyera", "ticket", "penalty"].includes(String(item.transaction_type || "").toLowerCase()))
         .forEach((item, index) => {
           const transactionType = String(item.transaction_type || "").toLowerCase();
           const feeLabel =
@@ -530,11 +530,11 @@ const SuperStatementOfAccount = () => {
               : `${normalizeTransactionLabel(transactionType)} Fee`;
           transactions.push({
             transaction_key: `charge-${bill.bill_id}-${transactionType}-${index}`,
-            date: bill.date_billed,
+            date: transactionType === "penalty" ? item.transaction_date : bill.date_billed,
             bill_reference: bill.bill_reference,
             type: "Bill",
             reference: "-",
-            description: feeLabel,
+            description: item.description || feeLabel,
             charge: Number(item.amount || 0),
             payment: 0,
           });

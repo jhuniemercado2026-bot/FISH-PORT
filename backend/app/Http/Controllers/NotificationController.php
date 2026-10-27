@@ -14,6 +14,8 @@ class NotificationController extends Controller
         $user = Auth::user();
         $userId = $user?->user_id;
 
+        if ($user) app(\App\Services\FrequentVisitingBoatNotificationService::class)->syncForCoordinator($user);
+
         $baseQuery = Notification::query()
             ->when($userId, fn ($query) => $query->where('recipient_user_id', $userId));
         $baseQuery = $this->applyFiscalYear($baseQuery, $request, 'created_at');
@@ -139,6 +141,8 @@ class NotificationController extends Controller
     {
         $user = Auth::user();
         $userId = $user?->user_id;
+
+        if ($user) app(\App\Services\FrequentVisitingBoatNotificationService::class)->syncForCoordinator($user);
 
         $baseQuery = Notification::query()
             ->when($userId, fn ($query) => $query->where('recipient_user_id', $userId));

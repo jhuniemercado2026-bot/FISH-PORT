@@ -19,6 +19,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        \App\Models\Docking::observe(\App\Observers\VisitingBoatObserver::class);
+        \App\Models\BanyeraTransaction::observe(\App\Observers\VisitingBoatObserver::class);
     }
 }

@@ -600,6 +600,10 @@ class RemittanceController extends Controller
 
     private function calculateDateAmount(string $date, ?int $createdBy = null): float
     {
+        if ($createdBy !== null && $createdBy > 0) {
+            return (float) ($this->collectionAmountsByUserForDate($date, [$createdBy])[$createdBy] ?? 0);
+        }
+
         $ticketsTotal = (float) VehicleTicket::query()
             ->whereDate('ticket_date', $date)
             ->when($createdBy, fn ($query) => $query->where('created_by', $createdBy))
@@ -725,6 +729,56 @@ class RemittanceController extends Controller
         return $role === 'inspector' ? (int) $user->user_id : null;
     }
 
+    private function collectionAmountsByUserForDate(string $date, array $userIds): array
+    {
+        $amounts = array_fill_keys(array_map('intval', $userIds), 0.0);
+        $addAmounts = static function ($rows) use (&$amounts): void {
+            foreach ($rows as $row) {
+                $userId = (int) $row->user_id;
+                $amounts[$userId] = round(($amounts[$userId] ?? 0) + (float) $row->amount, 2);
+            }
+        };
+
+        $addAmounts(DB::table('vehicle_tickets')
+            ->selectRaw('created_by as user_id, SUM(ticket_fee) as amount')
+            ->whereDate('ticket_date', $date)
+            ->whereIn('created_by', $userIds)
+            ->whereNull('voided_at')
+            ->groupBy('created_by')
+            ->get());
+
+        $addAmounts(DB::table('payments')
+            ->selectRaw('received_by as user_id, SUM(amount_paid) as amount')
+            ->whereDate('payment_date', $date)
+            ->whereIn('received_by', $userIds)
+            ->groupBy('received_by')
+            ->get());
+
+        $addAmounts(DB::table('dockings as d')
+            ->leftJoin('bill_items as bill_item', 'bill_item.docking_id', '=', 'd.docking_id')
+            ->selectRaw('d.created_by as user_id, SUM(d.docking_fee) as amount')
+            ->where('d.boat_category', 'visiting')
+            ->whereDate('d.docking_date', $date)
+            ->whereIn('d.created_by', $userIds)
+            ->whereNull('d.voided_at')
+            ->whereNull('bill_item.docking_id')
+            ->groupBy('d.created_by')
+            ->get());
+
+        $addAmounts(DB::table('banyera_transactions as bt')
+            ->leftJoin('bill_items as bill_item', 'bill_item.banyera_id', '=', 'bt.banyera_id')
+            ->selectRaw('bt.created_by as user_id, SUM(bt.total_fee) as amount')
+            ->where('bt.boat_category', 'visiting')
+            ->whereDate('bt.transaction_date', $date)
+            ->whereIn('bt.created_by', $userIds)
+            ->whereNull('bt.voided_at')
+            ->whereNull('bill_item.banyera_id')
+            ->groupBy('bt.created_by')
+            ->get());
+
+        return $amounts;
+    }
+
     private function remittanceProgressForDate(string $date): array
     {
         $ticketCreatorIds = VehicleTicket::query()
@@ -796,6 +850,7 @@ class RemittanceController extends Controller
             ->map(fn ($userId) => (int) $userId)
             ->unique()
             ->values();
+        $collectionAmounts = $this->collectionAmountsByUserForDate($date, $inspectorIds->all());
 
         $eligibleCount = $inspectorIds->count();
         $remittedCount = $remittedUserIds->count();
@@ -806,7 +861,7 @@ class RemittanceController extends Controller
             'pending_users' => max($eligibleCount - $remittedCount, 0),
             'percentage' => $eligibleCount > 0 ? (int) round(($remittedCount / $eligibleCount) * 100) : 0,
             'users' => $inspectors
-                ->map(function (User $user) use ($remittedUserIds) {
+                ->map(function (User $user) use ($remittedUserIds, $collectionAmounts) {
                     $name = trim(collect([$user->first_name, $user->last_name])->filter()->join(' '));
 
                     return [
@@ -814,6 +869,7 @@ class RemittanceController extends Controller
                         'name' => $name !== '' ? $name : $user->email,
                         'email' => $user->email,
                         'has_remitted' => $remittedUserIds->contains((int) $user->user_id),
+                        'collection_amount' => (float) ($collectionAmounts[(int) $user->user_id] ?? 0),
                     ];
                 })
                 ->values(),

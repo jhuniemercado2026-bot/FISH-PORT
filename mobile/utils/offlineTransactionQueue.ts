@@ -1,7 +1,8 @@
+import { getServerNow } from "./serverClock";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { buildApiHeaders, getApiBaseUrl } from "../api/axios";
-import { getAuthToken } from "../api/auth";
+import { getAuthSession, getAuthToken } from "../api/auth";
 
 export type OfflineTransactionType = "docking" | "banyera" | "tickets" | "remittance";
 
@@ -13,6 +14,7 @@ export type OfflineTransactionDraft = {
   label: string;
   metadata?: Record<string, any>;
   created_at: string;
+  owner_user_id?: number;
 };
 
 export type SyncedOfflineTransaction = {
@@ -131,7 +133,8 @@ export async function queueOfflineTransaction({
     payload,
     label,
     metadata,
-    created_at: new Date().toISOString(),
+    created_at: getServerNow().toISOString(),
+    owner_user_id: getAuthSession()?.user?.user_id,
   };
 
   await writeQueue([...queue, draft]);
@@ -174,12 +177,28 @@ export async function syncOfflineTransactions(
     };
   }
 
-  const networkState = await NetInfo.fetch().catch(() => null);
-  if (isOfflineNetworkState(networkState)) {
-    const queue = await readQueue();
+  const currentUserId = getAuthSession()?.user?.user_id;
+  if (!currentUserId) {
     return {
       synced: 0,
-      remaining: queue.length,
+      remaining: 0,
+      transactions: [] as SyncedOfflineTransaction[],
+      lockedDiscarded: 0,
+      lockedDraftIds: [] as string[],
+      duplicateDiscarded: 0,
+      duplicateDraftIds: [] as string[],
+      skippedOffline: false,
+    };
+  }
+
+  const ownedQueue = (await readQueue()).filter(
+    (draft) => String(draft.owner_user_id ?? "") === String(currentUserId)
+  );
+  const networkState = await NetInfo.fetch().catch(() => null);
+  if (isOfflineNetworkState(networkState)) {
+    return {
+      synced: 0,
+      remaining: ownedQueue.length,
       transactions: [] as SyncedOfflineTransaction[],
       lockedDiscarded: 0,
       lockedDraftIds: [] as string[],
@@ -189,7 +208,7 @@ export async function syncOfflineTransactions(
     };
   }
 
-  const queue = await readQueue();
+  const queue = ownedQueue;
   const syncId = `sync-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const total = queue.length;
   const transactions: SyncedOfflineTransaction[] = [];
@@ -291,7 +310,9 @@ export async function syncOfflineTransactions(
 
   return {
     synced,
-    remaining: latestQueue.length,
+    remaining: latestQueue.filter(
+      (draft) => String(draft.owner_user_id ?? "") === String(currentUserId)
+    ).length,
     transactions,
     lockedDiscarded: lockedDraftIds.length,
     lockedDraftIds,

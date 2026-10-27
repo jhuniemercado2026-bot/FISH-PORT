@@ -16,6 +16,7 @@ const formatNotificationDate = (value?: string | null) => {
   if (Number.isNaN(date.getTime())) return "No date";
 
   return date.toLocaleDateString("en-US", {
+    timeZone: "Asia/Manila",
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -29,6 +30,7 @@ const formatNotificationTime = (value?: string | null) => {
   if (Number.isNaN(date.getTime())) return "No time";
 
   return date.toLocaleTimeString("en-PH", {
+    timeZone: "Asia/Manila",
     hour: "numeric",
     minute: "2-digit",
   });

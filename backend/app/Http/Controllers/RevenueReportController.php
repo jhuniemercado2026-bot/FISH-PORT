@@ -34,7 +34,7 @@ class RevenueReportController extends Controller
     private function requestedTransactionType(Request $request): array
     {
         $transactionType = trim((string) $request->query('transaction_type', ''));
-        $allowed = ['all', 'docking', 'banyera', 'ticket', 'registered', 'visiting'];
+        $allowed = ['all', 'docking', 'banyera', 'ticket', 'registered', 'visiting', 'penalty'];
 
         if ($transactionType === '') {
             return ['valid' => true, 'value' => 'all'];
@@ -71,6 +71,11 @@ class RevenueReportController extends Controller
 
     private function getRevenueRowsAndTotal(?string $date, ?string $month, ?string $year, ?int $userId = null, ?array $reportUserRoles = null, string $transactionType = 'all')
     {
+        $penaltyRows = in_array($transactionType, ['all', 'registered', 'penalty'], true)
+            ? $this->penaltyRevenueRows($date, $month, $year, $userId, $reportUserRoles) : [];
+        if ($transactionType === 'penalty') {
+            return ['rows' => $penaltyRows, 'totalRevenue' => round(array_sum(array_column($penaltyRows, 'total')), 2)];
+        }
         // Build subqueries for OR numbers and receivable amounts
         $dockingOrsSubquery = DB::table('bill_items')
             ->select('bill_items.docking_id')
@@ -89,20 +94,20 @@ class RevenueReportController extends Controller
         // Subquery to calculate receivable for dockings (bill.total - sum of payments)
         $dockingReceivableSubquery = DB::table('bill_items')
             ->select('bill_items.docking_id')
-            ->selectRaw("GREATEST(0, bills.total_amount - COALESCE(SUM(payments.amount_paid), 0)) as receivable")
+            ->selectRaw("GREATEST(0, bills.total_amount - COALESCE(bills.penalty_amount, 0) - COALESCE(SUM(payments.amount_paid), 0)) as receivable")
             ->leftJoin('bills', 'bills.bill_id', '=', 'bill_items.bill_id')
             ->leftJoin('payments', 'payments.bill_id', '=', 'bill_items.bill_id')
             ->where('bill_items.transaction_type', '=', 'docking')
-            ->groupBy('bill_items.docking_id', 'bills.total_amount');
+            ->groupBy('bill_items.docking_id', 'bills.total_amount', 'bills.penalty_amount');
 
         // Subquery to calculate receivable for banyera (bill.total - sum of payments)
         $banyeraReceivableSubquery = DB::table('bill_items')
             ->select('bill_items.banyera_id')
-            ->selectRaw("GREATEST(0, bills.total_amount - COALESCE(SUM(payments.amount_paid), 0)) as receivable")
+            ->selectRaw("GREATEST(0, bills.total_amount - COALESCE(bills.penalty_amount, 0) - COALESCE(SUM(payments.amount_paid), 0)) as receivable")
             ->leftJoin('bills', 'bills.bill_id', '=', 'bill_items.bill_id')
             ->leftJoin('payments', 'payments.bill_id', '=', 'bill_items.bill_id')
             ->where('bill_items.transaction_type', '=', 'banyera')
-            ->groupBy('bill_items.banyera_id', 'bills.total_amount');
+            ->groupBy('bill_items.banyera_id', 'bills.total_amount', 'bills.penalty_amount');
 
         // Use UNION to combine all revenue sources in a single query - FAR MORE EFFICIENT
         // Filter at DB level, not in PHP
@@ -239,9 +244,49 @@ class RevenueReportController extends Controller
         }
 
         return [
-            'rows' => $rows,
-            'totalRevenue' => round($totalRevenue, 2),
+            'rows' => collect($rows)->concat($penaltyRows)->sortBy('date')->values()->all(),
+            'totalRevenue' => round($totalRevenue + array_sum(array_column($penaltyRows, 'total')), 2),
         ];
+    }
+
+    protected function penaltyRevenueRows(?string $date, ?string $month, ?string $year, ?int $userId, ?array $reportUserRoles): array
+    {
+        // Use saved effective charges, including paid fees retained when a rule
+        // is Off. Do not recalculate historical charges using today's rate.
+        $effective = 'CASE WHEN p.amount > p.suspended_amount THEN p.amount - p.suspended_amount ELSE 0 END';
+        $query = DB::table('bill_penalties as p')
+            ->join('bills as b', 'b.bill_id', '=', 'p.bill_id')
+            ->leftJoin('boats', 'boats.boat_id', '=', 'b.boat_id')
+            ->whereNotNull('b.boat_id')
+            ->whereRaw("($effective) > 0")
+            ->select('p.id', 'p.bill_id', 'p.period_ended_at', 'boats.boat_name', 'b.total_amount', 'b.penalty_amount', 'b.created_at as fiscal_date')
+            ->selectRaw("($effective) as effective_amount")
+            ->selectSub(DB::table('payments')->selectRaw('COALESCE(SUM(amount_paid), 0)')->whereColumn('payments.bill_id', 'p.bill_id'), 'paid_total')
+            ->selectSub(DB::table('bill_penalties as earlier')
+                ->selectRaw('COALESCE(SUM(CASE WHEN earlier.amount > earlier.suspended_amount THEN earlier.amount - earlier.suspended_amount ELSE 0 END), 0)')
+                ->whereColumn('earlier.bill_id', 'p.bill_id')->whereColumn('earlier.id', '<', 'p.id'), 'prior_penalties');
+        // Fiscal reporting follows the parent bill, while the assessment date
+        // remains visible in the description and in the bill's penalty ledger.
+        if ($date) $query->whereDate('b.created_at', $date);
+        elseif ($month && $year) $query->whereYear('b.created_at', $year)->whereMonth('b.created_at', $month);
+        elseif ($year) $query->whereYear('b.created_at', $year);
+        if ($userId) $query->where('b.created_by', $userId);
+        if ($reportUserRoles) $query->whereIn('b.created_by', DB::table('users')->select('user_id')->whereIn('role', $reportUserRoles));
+        $charges = $query->orderBy('p.period_ended_at')->orderBy('p.id')->get();
+        $receipts = $charges->isEmpty() ? collect() : DB::table('payments')
+            ->whereIn('bill_id', $charges->pluck('bill_id')->unique())->get(['bill_id', 'official_receipt_no'])->groupBy('bill_id');
+        return $charges->map(function ($charge) use ($receipts) {
+            $principal = (float) $charge->total_amount - (float) $charge->penalty_amount;
+            $paidTowardCharge = max(0, (float) $charge->paid_total - $principal - (float) $charge->prior_penalties);
+            return $this->normalizeRevenueRow([
+                'date' => $charge->fiscal_date, 'payorName' => $charge->boat_name ?? 'Boat',
+                'orNumber' => ($receipts->get($charge->bill_id) ?? collect())->pluck('official_receipt_no')->filter()->unique()->implode(', '),
+                'description' => 'Late payment penalty (Assessed ' . \Carbon\CarbonImmutable::parse($charge->period_ended_at, config('app.timezone', 'Asia/Manila'))
+                    ->setTimezone('Asia/Manila')->format('M. j, Y') . ')', 'sourceType' => 'penalty', 'quantity' => 1,
+                'amount' => $charge->effective_amount, 'total' => $charge->effective_amount,
+                'receivable' => max(0, (float) $charge->effective_amount - $paidTowardCharge),
+            ]);
+        })->all();
     }
 
     public function daily(Request $request)

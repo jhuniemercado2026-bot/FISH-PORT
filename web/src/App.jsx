@@ -12,6 +12,7 @@ import HomePage from "./pages/landing_page/home";
 import AboutPage from "./pages/landing_page/about";
 import ContactPage from "./pages/landing_page/contact";
 import BottomToast from "./components/BottomToast";
+import PenaltyProgressToast from "./components/PenaltyProgressToast";
 import FirstLoginCompletionModal from "./components/FirstLoginCompletionModal";
 import { useSidebarStore } from "./store/sidebarStore";
 import {
@@ -632,6 +633,7 @@ const App = () => {
       </Routes>
       <FirstLoginCompletionModal />
       <BottomToast />
+      <PenaltyProgressToast />
     </Router>
   );
 };

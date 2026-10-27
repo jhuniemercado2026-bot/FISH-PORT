@@ -1,9 +1,11 @@
+import { drawStatementSignature } from "./statementSignature";
 import {
   PDFDocument,
   StandardFonts,
   rgb,
 } from "pdf-lib";
 import { getHeaderPngBytes } from "./pdfHeader";
+import { drawPdfPenaltyRow, getPenaltyAmount } from "./billPenalty";
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
@@ -91,6 +93,10 @@ class PdfComposer {
   addPage() {
     this.page = this.pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     this.cursorY = PAGE_HEIGHT - MARGIN_Y;
+  }
+
+  ensureSpace(height) {
+    if (this.cursorY - height < MARGIN_Y) this.addPage();
   }
 
   drawText(text, x, y, options = {}) {
@@ -205,44 +211,8 @@ const drawSummaryCells = (composer, items, top, rowHeight, borderWidth) => {
   });
 };
 
-const drawOwnerStatementFooter = (composer, balance) => {
-  const footerHeight = 38;
-  const textBlockHeight = footerHeight;
-
-  if (composer.cursorY - footerHeight < MARGIN_Y) {
-    composer.addPage();
-  }
-
-  const textBlockTop = composer.cursorY;
-  const textBlockBottom = textBlockTop - textBlockHeight;
-  const textBlockCenterY = textBlockTop - textBlockHeight / 2;
-  const footerTextTopY = textBlockCenterY + 4;
-  const footerTextBottomY = textBlockCenterY - 10;
-
-  composer.drawRect(MARGIN_X, textBlockBottom, CONTENT_WIDTH, textBlockHeight, {
-    borderColor: COLORS.black,
-    borderWidth: 1.5,
-  });
-  composer.drawCenteredText(
-    "If you have questions about this document, please contact the port office.",
-    MARGIN_X + CONTENT_WIDTH / 2,
-    footerTextTopY,
-    {
-      fontSize: 9,
-      color: COLORS.black,
-    },
-  );
-  composer.drawCenteredText(
-    "Thank you for your business!",
-    MARGIN_X + CONTENT_WIDTH / 2,
-    footerTextBottomY,
-    {
-      fontSize: 11,
-      bold: true,
-      color: COLORS.black,
-    },
-  );
-  composer.cursorY = textBlockBottom - 18;
+const drawOwnerStatementFooter = (composer) => {
+  drawStatementSignature(composer, { marginX: MARGIN_X, marginY: MARGIN_Y, contentWidth: CONTENT_WIDTH });
 };
 
 const drawOwnerBalanceSummary = (composer, boatStatements, totalBalance, borderWidth) => {
@@ -319,6 +289,12 @@ const drawOwnerBalanceSummary = (composer, boatStatements, totalBalance, borderW
     composer.cursorY -= rowHeight;
   });
 
+  drawPdfPenaltyRow(composer, {
+    amount: boatStatements.reduce((sum, entry) => sum + getPenaltyAmount(entry.boat), 0),
+    x: MARGIN_X, width: CONTENT_WIDTH, amountWidth: balanceWidth,
+    borderColor: COLORS.black, textColor: COLORS.black, borderWidth,
+    fontSize: 8, formatMoney: formatPdfMoneyValue,
+  });
   composer.drawRect(MARGIN_X, composer.cursorY - rowHeight, CONTENT_WIDTH, rowHeight, {
     borderColor: COLORS.black,
     borderWidth,
@@ -360,6 +336,11 @@ const drawTransactionTable = (composer, boat, transactions, borderWidth) => {
   drawTableHeader(composer, columns, borderWidth);
 
   if (!transactions.length) {
+    drawPdfPenaltyRow(composer, {
+      amount: getPenaltyAmount(boat), x: MARGIN_X, width: tableWidth,
+      amountWidth: columns[columns.length - 1].width, borderColor: COLORS.black,
+      textColor: COLORS.black, borderWidth, fontSize: 8, formatMoney: formatPdfMoneyValue,
+    });
     composer.drawRect(MARGIN_X, composer.cursorY - 24, tableWidth, 24, {
       borderColor: COLORS.black,
       borderWidth,
@@ -442,6 +423,11 @@ const drawTransactionTable = (composer, boat, transactions, borderWidth) => {
     composer.cursorY -= rowHeight;
   });
 
+  drawPdfPenaltyRow(composer, {
+    amount: getPenaltyAmount(boat), x: MARGIN_X, width: tableWidth,
+    amountWidth: columns[columns.length - 1].width, borderColor: COLORS.black,
+    textColor: COLORS.black, borderWidth, fontSize: 8, formatMoney: formatPdfMoneyValue,
+  });
   const amountColumnWidth = columns[columns.length - 2].width;
   const totalColumnWidth = columns[columns.length - 1].width;
   composer.drawRect(MARGIN_X, composer.cursorY - 22, tableWidth - amountColumnWidth - totalColumnWidth, 22, {
@@ -573,6 +559,7 @@ export const buildOwnerStatementPdf = async ({
     [
       ["Credits", formatPdfMoney(record?.total_paid || 0)],
       ["New Charges", formatPdfMoney(record?.total_billed || 0)],
+      ["Penalty", formatPdfMoney(boatStatements.reduce((sum, entry) => sum + getPenaltyAmount(entry.boat), 0))],
       ["Total Balance Due", formatPdfMoney(record?.balance_due || 0)],
     ],
     composer.cursorY,

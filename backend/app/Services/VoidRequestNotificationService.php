@@ -2,10 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\BanyeraTransaction;
-use App\Models\Docking;
 use App\Models\Notification;
-use App\Models\VehicleTicket;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 
@@ -23,6 +20,8 @@ class VoidRequestNotificationService
         $requestNotification = Notification::query()
             ->where('related_type', $relatedType)
             ->where('related_id', $relatedId)
+            ->where('recipient_user_id', Auth::id())
+            ->where('title', 'Void Request')
             ->whereNotNull('sender_user_id')
             ->latest('created_at')
             ->latest('notification_id')
@@ -35,8 +34,8 @@ class VoidRequestNotificationService
         }
 
         Notification::create([
-            'title' => 'Void request completed',
-            'message' => $this->completedMessage($transactionType, $record),
+            'title' => 'Void Request Approved',
+            'message' => $this->completedMessage($requestNotification),
             'recipient_user_id' => $requesterId,
             'sender_user_id' => Auth::id(),
             'related_type' => $relatedType,
@@ -72,51 +71,26 @@ class VoidRequestNotificationService
         return $id ? (int) $id : null;
     }
 
-    private function completedMessage(string $transactionType, Model $record): string
+    private function completedMessage(Notification $requestNotification): string
     {
-        if ($transactionType === 'docking' && $record instanceof Docking) {
-            $record->loadMissing('boat');
-            $boatName = (string) ($record->boat?->boat_name ?? '');
+        $originalMessage = trim((string) $requestNotification->message);
+        $requestPrefix = ', requested to void ';
+        $prefixPosition = strpos($originalMessage, $requestPrefix);
+        $requestDetails = $prefixPosition === false
+            ? 'Your request to void the ' . $originalMessage
+            : 'Your request to void the ' . substr($originalMessage, $prefixPosition + strlen($requestPrefix));
 
-            return 'Your request to void docking records, boat "' . $boatName . '", with fee "'
-                . $this->formatMoney($record->docking_fee) . '" has been approved and voided.';
+        $reasonDelimiter = '. Reason: ';
+        $reasonPosition = strpos($requestDetails, $reasonDelimiter);
+        if ($reasonPosition === false) {
+            return rtrim($requestDetails, '.') . ' has been approved by the Coordinator.';
         }
 
-        return 'Your request to void ' . $this->recordLabel($transactionType, $record) . ' has been approved and voided.';
-    }
+        $transactionDetails = substr($requestDetails, 0, $reasonPosition);
+        $reason = trim(substr($requestDetails, $reasonPosition + strlen($reasonDelimiter)));
 
-    private function formatMoney(mixed $value): string
-    {
-        if ($value === null || $value === '') {
-            return '';
-        }
-
-        return '₱' . number_format((float) $value, 2);
-    }
-
-    private function recordLabel(string $transactionType, Model $record): string
-    {
-        if ($transactionType === 'docking' && $record instanceof Docking) {
-            $boatName = $record->boat?->boat_name;
-
-            return 'docking record #' . $record->docking_id . ($boatName ? ' for boat "' . $boatName . '"' : '');
-        }
-
-        if ($transactionType === 'banyera' && $record instanceof BanyeraTransaction) {
-            $boatName = $record->boat?->boat_name;
-
-            return 'banyera transaction #' . $record->banyera_id . ($boatName ? ' for boat "' . $boatName . '"' : '');
-        }
-
-        if ($transactionType === 'tickets' && $record instanceof VehicleTicket) {
-            $vehicleType = $record->vehicleType?->type_name;
-            $plateNumber = trim((string) $record->plate_number);
-
-            return strtolower((string) $record->ticket_type) . ' vehicle ticket #' . $record->ticket_id
-                . ($plateNumber !== '' ? ' for plate "' . $plateNumber . '"' : '')
-                . ($vehicleType ? ' (' . $vehicleType . ')' : '');
-        }
-
-        return 'transaction #' . ($record->getKey() ?? 'N/A');
+        return rtrim($transactionDetails, '.')
+            . ' has been approved by the Coordinator. Reason: '
+            . rtrim($reason, '.');
     }
 }

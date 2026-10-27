@@ -1,14 +1,16 @@
+import { getServerNow } from "../../../utils/serverClock";
+import { useServerClockVersion } from "../../../utils/useServerClockVersion";
 import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getAuthSession, getAuthToken } from "../../../api/auth";
 import { buildApiHeaders, getApiBaseUrl } from "../../../api/axios";
 import {
   Image,
   ImageBackground,
-  Modal as NativeModal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StatusBar,
   Text,
@@ -18,6 +20,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useHistoryStore } from "../../../store/historyStore";
 import { useHomeStore } from "../../../store/homeStore";
 import { useToastStore } from "../../../store/toastStore";
+import { usePullRefreshIndicator } from "../../../utils/usePullRefreshIndicator";
+import ResourcesModal from "../../../components/ResourcesModal";
 import {
   getOfflineResource,
   getOfflineReadinessStatus,
@@ -28,6 +32,7 @@ import {
   getOfflineTransactionDrafts,
   OfflineTransactionDraft,
 } from "../../../utils/offlineTransactionQueue";
+import { isRecordOwnedByUser } from "../../../utils/historyOwnership";
 
 type HomeOfflineData = {
   overviewCounts: {
@@ -225,7 +230,7 @@ const getTodayDateKeyInManila = () => {
     day: "2-digit",
   });
 
-  const parts = formatter.formatToParts(new Date());
+  const parts = formatter.formatToParts(getServerNow());
   const year = parts.find((part) => part.type === "year")?.value;
   const month = parts.find((part) => part.type === "month")?.value;
   const day = parts.find((part) => part.type === "day")?.value;
@@ -248,34 +253,10 @@ const isTodayRecord = (record: any) => {
   return recordDateKey === todayDateKey;
 };
 
-const isOwnedByCurrentUser = (record: any, currentUserId?: number | string | null) => {
-  if (!currentUserId) return false;
-
-  const currentUserIdString = String(currentUserId);
-  const ownerCandidates = [
-    record?.created_by,
-    record?.created_by?.user_id,
-    record?.created_by?.id,
-    record?.created_by_id,
-    record?.createdBy?.user_id,
-    record?.createdBy?.id,
-    record?.createdBy,
-    record?.user_id,
-    record?.user?.user_id,
-    record?.user?.id,
-    record?.owner_id,
-    record?.submitted_by,
-    record?.submittedBy?.user_id,
-    record?.submittedBy?.id,
-  ];
-
-  return ownerCandidates.some((value) => {
-    return value !== undefined && value !== null && String(value) === currentUserIdString;
-  });
-};
-
 const filterRecordsByCurrentUser = (records: any[], currentUserId?: number | string | null) =>
-  records.filter((record: any) => isOwnedByCurrentUser(record, currentUserId));
+  records.filter((record: any) => isRecordOwnedByUser(record, currentUserId));
+
+const isOwnedByCurrentUser = isRecordOwnedByUser;
 
 const unwrapSyncedTransactionData = (data: Record<string, any>) => {
   if (data?.data && !Array.isArray(data.data)) return data.data;
@@ -453,28 +434,6 @@ const formatBanyeraTime = (value?: string | null) => {
   return `${hours}:${String(parsed.minute).padStart(2, "0")} ${meridiem}`;
 };
 
-const formatOfflineUpdatedAt = (value?: string | null) => {
-  if (!value) return "Not yet updated";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not yet updated";
-
-  const dateText = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Manila",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
-
-  const timeText = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Manila",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-
-  return `${dateText} | ${timeText}`;
-};
-
 function SkeletonBlock({
   className = "",
   style,
@@ -518,6 +477,7 @@ function HomeSectionSkeletonCard() {
 }
 
 export default function HomeScreen() {
+  useServerClockVersion();
   const router = useRouter();
   const authSession = getAuthSession();
   const refreshKey = useHistoryStore((state) => state.refreshKey);
@@ -537,6 +497,12 @@ export default function HomeScreen() {
   const userEmail = useHomeStore((state) => state.userEmail);
   const userId = useHomeStore((state) => state.userId);
   const [offlineReadyPercent, setOfflineReadyPercent] = useState(0);
+  const [refreshRequest, setRefreshRequest] = useState(0);
+  const {
+    isRefreshing,
+    beginRefresh,
+    finishRefresh,
+  } = usePullRefreshIndicator();
   const [isPreparingOfflineData, setIsPreparingOfflineData] = useState(false);
   const [offlineStatusVisible, setOfflineStatusVisible] = useState(false);
   const [offlineLastUpdated, setOfflineLastUpdated] = useState("");
@@ -553,7 +519,7 @@ export default function HomeScreen() {
       hour: "numeric",
       hour12: false,
       timeZone: "Asia/Manila",
-    }).format(new Date())
+    }).format(getServerNow())
   );
   const greeting =
     manilaHour < 12
@@ -831,14 +797,21 @@ export default function HomeScreen() {
         let localRemittance = Array.isArray(cachedHistory.remittance)
           ? filterRecordsByCurrentUser(cachedHistory.remittance, currentUserId)
           : [];
-        const storedDrafts = await getOfflineTransactionDrafts();
+        const storedDrafts = (await getOfflineTransactionDrafts()).filter(
+          (draft) => Boolean(currentUserId) && String(draft.owner_user_id ?? "") === String(currentUserId)
+        );
         const syncedLocalIds = new Set(
           syncedTransactions
             .filter((transaction) => syncedTransactionIdForType(transaction))
             .map((transaction) => transaction.local_id)
         );
         const draftIds = new Set(storedDrafts.map((draft) => draft.local_id));
-        const liveDrafts = queuedDrafts.filter((draft) => !draftIds.has(draft.local_id));
+        const liveDrafts = queuedDrafts.filter(
+          (draft) =>
+            Boolean(currentUserId) &&
+            String(draft.owner_user_id ?? "") === String(currentUserId) &&
+            !draftIds.has(draft.local_id)
+        );
         const allDrafts = [...liveDrafts, ...storedDrafts];
 
         syncedTransactions.forEach((transaction) => {
@@ -988,12 +961,21 @@ export default function HomeScreen() {
       }
     }
 
-    loadOverviewCounts();
+    loadOverviewCounts().finally(() => {
+      if (isMounted) {
+        finishRefresh();
+      }
+    });
 
     return () => {
       isMounted = false;
     };
-  }, [authSession?.user?.user_id, queuedDrafts, refreshKey, showToast, setHomeData, syncedTransactions]);
+  }, [authSession?.user?.user_id, finishRefresh, queuedDrafts, refreshKey, refreshRequest, showToast, setHomeData, syncedTransactions]);
+
+  const handleRefresh = useCallback(() => {
+    if (!beginRefresh()) return;
+    setRefreshRequest((current) => current + 1);
+  }, [beginRefresh]);
 
   const banyeraCards = banyeraRecords.map((record) => {
     const itemCount = Array.isArray(record?.items) ? record.items.length : 0;
@@ -1139,87 +1121,34 @@ export default function HomeScreen() {
                 }`}
                 style={{ fontFamily: "Montserrat_600SemiBold" }}
               >
-                Offline {offlineReadyPercent}%
+                Resources {offlineReadyPercent}%
               </Text>
             </Pressable>
           </View>
         </View>
       </SafeAreaView>
 
-      <NativeModal
+      <ResourcesModal
         visible={offlineStatusVisible}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setOfflineStatusVisible(false)}
-      >
-        <View className="flex-1 items-center justify-center bg-black/35 px-5">
-          <View className="w-full max-w-[340px] rounded-[14px] border border-[#E8E1E6] bg-white">
-            <View className="flex-row items-center justify-between border-b border-[#F2ECEF] px-4 py-3">
-              <View className="flex-1 pr-3">
-                <Text
-                  className="text-[15px] text-[#1A1F36]"
-                  style={{ fontFamily: "Montserrat_600SemiBold" }}
-                >
-                  Offline {offlineReadyPercent}%
-                </Text>
-                <Text
-                  className="text-[11px] text-[#6F6F82]"
-                  style={{ fontFamily: "Montserrat_400Regular" }}
-                >
-                  Updated in {formatOfflineUpdatedAt(offlineLastUpdated)}
-                </Text>
-              </View>
-              <Pressable
-                hitSlop={10}
-                onPress={() => setOfflineStatusVisible(false)}
-              >
-                <Ionicons name="close" size={20} color="#6F6F82" />
-              </Pressable>
-            </View>
-
-            <View className="px-4 py-2">
-              {offlineEntries.map((entry) => (
-                <View
-                  key={entry.key}
-                  className="flex-row items-center justify-between border-b border-[#F8F1F4] py-3 last:border-b-0"
-                >
-                  <Text
-                    className="text-[13px] text-[#1A1F36]"
-                    style={{ fontFamily: "Montserrat_400Regular" }}
-                  >
-                    {entry.label}
-                  </Text>
-                  <View
-                    className={`flex-row items-center rounded-full px-2 py-1 ${
-                      entry.isReady ? "bg-[#DCFCE7]" : "bg-[#FEF3C7]"
-                    }`}
-                  >
-                    <Ionicons
-                      name={entry.isReady ? "checkmark-circle" : "time-outline"}
-                      size={12}
-                      color={entry.isReady ? "#16A34A" : "#D97706"}
-                    />
-                    <Text
-                      className={`ml-1 text-[10px] ${
-                        entry.isReady ? "text-[#16A34A]" : "text-[#D97706]"
-                      }`}
-                      style={{ fontFamily: "Montserrat_600SemiBold" }}
-                    >
-                      {entry.isReady ? "Ready" : "Missing"}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          </View>
-        </View>
-      </NativeModal>
+        readyPercent={offlineReadyPercent}
+        lastUpdated={offlineLastUpdated}
+        entries={offlineEntries}
+        onClose={() => setOfflineStatusVisible(false)}
+      />
 
       <ScrollView
         className="flex-1"
+        alwaysBounceVertical
         showsVerticalScrollIndicator={false}
         style={{ marginTop: -18 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor="#2563EB"
+            colors={["#2563EB"]}
+          />
+        }
       >
         <View className="bg-[#1A1F36]">
           <ImageBackground
@@ -1264,7 +1193,15 @@ export default function HomeScreen() {
                 >
                   {"Today's Overview"}
                 </Text>
-                <Pressable onPress={() => router.push("/history")} hitSlop={10}>
+                <Pressable
+                  onPress={() =>
+                    router.navigate({
+                      pathname: "/(tabs)/history",
+                      params: { tab: "all" },
+                    })
+                  }
+                  hitSlop={10}
+                >
                   <Ionicons name="arrow-forward" size={16} color="#8A94A3" />
                 </Pressable>
               </View>
@@ -1421,7 +1358,10 @@ export default function HomeScreen() {
                   <Pressable
                     hitSlop={8}
                     onPress={() => {
-                      router.push(`/history?tab=${section.tab}`);
+                      router.navigate({
+                        pathname: "/(tabs)/history",
+                        params: { tab: section.tab },
+                      });
                     }}
                   >
                     <Ionicons name="arrow-forward" size={16} color="#8A94A3" />

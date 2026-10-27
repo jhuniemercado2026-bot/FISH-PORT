@@ -13,6 +13,7 @@ import {
 } from "react-icons/io5";
 import { logoutUser } from "../pages/login/logout";
 import { getStoredUser } from "../pages/login/auth";
+import { getFrequentVisitRegistrationTarget } from "../lib/frequentVisitRegistration";
 import { useNotificationsDataQuery } from "../hooks/useNotificationsDataQuery";
 import { useSettingsQuery } from "../hooks/useSettingsQuery";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
@@ -337,6 +338,8 @@ const Topbar = ({ sidebarOpen, onMenuToggle, sidebarCollapsed }) => {
   });
 
   const getNotificationNavigationTarget = (notification) => {
+    const registrationTarget = getFrequentVisitRegistrationTarget(notification);
+    if (registrationTarget) return registrationTarget;
     const relatedType = String(notification?.related_type || "").trim().toLowerCase();
     const relatedId = notification?.related_id;
 

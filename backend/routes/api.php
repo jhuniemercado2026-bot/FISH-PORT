@@ -45,6 +45,7 @@ use App\Http\Controllers\VoidRequestController;
 */
 
 Route::get('/', fn () => 'hello');
+Route::get('server-time', \App\Http\Controllers\ServerTimeController::class);
 Route::post('login', [AuthController::class, 'login']);
 Route::post('forgot-password/check-email', [AuthController::class, 'checkForgotPasswordEmail']);
 Route::post('forgot-password/verify-code', [AuthController::class, 'verifyForgotPasswordCode']);
@@ -55,7 +56,16 @@ Route::post('forgot-password/reset', [AuthController::class, 'resetForgotPasswor
 | Protected Routes (Sanctum Token Required)
 |--------------------------------------------------------------------------
 */
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', \App\Http\Middleware\ApplyBoatBillPenalties::class])->group(function () {
+
+    Route::get('settings/bill-penalty', [\App\Http\Controllers\BillingPenaltySettingController::class, 'show']);
+    Route::get('settings/bill-penalty/state', [\App\Http\Controllers\BillingPenaltySettingController::class, 'state']);
+    Route::get('settings/bill-penalty/entries', [\App\Http\Controllers\BillingPenaltySettingController::class, 'entries']);
+    Route::get('settings/bill-penalty/rules', [\App\Http\Controllers\BillingPenaltyRuleController::class, 'index']);
+    Route::get('settings/bill-penalty/progress/{token}', [\App\Http\Controllers\BillingPenaltyRuleController::class, 'progress']);
+    Route::post('settings/bill-penalty/rules', [\App\Http\Controllers\BillingPenaltyRuleController::class, 'store']);
+    Route::patch('settings/bill-penalty/rules/{id}', [\App\Http\Controllers\BillingPenaltyRuleController::class, 'update']);
+    Route::patch('settings/bill-penalty', [\App\Http\Controllers\BillingPenaltySettingController::class, 'update']);
 
     // Auth
     Route::post('logout', [AuthController::class, 'logout']);

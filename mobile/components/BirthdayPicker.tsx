@@ -1,9 +1,10 @@
+import { getServerCalendarDate } from "../utils/serverClock";
 import DatePicker, { DatePickerProps } from "./DatePicker";
 
 export default function BirthdayPicker(
   props: Omit<DatePickerProps, "precision">,
 ) {
-  const today = new Date();
+  const today = getServerCalendarDate();
   const defaultMinDate = new Date(1900, 0, 1);
   const defaultMaxDate = new Date(
     today.getFullYear() - 15,

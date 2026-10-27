@@ -1,3 +1,4 @@
+import { drawPreparedBySignature, REPORT_SIGNATURE_SPACE } from "./reportSignature";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { getHeaderPngBytes } from "./pdfHeader";
 
@@ -447,7 +448,6 @@ export const buildBanyeraPdf = async ({
     ["Report Type", reportTypeLabel],
     ["Coverage", reportDateLabel],
     ...(filterType === "daily" ? [["Day", reportDayLabel]] : []),
-    ["Prepared By", preparedBy],
   ];
   const secondRowItems = [
     ["Municipality", "Opol"],
@@ -567,7 +567,7 @@ export const buildBanyeraPdf = async ({
     );
     const detailRowHeight = Math.max(38, 16 + (fishItemLines.length * 10));
 
-    if (composer.cursorY - detailRowHeight < MARGIN_Y + 36) {
+    if (composer.cursorY - detailRowHeight < MARGIN_Y + REPORT_SIGNATURE_SPACE + 36) {
       composer.addPage();
       drawTableHeader(composer, columns);
     }
@@ -629,7 +629,7 @@ export const buildBanyeraPdf = async ({
   });
 
   const summaryRowHeight = 30;
-  if (composer.cursorY - summaryRowHeight < MARGIN_Y + 36) {
+  if (composer.cursorY - summaryRowHeight < MARGIN_Y + REPORT_SIGNATURE_SPACE + 36) {
     composer.addPage();
     drawTableHeader(composer, columns);
   }
@@ -702,5 +702,6 @@ export const buildBanyeraPdf = async ({
     { fontSize: 10, bold: true },
   );
 
+  drawPreparedBySignature(composer, preparedBy, { marginX: MARGIN_X, marginY: MARGIN_Y, contentWidth: CONTENT_WIDTH });
   return composer.pdfDoc.save();
 };

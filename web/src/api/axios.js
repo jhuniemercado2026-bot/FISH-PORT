@@ -11,6 +11,9 @@ const api = axios.create({
   },
 });
 
+let pendingDatabaseRecoveries = 0;
+export const isDatabaseRecoveryInProgress = () => pendingDatabaseRecoveries > 0;
+
 // Automatically attach token to every request
 api.interceptors.request.use((config) => {
   localStorage.removeItem("token");
@@ -19,6 +22,10 @@ api.interceptors.request.use((config) => {
 
   const method = String(config.method || "get").toLowerCase();
   const url = String(config.url || "");
+  if (method === "post" && /\/database\/recover\/?$/.test(url)) {
+    config.databaseRecovery = true;
+    pendingDatabaseRecoveries += 1;
+  }
   const fiscalYear = readStoredFiscalYear();
 
   if (["post", "put", "patch"].includes(method) && OPERATIONAL_FISCAL_ENDPOINT_PATTERN.test(url)) {
@@ -31,5 +38,16 @@ api.interceptors.request.use((config) => {
 
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => {
+    if (response.config.databaseRecovery) pendingDatabaseRecoveries -= 1;
+    return response;
+  },
+  (error) => {
+    if (error.config?.databaseRecovery) pendingDatabaseRecoveries -= 1;
+    return Promise.reject(error);
+  },
+);
 
 export default api;

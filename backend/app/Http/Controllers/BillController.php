@@ -73,7 +73,7 @@ class BillController extends Controller
         try {
             if ($request->boolean('all') && $request->boolean('compact')) {
                 $bills = Bill::query()
-                    ->select('bill_id', 'bill_reference_no', 'boat_id', 'total_amount', 'created_at')
+                    ->select('bill_id', 'bill_reference_no', 'boat_id', 'total_amount', 'penalty_amount', 'created_at')
                     ->tableFilters(
                         $request->query('search', ''),
                         $request->query('status', 'all'),
@@ -447,7 +447,7 @@ class BillController extends Controller
 
         $billPayload = $this->transformBill($bill)->toArray();
 
-        broadcast(new TransactionUpdated('billing', 'created', $billPayload));
+        $this->broadcastBillingChange('created', $billPayload);
 
         if ($request->boolean('minimal')) {
             return response()->json([
@@ -487,6 +487,10 @@ class BillController extends Controller
         ];
 
         $bill = DB::transaction(function () use ($validated, $bill) {
+            $bill = Bill::whereKey($bill->bill_id)->lockForUpdate()->firstOrFail();
+            if ($bill->penalties()->exists()) {
+                throw ValidationException::withMessages(['bill' => 'A bill with assessed penalties cannot be edited.']);
+            }
             $items = $this->normalizeItems($validated['items']);
             $this->ensureTransactionsAreUnbilled($items, $bill->bill_id);
 
@@ -532,7 +536,7 @@ class BillController extends Controller
 
         $billPayload = $this->transformBill($bill)->toArray();
 
-        broadcast(new TransactionUpdated('billing', 'updated', $billPayload));
+        $this->broadcastBillingChange('updated', $billPayload);
 
         if ($request->boolean('minimal')) {
             return response()->json([
@@ -550,7 +554,13 @@ class BillController extends Controller
     public function destroy($id)
     {
         $bill = Bill::with('boat')->findOrFail($id);
-        $bill->delete();
+        DB::transaction(function () use ($bill) {
+            Bill::whereKey($bill->bill_id)->lockForUpdate()->firstOrFail();
+            if ($bill->penalties()->exists()) {
+                throw ValidationException::withMessages(['bill' => 'A bill with assessed penalties cannot be archived.']);
+            }
+            $bill->delete();
+        });
 
         app(ActivityLogService::class)->log(
             action: 'ARCHIVE',
@@ -559,13 +569,24 @@ class BillController extends Controller
             user: Auth::user()
         );
 
-        broadcast(new TransactionUpdated('billing', 'updated', [
+        $this->broadcastBillingChange('updated', [
             'bill_id' => $bill->bill_id,
             'boat_id' => $bill->boat_id,
             'deleted_at' => optional($bill->deleted_at)->toIso8601String(),
-        ]));
+        ]);
 
         return response()->json(['message' => 'Billing record archived successfully.']);
+    }
+
+    private function broadcastBillingChange(string $action, array $record): void
+    {
+        try {
+            broadcast(new TransactionUpdated('billing', $action, $record));
+        } catch (\Throwable $exception) {
+            // The database transaction has committed. A realtime outage must
+            // not turn a successful save into an error that invites a retry.
+            report($exception);
+        }
     }
 
     private function validateBill(Request $request): array
@@ -1036,7 +1057,6 @@ class BillController extends Controller
                 $this->transformBill($bill);
                 $bill->setAttribute('bill_reference', substr((string) ($bill->bill_reference_no ?? ''), -6) ?: str_pad((string) $bill->bill_id, 6, '0', STR_PAD_LEFT));
                 $bill->setAttribute('date_billed', $bill->created_at);
-                $bill->setAttribute('line_items', $bill->items);
 
                 return $bill;
             });
@@ -1126,7 +1146,8 @@ class BillController extends Controller
     private function transformBill(Bill $bill): Bill
     {
         $bill->createdBy?->append('full_name');
-        $totalPaid = (float) ($bill->total_paid ?? 0);
+        $totalPaid = array_key_exists('total_paid', $bill->getAttributes())
+            ? (float) $bill->total_paid : (float) $bill->payments()->sum('amount_paid');
         $balance = max((float) $bill->total_amount - $totalPaid, 0);
 
         $bill->setAttribute('bill_number', 'BILL-' . ($bill->bill_reference_no ?? str_pad((string) $bill->bill_id, 9, '0', STR_PAD_LEFT)));
@@ -1136,6 +1157,7 @@ class BillController extends Controller
         $bill->setAttribute('payments_count', (int) ($bill->payments_count ?? ((bool) ($bill->has_payments ?? false) ? 1 : 0)));
         $bill->setAttribute('amount_paid', $totalPaid);
         $bill->setAttribute('balance', $balance);
+        $bill->setAttribute('is_overdue', $bill->hasOverdueMonthlyPenalty($totalPaid));
         $bill->items->each(function (BillItem $item) {
             $transactionDate = match ($item->transaction_type) {
                 'docking' => $item->docking?->docking_date,
@@ -1156,6 +1178,15 @@ class BillController extends Controller
             })->values()
         );
         $bill->setAttribute('transaction_summary', $bill->items->pluck('transaction_type')->unique()->values()->join(', '));
+        $penaltyLines = $bill->penalties->filter(fn ($penalty) => $penalty->effective_amount > 0)
+            ->map(fn ($penalty) => [
+                'transaction_type' => 'penalty', 'transaction_date' => $penalty->period_ended_at,
+                'amount' => number_format($penalty->effective_amount, 2, '.', ''),
+                'description' => 'Late payment penalty (PHP '
+                    . number_format((float) ($penalty->fixed_amount ?? $penalty->amount), 2) . ' / '
+                    . $penalty->interval_value . ' ' . $penalty->interval_unit . ', period ' . $penalty->period_number . ')',
+            ]);
+        $bill->setAttribute('line_items', $bill->items->map->toArray()->concat($penaltyLines)->values());
 
         return $bill;
     }
@@ -1167,6 +1198,7 @@ class BillController extends Controller
             'bill_reference_no' => $bill->bill_reference_no,
             'boat_id' => $bill->boat_id,
             'total_amount' => (float) ($bill->total_amount ?? 0),
+            'penalty_amount' => (float) ($bill->penalty_amount ?? 0),
             'billing_date' => $bill->created_at,
             'created_at' => $bill->created_at,
         ];

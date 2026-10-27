@@ -1,10 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useProfileStore } from "../../../store/profileStore";
 import SignOutModal from "../../../components/SignOutModal";
-import { Pressable, StatusBar, Text, View } from "react-native";
+import { getAuthSession, getAuthToken } from "../../../api/auth";
+import { buildApiHeaders, getApiBaseUrl } from "../../../api/axios";
+import { Pressable, RefreshControl, ScrollView, StatusBar, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useToastStore } from "../../../store/toastStore";
+import { usePullRefreshIndicator } from "../../../utils/usePullRefreshIndicator";
 
 const profileActions = [
   {
@@ -36,7 +40,34 @@ const profileActions = [
 export default function ProfileScreen() {
   const router = useRouter();
   const [signOutModalVisible, setSignOutModalVisible] = useState(false);
+  const { isRefreshing, beginRefresh, finishRefresh } = usePullRefreshIndicator();
   const profile = useProfileStore((state) => state);
+  const setProfile = useProfileStore((state) => state.setProfile);
+  const showToast = useToastStore((state) => state.showToast);
+
+  const handleRefresh = useCallback(async () => {
+    if (!beginRefresh()) return;
+    const authToken = getAuthToken();
+    const userId = getAuthSession()?.user?.user_id;
+    if (!authToken || !userId) {
+      finishRefresh();
+      return;
+    }
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/users/${userId}`, {
+        headers: buildApiHeaders(authToken),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.data) {
+        throw new Error("Unable to refresh profile.");
+      }
+      setProfile(payload.data);
+    } catch {
+      showToast("error", "Unable to refresh profile.");
+    } finally {
+      finishRefresh();
+    }
+  }, [beginRefresh, finishRefresh, setProfile, showToast]);
   const openProfileDetails = (mode?: "change-password") => {
     router.push({
       pathname: "/(tabs)/profile/[id]",
@@ -115,7 +146,20 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        <View className="-mt-24 flex-1 rounded-t-[20px] bg-[#FFFDFB] px-5 pt-8">
+        <ScrollView
+          className="-mt-24 flex-1 rounded-t-[20px] bg-[#FFFDFB]"
+          alwaysBounceVertical
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingTop: 32 }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor="#2563EB"
+              colors={["#2563EB"]}
+            />
+          }
+        >
           <View className="items-center">
             <Text
               className="mt-20 text-center text-[24px] text-[#1A1F36]"
@@ -182,7 +226,7 @@ export default function ProfileScreen() {
               </Pressable>
             </View>
           ))}
-        </View>
+        </ScrollView>
       </SafeAreaView>
 
       <SignOutModal

@@ -1,4 +1,4 @@
-<?php
+<!-- <?php
 
 namespace Database\Seeders;
 
@@ -21,4 +21,4 @@ class HeadSeeder extends Seeder
             ]
         );
     }
-}
+} -->

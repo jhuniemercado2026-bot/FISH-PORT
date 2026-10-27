@@ -3415,20 +3415,18 @@ const SuperVehicleTickets = () => {
                         height={42}
                       />
                       {!isHeadViewOnly ? (
-                        <Tooltip title={isTransactionLocked ? transactionLockMessage : "Add Vehicle Type"}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              clearUniversalHighlight();
-                              openAddVehicleType();
-                            }}
-                            disabled={isTransactionLocked}
-                            className="flex h-[42px] items-center justify-center gap-2 rounded-xl border-none bg-[#1a1f36] px-5 text-[13px] font-semibold text-white cursor-pointer hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
-                          >
-                            <IoAddOutline className="text-[16px]" />
-                            Add Vehicle Type
-                          </button>
-                        </Tooltip>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            clearUniversalHighlight();
+                            openAddVehicleType();
+                          }}
+                          disabled={isTransactionLocked}
+                          className="flex h-[42px] items-center justify-center gap-2 rounded-xl border-none bg-[#1a1f36] px-5 text-[13px] font-semibold text-white cursor-pointer hover:bg-[#2d3561] disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          <IoAddOutline className="text-[16px]" />
+                          Add Vehicle Type
+                        </button>
                       ) : null}
                     </>
                   }

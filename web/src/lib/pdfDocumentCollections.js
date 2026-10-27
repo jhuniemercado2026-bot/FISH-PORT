@@ -1,3 +1,4 @@
+import { drawPreparedBySignature, REPORT_SIGNATURE_SPACE } from "./reportSignature";
 import {
   PDFDocument,
   StandardFonts,
@@ -293,7 +294,6 @@ export const buildCollectionsPdf = async ({
     ["Region", "X"],
   ];
   const secondRowItems = [
-    ["Prepared By", preparedBy || "Admin"],
     ["Total Collections", formatPdfMoney(totals.cashReceived)],
   ];
   const firstRowWidth = CONTENT_WIDTH / firstRowItems.length;
@@ -391,7 +391,7 @@ export const buildCollectionsPdf = async ({
       });
       const rowHeight = Math.max(24, Math.max(...textLineCounts) * 10 + 10);
 
-      if (composer.cursorY - rowHeight < MARGIN_Y + 40) {
+      if (composer.cursorY - rowHeight < MARGIN_Y + REPORT_SIGNATURE_SPACE + 40) {
         composer.addPage();
         drawTableHeader(composer, columns);
       }
@@ -443,5 +443,6 @@ export const buildCollectionsPdf = async ({
     composer.cursorY -= 36;
   }
 
+  drawPreparedBySignature(composer, preparedBy, { marginX: MARGIN_X, marginY: MARGIN_Y, contentWidth: CONTENT_WIDTH });
   return composer.pdfDoc.save();
 };

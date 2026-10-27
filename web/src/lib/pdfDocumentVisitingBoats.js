@@ -1,3 +1,4 @@
+import { drawPreparedBySignature, REPORT_SIGNATURE_SPACE } from "./reportSignature";
 import {
   PDFDocument,
   StandardFonts,
@@ -254,7 +255,6 @@ export const buildVisitingBoatsPdf = async ({
   const firstRowItems = [
     ["Report Type", "Visiting Boats"],
     ["Generated On", generatedOn],
-    ["Prepared By", preparedBy],
   ];
   const secondRowItems = [
     ["Municipality", "Opol"],
@@ -358,7 +358,7 @@ export const buildVisitingBoatsPdf = async ({
 
   const detailRowHeight = 24;
   rows.forEach((row) => {
-    if (composer.cursorY - detailRowHeight < MARGIN_Y + 36) {
+    if (composer.cursorY - detailRowHeight < MARGIN_Y + REPORT_SIGNATURE_SPACE + 36) {
       composer.addPage();
       drawTableHeader(composer, columns);
     }
@@ -389,5 +389,6 @@ export const buildVisitingBoatsPdf = async ({
     composer.cursorY -= detailRowHeight;
   });
 
+  drawPreparedBySignature(composer, preparedBy, { marginX: MARGIN_X, marginY: MARGIN_Y, contentWidth: CONTENT_WIDTH });
   return composer.pdfDoc.save();
 };

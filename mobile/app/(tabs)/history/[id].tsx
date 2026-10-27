@@ -1,3 +1,5 @@
+import { getServerNow } from "../../../utils/serverClock";
+import { useServerClockVersion } from "../../../utils/useServerClockVersion";
 import { Ionicons } from "@expo/vector-icons";
 import type { BluetoothPrinter } from "@netinove/thermal-printer";
 import NetInfo from "@react-native-community/netinfo";
@@ -19,6 +21,7 @@ import {
   OfflineTransactionDraft,
 } from "../../../utils/offlineTransactionQueue";
 import { printThermalReceipt } from "../../../utils/thermalReceiptPrinter";
+import { isRecordOwnedByUser } from "../../../utils/historyOwnership";
 
 type TransactionType = "docking" | "banyera" | "tickets" | "remittance";
 type VoidableTransactionType = Exclude<TransactionType, "remittance">;
@@ -310,7 +313,7 @@ const getPhilippineToday = () => {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(new Date());
+  }).formatToParts(getServerNow());
 
   const year = Number(parts.find((part) => part.type === "year")?.value ?? "0");
   const month = Number(parts.find((part) => part.type === "month")?.value ?? "0");
@@ -647,7 +650,48 @@ const isOfflineNetworkState = (state: {
 
 const detailCacheKey = (type: TransactionType, id: string | number) => `${type}:${id}`;
 
+const resolveDetailFromResponse = (
+  payload: TransactionRecord | null | undefined,
+  fallback: TransactionRecord | null
+) => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return fallback;
+  }
+
+  const wrappedCandidates = [
+    payload.data,
+    payload.transaction,
+    payload.ticket,
+    payload.docking,
+    payload.banyera,
+    payload.remittance,
+    payload.record,
+  ];
+  for (const candidate of wrappedCandidates) {
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      return { ...(fallback ?? {}), ...(candidate as TransactionRecord) };
+    }
+  }
+
+  if (
+    payload.id ||
+    payload.ticket_id ||
+    payload.banyera_id ||
+    payload.docking_id ||
+    payload.remittance_id ||
+    payload.plate_number ||
+    payload.boat_name ||
+    payload.total_fee != null ||
+    payload.ticket_fee != null
+  ) {
+    return { ...(fallback ?? {}), ...payload };
+  }
+
+  return fallback;
+};
+
 export default function HistoryDetailScreen() {
+  useServerClockVersion();
   const router = useRouter();
   const params = useLocalSearchParams<Params>();
   const authToken = getAuthToken();
@@ -686,6 +730,14 @@ export default function HistoryDetailScreen() {
       queryType === "docking" || queryType === "banyera" || queryType === "tickets" || queryType === "remittance"
         ? (queryType as TransactionType)
         : undefined;
+    const currentUserId = getAuthSession()?.user?.user_id;
+    const cachedCandidate =
+      parsedType && id
+        ? useHistoryStore.getState().transactionDetailCache[detailCacheKey(parsedType, id)]
+        : null;
+    const cachedDetail = isRecordOwnedByUser(cachedCandidate, currentUserId)
+      ? cachedCandidate
+      : null;
 
     setType(parsedType);
 
@@ -725,7 +777,12 @@ export default function HistoryDetailScreen() {
 
       if (isDraftRoute) {
         const drafts = await getOfflineTransactionDrafts();
-        const draft = drafts.find((item) => item.local_id === id);
+        const draft = drafts.find(
+          (item) =>
+            item.local_id === id &&
+            Boolean(currentUserId) &&
+            String(item.owner_user_id ?? "") === String(currentUserId)
+        );
 
         if (!draft) {
           showToast("info", "Draft details not found.");
@@ -741,7 +798,6 @@ export default function HistoryDetailScreen() {
       }
 
       if (parsedType && id) {
-        const cachedDetail = useHistoryStore.getState().transactionDetailCache[detailCacheKey(parsedType, id)];
         if (cachedDetail) {
           setDetail(cachedDetail);
           setIsLoading(false);
@@ -758,11 +814,6 @@ export default function HistoryDetailScreen() {
 
       const networkState = await NetInfo.fetch().catch(() => null);
       if (isOfflineNetworkState(networkState)) {
-        const cachedDetail =
-          parsedType && id
-            ? useHistoryStore.getState().transactionDetailCache[detailCacheKey(parsedType, id)]
-            : null;
-
         if (cachedDetail) {
           setDetail(cachedDetail);
         } else {
@@ -773,9 +824,6 @@ export default function HistoryDetailScreen() {
         setIsLoading(false);
         return;
       }
-
-      const authSession = getAuthSession();
-      const currentUserId = authSession?.user?.user_id;
 
       if (!authToken || !currentUserId) {
         showToast("error", "Please sign in again.");
@@ -799,30 +847,6 @@ export default function HistoryDetailScreen() {
 
         let found: TransactionRecord | null = null;
 
-        const isOwnedByCurrentUser = (record: TransactionRecord) => {
-          const currentUserIdString = String(currentUserId);
-          const ownerCandidates = [
-            record?.created_by,
-            record?.created_by?.user_id,
-            record?.created_by?.id,
-            record?.created_by_id,
-            record?.createdBy?.user_id,
-            record?.createdBy?.id,
-            record?.createdBy,
-            record?.user_id,
-            record?.user?.user_id,
-            record?.user?.id,
-            record?.owner_id,
-            record?.submitted_by,
-            record?.submittedBy?.user_id,
-            record?.submittedBy?.id,
-          ];
-
-          return ownerCandidates.some(
-            (value) => value !== undefined && value !== null && String(value) === currentUserIdString
-          );
-        };
-
         for (const typeToCheck of typesToCheck) {
           const response = await fetch(`${getApiBaseUrl()}${endpointForType(typeToCheck)}/${idNumber}`, {
             headers: buildApiHeaders(authToken),
@@ -833,7 +857,7 @@ export default function HistoryDetailScreen() {
           }
 
           const json = await response.json().catch(() => null);
-          let record = resolveDetailFromResponse(json, null);
+          let record = resolveDetailFromResponse(json, cachedDetail);
 
           if (
             typeToCheck === "remittance" &&
@@ -856,7 +880,7 @@ export default function HistoryDetailScreen() {
             }
           }
 
-          if (record && isOwnedByCurrentUser(record)) {
+          if (record && isRecordOwnedByUser(record, currentUserId)) {
             found = record;
             setType(typeToCheck);
             cacheTransactionDetail(typeToCheck, idNumber, record);
@@ -864,11 +888,11 @@ export default function HistoryDetailScreen() {
           }
         }
 
-        if (!found) {
+        if (!found && !cachedDetail) {
           showToast("info", "Transaction details not found.");
         }
 
-        setDetail(found);
+        setDetail(found ?? cachedDetail);
       } catch {
         const latestNetworkState = await NetInfo.fetch().catch(() => null);
         if (isOfflineNetworkState(latestNetworkState)) {
@@ -1045,25 +1069,6 @@ export default function HistoryDetailScreen() {
     } finally {
       setIsPrintingBanyera(false);
     }
-  };
-
-  const resolveDetailFromResponse = (payload: TransactionRecord | null | undefined, fallback: TransactionRecord | null) => {
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      return fallback;
-    }
-
-    const wrappedCandidates = [payload.data, payload.transaction, payload.ticket, payload.docking, payload.banyera, payload.remittance, payload.record];
-    for (const candidate of wrappedCandidates) {
-      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
-        return { ...(fallback ?? {}), ...(candidate as TransactionRecord) };
-      }
-    }
-
-    if (payload.id || payload.ticket_id || payload.banyera_id || payload.docking_id || payload.remittance_id || payload.plate_number || payload.boat_name || payload.total_fee != null || payload.ticket_fee != null) {
-      return { ...(fallback ?? {}), ...(payload as TransactionRecord) };
-    }
-
-    return fallback;
   };
 
   const handleVoidConfirm = async () => {

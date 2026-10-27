@@ -186,6 +186,17 @@ input:-webkit-autofill {
   animation-fill-mode: both;
 }
 
+input.penalty-number-input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input.penalty-number-input[type="number"]::-webkit-inner-spin-button,
+input.penalty-number-input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 tr.table-row-even > td {
   background-color: #ffffff;
 }

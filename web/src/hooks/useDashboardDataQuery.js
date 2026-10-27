@@ -14,6 +14,7 @@ export const getDashboardDataQueryOptions = () => ({
       banyeraTransactions: data?.banyeraTransactions ?? [],
       bills: data?.bills ?? [],
       payments: data?.payments ?? [],
+      penalties: data?.penalties ?? [],
       remittances: data?.remittances ?? [],
       dockings: data?.dockings ?? [],
       users: data?.users ?? [],

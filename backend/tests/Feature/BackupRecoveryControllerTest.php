@@ -44,4 +44,27 @@ class BackupRecoveryControllerTest extends TestCase
             }
         }
     }
+
+    public function test_mysql_binary_uses_mysql_bin_path_environment_when_provided(): void
+    {
+        $controller = new BackupRecoveryController();
+        $reflection = new ReflectionClass($controller);
+        $method = $reflection->getMethod('resolveMysqlBinary');
+        $method->setAccessible(true);
+
+        $binaryPath = tempnam(sys_get_temp_dir(), 'mysql-cli');
+        $this->assertNotFalse($binaryPath);
+
+        putenv('MYSQL_BIN_PATH=' . $binaryPath);
+
+        try {
+            $binary = $method->invoke($controller, 'mysql');
+            $this->assertSame($binaryPath, $binary);
+        } finally {
+            putenv('MYSQL_BIN_PATH');
+            if (is_file($binaryPath)) {
+                unlink($binaryPath);
+            }
+        }
+    }
 }

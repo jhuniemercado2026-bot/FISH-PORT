@@ -49,6 +49,7 @@ import { useTransactionLockQuery } from "../../hooks/useTransactionLockQuery";
 import { isHeadRole } from "../../utils/transactionLock";
 import { cacheTab, getCachedTab } from "../../utils/tabSession";
 import { buildBillingStatementPdf } from "../../lib/pdfDocumentBill";
+import { getPenaltyAmount } from "../../lib/billPenalty";
 import { getEcho } from "../../lib/realtime";
 import Spinner from "../../components/Spinner";
 import NoDataFound from "../../components/NoDataFound";
@@ -122,6 +123,10 @@ const PAYMENT_STATUS_FILTER_OPTIONS = [
 const PAYMENT_STATUS_LEGEND = [
   { key: "paid", label: "Paid", color: "#16a34a" },
   { key: "partial", label: "Partial", color: "#f59e0b" },
+];
+
+const BILLING_RECORDS_LEGEND = [
+  { key: "overdue", label: "Overdue", color: "#ef4444" },
 ];
 
 const BILLING_FILTER_DROPDOWN_PROPS = {
@@ -325,6 +330,8 @@ const getBillItemDisplayType = (transactionType) =>
     ? "Docking"
     : transactionType === "banyera"
       ? "Banyera"
+      : transactionType === "penalty"
+        ? "Penalty"
       : "Transaction";
 
 const getBillItemDisplayDate = (item, fallbackDate = "") => {
@@ -345,7 +352,7 @@ const getBillItemDisplayDate = (item, fallbackDate = "") => {
       item?.banyera_date ||
       fallbackDate
     );
-  return fallbackDate;
+  return item?.transaction_date || fallbackDate;
 };
 
 const TH = ({ children }) => (
@@ -941,6 +948,7 @@ const RecordPaymentModal = ({
             .filter(Boolean),
         ))].join(", ") || "-",
         amount_due: selectedBills.reduce((sum, record) => sum + parseMoneyValue(record.amount_due ?? record.total_amount), 0),
+        penalty_amount: selectedBills.reduce((sum, record) => sum + getPenaltyAmount(record), 0),
         total_paid: selectedBills.reduce((sum, record) => sum + parseMoneyValue(record.total_paid), 0),
         balance: selectedBills.reduce((sum, record) => sum + parseMoneyValue(record.balance ?? record.total_amount), 0),
         bill_count: selectedBills.length,
@@ -1129,6 +1137,7 @@ const RecordPaymentModal = ({
                 <div className="space-y-3">
                   {[
                     ["Transactions", paymentSummary.transaction_summary || "-"],
+                    ["Penalty", formatMoney(getPenaltyAmount(paymentSummary))],
                     ["Total Billed", formatMoney(paymentSummary.amount_due ?? paymentSummary.total_amount)],
                     ["Previously Paid", formatMoney(paymentSummary.total_paid)],
                   ].map(([label, value]) => (
@@ -3075,7 +3084,7 @@ const SuperBilling = () => {
   const selectedBillChargeItems = useMemo(() => {
     if (!selectedBillRecord) return [];
 
-    return (selectedBillRecord.items ?? [])
+    return (selectedBillRecord.line_items ?? selectedBillRecord.items ?? [])
       .map((item, index) => {
         const transactionType = String(
           item.transaction_type || "",
@@ -3086,7 +3095,7 @@ const SuperBilling = () => {
           charge_key: `charge-${selectedBillRecord.bill_id}-${transactionType}-${index}`,
           date: getBillItemDisplayDate(item),
           type: feeLabel,
-          description: `${feeLabel} Fee`,
+          description: item.description || `${feeLabel} Fee`,
           amount: parseMoneyValue(item.amount),
         };
       })
@@ -3826,6 +3835,8 @@ const SuperBilling = () => {
                 loading={showPageShellSkeleton}
                 rightContent={isPaymentsTab ? (
                   <Legend items={PAYMENT_STATUS_LEGEND} loading={showPageShellSkeleton} />
+                ) : isRecordsTab ? (
+                  <Legend items={BILLING_RECORDS_LEGEND} className="gap-3" itemClassName="gap-2" loading={showPageShellSkeleton} skeletonCount={1} />
                 ) : null}
               >
 
@@ -3964,6 +3975,7 @@ const SuperBilling = () => {
                           ) : (
                             paginatedRecords.map((record, index) => {
                               const hasPayments = billHasPayments(record);
+                              const isOverdue = record.is_overdue === true;
                               const isHighlighted =
                                 highlightedBillId &&
                                 String(highlightedBillId) === String(record.bill_id);
@@ -3979,8 +3991,9 @@ const SuperBilling = () => {
                                 }}
                               >
                                <td className="px-4 py-3">
-  <Tooltip title="Click Me">
+  <Tooltip title={isOverdue ? "Overdue — monthly penalty period reached with an unpaid balance. Click to view billing statement." : "Click Me"}>
     <div className="flex w-fit items-center gap-2">
+      {isOverdue ? <span role="img" aria-label="Overdue: monthly penalty period reached" className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: BILLING_RECORDS_LEGEND[0].color, minWidth: 10, minHeight: 10 }} /> : null}
       <span className="text-[13px] font-semibold text-[#1a1f36]">
         {formatReferenceNumber(
           record.bill_reference_no,

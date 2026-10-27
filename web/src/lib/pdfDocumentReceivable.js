@@ -1,3 +1,4 @@
+import { drawPreparedBySignature, REPORT_SIGNATURE_SPACE } from "./reportSignature";
 import {
   PDFDocument,
   StandardFonts,
@@ -309,7 +310,6 @@ export const buildReceivablePdf = async ({
     ["Coverage", getCoverageLabel({ filterType, month, day, year, monthlyMonth, monthlyYear, yearlyDate })],
     ["Municipality", "Opol"],
     ["Region", "X"],
-    ["Prepared By", preparedBy || "Admin"],
   ];
   const secondRowItems = [
     ["Total Billed", formatPdfMoney(totals.billed)],
@@ -405,7 +405,7 @@ export const buildReceivablePdf = async ({
       );
       const rowHeight = Math.max(24, Math.max(...textLineCounts) * 10 + 10);
 
-      if (composer.cursorY - rowHeight < MARGIN_Y + 40) {
+      if (composer.cursorY - rowHeight < MARGIN_Y + REPORT_SIGNATURE_SPACE + 40) {
         composer.addPage();
         drawTableHeader(composer, columns);
       }
@@ -465,5 +465,6 @@ export const buildReceivablePdf = async ({
     composer.cursorY -= 36;
   }
 
+  drawPreparedBySignature(composer, preparedBy, { marginX: MARGIN_X, marginY: MARGIN_Y, contentWidth: CONTENT_WIDTH });
   return composer.pdfDoc.save();
 };

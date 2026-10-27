@@ -461,7 +461,7 @@ class BoatController extends Controller
     public function uploadImage(Request $request, $id)
     {
         $request->validate([
-            'image' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
+            'image' => 'required|image|mimes:jpeg,png,jpg,webp|max:50000',
         ]);
 
         $boat = Boat::findOrFail($id);

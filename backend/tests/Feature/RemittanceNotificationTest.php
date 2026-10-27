@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Enums\FeeTypeName;
+use App\Models\BanyeraTransaction;
+use App\Models\Docking;
 use App\Models\Fee;
 use App\Models\Notification;
 use App\Models\Remittance;
@@ -75,6 +77,57 @@ class RemittanceNotificationTest extends TestCase
             'is_read' => false,
         ]);
         $this->assertSame(0, Notification::query()->where('recipient_user_id', $head->user_id)->count());
+    }
+
+    public function test_today_collection_progress_includes_pending_inspector_collection_amount(): void
+    {
+        $coordinator = User::factory()->create(['role' => 'coordinator']);
+        $inspector = User::factory()->create(['role' => 'inspector']);
+        $date = now('Asia/Manila')->toDateString();
+        $this->createVehicleTicketCollection($inspector, $date, 125);
+        $fee = Fee::query()->where('created_by', $inspector->user_id)->firstOrFail();
+
+        Docking::create([
+            'boat_category' => 'visiting',
+            'visiting_boat_name' => 'Visiting Docking Test',
+            'fee_id' => $fee->fee_id,
+            'docking_date' => $date,
+            'docking_fee' => 30,
+            'created_by' => $inspector->user_id,
+        ]);
+
+        BanyeraTransaction::create([
+            'boat_category' => 'visiting',
+            'visiting_boat_name' => 'Visiting Banyera Test',
+            'transaction_date' => $date,
+            'total_fee' => 45,
+            'created_by' => $inspector->user_id,
+        ]);
+
+        $annualOnlyInspector = User::factory()->create(['role' => 'inspector']);
+        $dailyTicket = VehicleTicket::query()
+            ->where('created_by', $inspector->user_id)
+            ->firstOrFail();
+        VehicleTicket::create([
+            'vehicle_type_id' => $dailyTicket->vehicle_type_id,
+            'ticket_type' => 'annual',
+            'fee_id' => $dailyTicket->fee_id,
+            'ticket_fee' => 900,
+            'ticket_date' => $date,
+            'plate_number' => 'ANNUAL-TEST',
+            'created_by' => $annualOnlyInspector->user_id,
+        ]);
+
+        $this->actingAs($coordinator, 'sanctum');
+
+        $response = $this->getJson('/api/remittances/today-collection?date=' . $date)
+            ->assertOk();
+        $users = collect($response->json('remittance_progress.users'))->keyBy('user_id');
+
+        $this->assertCount(2, $users);
+        $this->assertFalse($users->get($inspector->user_id)['has_remitted']);
+        $this->assertSame(200.0, (float) $users->get($inspector->user_id)['collection_amount']);
+        $this->assertSame(900.0, (float) $users->get($annualOnlyInspector->user_id)['collection_amount']);
     }
 
     public function test_remittance_reminder_notifies_only_online_inspectors_with_unsubmitted_ticket_collections(): void

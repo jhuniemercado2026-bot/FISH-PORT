@@ -23,6 +23,7 @@ import TitlePage from "../../components/TitlePage";
 import api from "../../api/axios";
 import { useSidebar } from "../../store/sidebarStore";
 import { useDashboardDataQuery } from "../../hooks/useDashboardDataQuery";
+import { getBilledReceivables } from "../../lib/dashboardReceivables";
 import { useFiscalYearStore, getFiscalYearOptions } from "../../store/fiscalYearStore";
 
 const FONT = "'Montserrat', sans-serif";
@@ -620,7 +621,7 @@ const Dashboard = () => {
       (bill) => getYear(bill?.created_at || bill?.billing_date) === selectedYearNumber,
     );
     const paymentsForYear = payments.filter(
-      (payment) => getYear(payment?.payment_date || payment?.created_at) === selectedYearNumber,
+      (payment) => getYear(payment?.fiscal_date) === selectedYearNumber,
     );
     const vehicleTicketsForYear = vehicleTickets.filter(
       (ticket) =>
@@ -934,7 +935,9 @@ const Dashboard = () => {
       totalTransactionRevenue:
         totalDockingTransactions +
         totalBanyeraTransactions +
-        totalVehicleTicketTransactions,
+        totalVehicleTicketTransactions +
+        (data?.penalties ?? []).reduce((sum, penalty) =>
+          getYear(penalty.fiscal_date) === selectedYearNumber ? sum + Number(penalty.amount || 0) : sum, 0),
       billsStatus: statusItems,
       billsStatusWithPercent: statusItemsWithPercent,
       totalBills: statusItems.reduce((sum, item) => sum + item.value, 0),
@@ -967,9 +970,9 @@ const Dashboard = () => {
     let totalRevenue = 0;
     let previousYearRevenue = 0;
 
-    // Add payments (bills-based) to revenue
+    // Keep every payment in its parent bill's fiscal year and month.
     payments.forEach((payment) => {
-      const rawDate = payment?.payment_date || payment?.created_at;
+      const rawDate = payment?.fiscal_date;
       const parsedDate = new Date(rawDate);
       if (Number.isNaN(parsedDate.getTime())) return;
       const amount = Number(payment?.amount_paid || 0);
@@ -1036,26 +1039,12 @@ const Dashboard = () => {
         ? ((totalRevenue - previousYearRevenue) / previousYearRevenue) * 100
         : 0;
 
-    // Calculate outstanding per month
+    // Keep the full bill balance within the bill's fiscal year.
     const bills = data?.bills ?? [];
-    const billsForYear = bills.filter((bill) => {
-      const parsedDate = new Date(bill?.created_at || bill?.billing_date || 0);
-      return !Number.isNaN(parsedDate.getTime()) && parsedDate.getFullYear() === selectedYearNumber;
-    });
-    const paymentsForYear = payments.filter((payment) => {
-      const parsedDate = new Date(payment?.payment_date || payment?.created_at);
-      return !Number.isNaN(parsedDate.getTime()) && parsedDate.getFullYear() === selectedYearNumber;
-    });
-    const paymentTotalsByBillId = paymentsForYear.reduce((acc, payment) => {
-      const key = String(payment?.bill_id ?? "");
-      if (!key) return acc;
-      acc[key] = (acc[key] ?? 0) + Number(payment?.amount_paid || 0);
-      return acc;
-    }, {});
 
     const billedDockingIds = new Set();
     const billedBanyeraIds = new Set();
-    billsForYear.forEach((bill) => {
+    bills.forEach((bill) => {
       const items = Array.isArray(bill?.items) ? bill.items : [];
       items.forEach((item) => {
         const transactionType = String(item?.transaction_type || "").toLowerCase();
@@ -1071,19 +1060,9 @@ const Dashboard = () => {
       });
     });
 
-    let totalOutstanding = 0;
-    billsForYear.forEach((bill) => {
-      const totalAmount = Number(bill?.total_amount || 0);
-      const totalPaid = Number(paymentTotalsByBillId[String(bill?.bill_id ?? "")] ?? 0);
-      const outstanding = Math.max(0, totalAmount - totalPaid);
-      totalOutstanding += outstanding;
-
-      // Add outstanding to its month bucket
-      const parsedDate = new Date(bill?.created_at || bill?.billing_date || 0);
-      if (!Number.isNaN(parsedDate.getTime()) && parsedDate.getFullYear() === selectedYearNumber) {
-        baseMonths[parsedDate.getMonth()].outstanding += outstanding;
-      }
-    });
+    const billedReceivables = getBilledReceivables(data ?? {}, selectedYearNumber);
+    const totalOutstanding = billedReceivables.total;
+    billedReceivables.monthly.forEach((amount, index) => { baseMonths[index].outstanding += amount; });
 
     const unbilledDockingTotal = dockings.reduce((sum, docking) => {
       if (isVisitingTransaction(docking)) return sum;
@@ -1182,6 +1161,10 @@ const Dashboard = () => {
           Number(ticket?.ticket_fee || 0),
         );
       });
+
+    (data?.penalties ?? []).forEach((penalty) => {
+      addTargetRevenue(penalty.fiscal_date, Number(penalty.amount || 0));
+    });
 
     return { selectedMonthRevenue, todayRevenue };
   }, [data, selectedTargetMonthIndex, selectedYear]);
@@ -2261,6 +2244,12 @@ const Dashboard = () => {
       revenueByYear[year] = (revenueByYear[year] ?? 0) + amount;
     });
 
+    (data?.penalties ?? []).forEach((penalty) => {
+      const year = getYear(penalty.fiscal_date);
+      if (!year) return;
+      revenueByYear[year] = (revenueByYear[year] ?? 0) + Number(penalty.amount || 0);
+    });
+
     return years.map((year) => ({
       year: String(year),
       revenue: revenueByYear[year] ?? 0,
@@ -2279,7 +2268,6 @@ const Dashboard = () => {
 
   const yearlyReceivablesData = useMemo(() => {
     const years = getFiscalYearOptions().map((value) => Number(value));
-    const payments = data?.payments ?? [];
     const bills = data?.bills ?? [];
     const dockings = data?.dockings ?? [];
     const banyeraTransactions = data?.banyeraTransactions ?? [];
@@ -2299,23 +2287,9 @@ const Dashboard = () => {
     };
 
     return years.map((year) => {
-      const billsForYear = bills.filter(
-        (bill) => getYear(bill?.created_at || bill?.billing_date) === year,
-      );
-      const paymentsForYear = payments.filter(
-        (payment) => getYear(payment?.payment_date || payment?.created_at) === year,
-      );
-
-      const paymentTotalsByBillId = paymentsForYear.reduce((acc, payment) => {
-        const key = String(payment?.bill_id ?? "");
-        if (!key) return acc;
-        acc[key] = (acc[key] ?? 0) + Number(payment?.amount_paid || 0);
-        return acc;
-      }, {});
-
       const billedDockingIds = new Set();
       const billedBanyeraIds = new Set();
-      billsForYear.forEach((bill) => {
+      bills.forEach((bill) => {
         const items = Array.isArray(bill?.items) ? bill.items : [];
         items.forEach((item) => {
           const transactionType = String(item?.transaction_type || "").toLowerCase();
@@ -2328,11 +2302,7 @@ const Dashboard = () => {
         });
       });
 
-      const outstandingBills = billsForYear.reduce((sum, bill) => {
-        const totalAmount = Number(bill?.total_amount || 0);
-        const totalPaid = Number(paymentTotalsByBillId[String(bill?.bill_id ?? "")] ?? 0);
-        return sum + Math.max(0, totalAmount - totalPaid);
-      }, 0);
+      const outstandingBills = getBilledReceivables(data ?? {}, year).total;
 
       const unbilledDockings = dockings.reduce((sum, docking) => {
         if (isVisitingTransaction(docking)) return sum;

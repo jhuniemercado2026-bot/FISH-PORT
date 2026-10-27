@@ -17,3 +17,5 @@ Schedule::command('remittances:send-inspector-reminders')
     ->dailyAt('13:30')
     ->timezone(config('app.timezone', 'Asia/Manila'))
     ->withoutOverlapping();
+
+Schedule::command('bills:apply-penalties')->hourly()->withoutOverlapping();

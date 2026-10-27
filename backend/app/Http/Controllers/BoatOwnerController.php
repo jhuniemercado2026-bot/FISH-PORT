@@ -12,6 +12,31 @@ use Illuminate\Support\Facades\Auth;
 
 class BoatOwnerController extends Controller
 {
+    private function normalizeOwnerName(?string $firstName, ?string $lastName): string
+    {
+        $normalized = trim(preg_replace('/\s+/', ' ', trim((string) ($firstName ?? '') . ' ' . (string) ($lastName ?? ''))));
+
+        return strtolower($normalized);
+    }
+
+    private function duplicateOwnerExists(?int $excludeOwnerId = null, ?string $firstName = null, ?string $lastName = null): bool
+    {
+        $normalizedName = $this->normalizeOwnerName($firstName, $lastName);
+
+        if ($normalizedName === '') {
+            return false;
+        }
+
+        $query = BoatOwner::query()
+            ->whereRaw('LOWER(TRIM(CONCAT(COALESCE(owner_firstname, ""), " ", COALESCE(owner_lastname, "")))) = ?', [$normalizedName]);
+
+        if ($excludeOwnerId !== null) {
+            $query->where('owner_id', '!=', $excludeOwnerId);
+        }
+
+        return $query->exists();
+    }
+
     private function cloudinaryUrl(): ?string
     {
         $cloudinaryUrl = config('services.cloudinary.url');
@@ -137,6 +162,15 @@ class BoatOwnerController extends Controller
             'owner_signature_signed_at' => 'nullable|date',
         ]);
 
+        $trimmedFirstName = trim((string) ($validated['owner_firstname'] ?? ''));
+        $trimmedLastName = trim((string) ($validated['owner_lastname'] ?? ''));
+
+        if ($this->duplicateOwnerExists(null, $trimmedFirstName, $trimmedLastName)) {
+            return response()->json([
+                'message' => 'A boat owner with this first name and last name already exists.',
+            ], 422);
+        }
+
         if (!empty($validated['owner_signature_data_url'])) {
             $uploadedSignature = $this->uploadSignatureToCloudinary($validated['owner_signature_data_url']);
             $validated['owner_signature_data_url'] = $uploadedSignature['url'];
@@ -233,6 +267,15 @@ class BoatOwnerController extends Controller
             'owner_signature_data_url' => 'nullable|string|max:2000000',
             'owner_signature_signed_at' => 'nullable|date',
         ]);
+
+        $nextFirstName = trim((string) ($validated['owner_firstname'] ?? $owner->owner_firstname ?? ''));
+        $nextLastName = trim((string) ($validated['owner_lastname'] ?? $owner->owner_lastname ?? ''));
+
+        if ($this->duplicateOwnerExists($owner->owner_id, $nextFirstName, $nextLastName)) {
+            return response()->json([
+                'message' => 'A boat owner with this first name and last name already exists.',
+            ], 422);
+        }
 
         if (array_key_exists('owner_signature_data_url', $validated) && !empty($validated['owner_signature_data_url'])) {
             $uploadedSignature = $this->uploadSignatureToCloudinary($validated['owner_signature_data_url']);

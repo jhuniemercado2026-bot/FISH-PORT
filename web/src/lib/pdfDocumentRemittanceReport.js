@@ -1,3 +1,4 @@
+import { drawPreparedBySignature, REPORT_SIGNATURE_SPACE } from "./reportSignature";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { getHeaderPngBytes } from "./pdfHeader";
 
@@ -396,7 +397,6 @@ export const buildRemittanceReportPdf = async ({
     ["Report Type", reportTypeLabel],
     ["Coverage", reportDateLabel],
     ...(filterType === "daily" ? [["Day", reportDayLabel]] : []),
-    ["Prepared By", preparedBy],
   ];
   const secondRowItems = [
     ["Municipality", "Opol"],
@@ -520,7 +520,7 @@ export const buildRemittanceReportPdf = async ({
 
   const detailRowHeight = 24;
   rows.forEach((row) => {
-    if (composer.cursorY - detailRowHeight < MARGIN_Y + 36) {
+    if (composer.cursorY - detailRowHeight < MARGIN_Y + REPORT_SIGNATURE_SPACE + 36) {
       composer.addPage();
       drawTableHeader(composer, columns);
     }
@@ -588,7 +588,7 @@ export const buildRemittanceReportPdf = async ({
       { key: "cashReceived", label: ["Cash Received", "(PHP)"], width: CONTENT_WIDTH - 150 - 128 - 126 },
     ];
 
-    if (composer.cursorY < MARGIN_Y + 110) {
+    if (composer.cursorY < MARGIN_Y + REPORT_SIGNATURE_SPACE + 110) {
       composer.addPage();
     }
 
@@ -602,7 +602,7 @@ export const buildRemittanceReportPdf = async ({
     drawTableHeader(composer, sourceColumns);
 
     sourceRows.forEach((row) => {
-      if (composer.cursorY - detailRowHeight < MARGIN_Y + 36) {
+      if (composer.cursorY - detailRowHeight < MARGIN_Y + REPORT_SIGNATURE_SPACE + 36) {
         composer.addPage();
         drawTableHeader(composer, sourceColumns);
       }
@@ -644,7 +644,7 @@ export const buildRemittanceReportPdf = async ({
 
   composer.cursorY -= 12;
 
-  if (composer.cursorY - 24 < MARGIN_Y) {
+  if (composer.cursorY - 24 < MARGIN_Y + REPORT_SIGNATURE_SPACE) {
     composer.addPage();
   }
 
@@ -662,5 +662,6 @@ export const buildRemittanceReportPdf = async ({
     { fontSize: 10, bold: true },
   );
 
+  drawPreparedBySignature(composer, preparedBy, { marginX: MARGIN_X, marginY: MARGIN_Y, contentWidth: CONTENT_WIDTH });
   return composer.pdfDoc.save();
 };
