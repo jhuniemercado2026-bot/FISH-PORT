@@ -34,7 +34,7 @@ class MasterDataUpdated implements ShouldBroadcastNow
         return [
             'resource' => $this->resource,
             'action' => $this->action,
-            'record' => $this->record,
+            'record' => $this->record === null ? null : \App\Services\SignatureStorage::redact($this->record),
         ];
     }
 }

@@ -6,7 +6,7 @@ use App\Models\BoatOwner;
 use App\Models\BoatOwnerSignatureAudit;
 use App\Services\ActivityLogService;
 use Carbon\Carbon;
-use Cloudinary\Cloudinary;
+use App\Services\SignatureStorage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -35,59 +35,6 @@ class BoatOwnerController extends Controller
         }
 
         return $query->exists();
-    }
-
-    private function cloudinaryUrl(): ?string
-    {
-        $cloudinaryUrl = config('services.cloudinary.url');
-        if ($cloudinaryUrl) {
-            return $cloudinaryUrl;
-        }
-
-        $cloudName = config('services.cloudinary.cloud_name');
-        $apiKey = config('services.cloudinary.api_key');
-        $apiSecret = config('services.cloudinary.api_secret');
-
-        if (! $cloudName || ! $apiKey || ! $apiSecret) {
-            return null;
-        }
-
-        return sprintf('cloudinary://%s:%s@%s', $apiKey, $apiSecret, $cloudName);
-    }
-
-    private function uploadSignatureToCloudinary(string $signatureDataUrl): array
-    {
-        if (! str_starts_with(trim($signatureDataUrl), 'data:image/')) {
-            return [
-                'url' => $signatureDataUrl,
-                'public_id' => null,
-            ];
-        }
-
-        $cloudinaryUrl = $this->cloudinaryUrl();
-        if (! $cloudinaryUrl) {
-            abort(500, 'Cloudinary is not configured. Please set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.');
-        }
-
-        $upload = (new Cloudinary($cloudinaryUrl))->uploadApi()->upload(
-            $signatureDataUrl,
-            [
-                'folder' => 'Opol Fish Port/Signature',
-                'resource_type' => 'image',
-            ]
-        );
-
-        $url = $upload['secure_url'] ?? $upload['url'] ?? null;
-        $publicId = $upload['public_id'] ?? null;
-
-        if (! $url || ! $publicId) {
-            abort(500, 'Cloudinary upload did not return complete signature image details.');
-        }
-
-        return [
-            'url' => $url,
-            'public_id' => $publicId,
-        ];
     }
 
     private function recordSignatureAudit(BoatOwner $owner): void
@@ -172,9 +119,8 @@ class BoatOwnerController extends Controller
         }
 
         if (!empty($validated['owner_signature_data_url'])) {
-            $uploadedSignature = $this->uploadSignatureToCloudinary($validated['owner_signature_data_url']);
-            $validated['owner_signature_data_url'] = $uploadedSignature['url'];
-            $validated['owner_signature_public_id'] = $uploadedSignature['public_id'];
+            $validated['owner_signature_data_url'] = app(SignatureStorage::class)->normalize($validated['owner_signature_data_url']);
+            $validated['owner_signature_public_id'] = null;
             $validated['owner_signature_signed_at'] = isset($validated['owner_signature_signed_at'])
                 ? Carbon::parse($validated['owner_signature_signed_at'], 'Asia/Manila')->format('Y-m-d H:i:s')
                 : Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');
@@ -278,9 +224,8 @@ class BoatOwnerController extends Controller
         }
 
         if (array_key_exists('owner_signature_data_url', $validated) && !empty($validated['owner_signature_data_url'])) {
-            $uploadedSignature = $this->uploadSignatureToCloudinary($validated['owner_signature_data_url']);
-            $validated['owner_signature_data_url'] = $uploadedSignature['url'];
-            $validated['owner_signature_public_id'] = $uploadedSignature['public_id'];
+            $validated['owner_signature_data_url'] = app(SignatureStorage::class)->normalize($validated['owner_signature_data_url']);
+            $validated['owner_signature_public_id'] = null;
             $validated['owner_signature_signed_at'] = isset($validated['owner_signature_signed_at'])
                 ? Carbon::parse($validated['owner_signature_signed_at'], 'Asia/Manila')->format('Y-m-d H:i:s')
                 : Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');

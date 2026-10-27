@@ -56,7 +56,7 @@ Route::post('forgot-password/reset', [AuthController::class, 'resetForgotPasswor
 | Protected Routes (Sanctum Token Required)
 |--------------------------------------------------------------------------
 */
-Route::middleware(['auth:sanctum', \App\Http\Middleware\ApplyBoatBillPenalties::class])->group(function () {
+Route::middleware(['auth:sanctum', \App\Http\Middleware\PreventPrivateResponseCaching::class, \App\Http\Middleware\ApplyBoatBillPenalties::class])->group(function () {
 
     Route::get('settings/bill-penalty', [\App\Http\Controllers\BillingPenaltySettingController::class, 'show']);
     Route::get('settings/bill-penalty/state', [\App\Http\Controllers\BillingPenaltySettingController::class, 'state']);

@@ -17,6 +17,7 @@ class BoatOwnerSignatureAudit extends Model
     ];
 
     protected $casts = [
+        'signature_data_url' => 'encrypted',
         'signed_at' => 'datetime',
     ];
 

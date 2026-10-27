@@ -29,6 +29,7 @@ class BoatOwner extends Model
     ];
 
     protected $casts = [
+        'owner_signature_data_url' => 'encrypted',
         'owner_signature_signed_at' => 'datetime',
     ];
 

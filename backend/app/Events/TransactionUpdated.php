@@ -43,7 +43,7 @@ class TransactionUpdated implements ShouldBroadcastNow
         return [
             'type' => $this->type,
             'action' => $this->action,
-            'record' => $record,
+            'record' => \App\Services\SignatureStorage::redact($record),
         ];
     }
 }

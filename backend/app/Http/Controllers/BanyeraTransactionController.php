@@ -16,7 +16,7 @@ use App\Models\User;
 use App\Services\ActivityLogService;
 use App\Services\VoidRequestNotificationService;
 use Carbon\Carbon;
-use Cloudinary\Cloudinary;
+use App\Services\SignatureStorage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -28,59 +28,6 @@ use Illuminate\Validation\Rule;
 class BanyeraTransactionController extends Controller
 {
     private ?bool $banyeraItemsHasDaugColumn = null;
-
-    private function cloudinaryUrl(): ?string
-    {
-        $cloudinaryUrl = config('services.cloudinary.url');
-        if ($cloudinaryUrl) {
-            return $cloudinaryUrl;
-        }
-
-        $cloudName = config('services.cloudinary.cloud_name');
-        $apiKey = config('services.cloudinary.api_key');
-        $apiSecret = config('services.cloudinary.api_secret');
-
-        if (! $cloudName || ! $apiKey || ! $apiSecret) {
-            return null;
-        }
-
-        return sprintf('cloudinary://%s:%s@%s', $apiKey, $apiSecret, $cloudName);
-    }
-
-    private function uploadSignatureToCloudinary(string $signatureDataUrl): array
-    {
-        if (! str_starts_with(trim($signatureDataUrl), 'data:image/')) {
-            return [
-                'url' => $signatureDataUrl,
-                'public_id' => null,
-            ];
-        }
-
-        $cloudinaryUrl = $this->cloudinaryUrl();
-        if (! $cloudinaryUrl) {
-            abort(500, 'Cloudinary is not configured. Please set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.');
-        }
-
-        $upload = (new Cloudinary($cloudinaryUrl))->uploadApi()->upload(
-            $signatureDataUrl,
-            [
-                'folder' => 'Opol Fish Port/Signature',
-                'resource_type' => 'image',
-            ]
-        );
-
-        $url = $upload['secure_url'] ?? $upload['url'] ?? null;
-        $publicId = $upload['public_id'] ?? null;
-
-        if (! $url || ! $publicId) {
-            abort(500, 'Cloudinary upload did not return complete signature image details.');
-        }
-
-        return [
-            'url' => $url,
-            'public_id' => $publicId,
-        ];
-    }
 
     private function manilaNow(): Carbon
     {
@@ -917,7 +864,9 @@ class BanyeraTransactionController extends Controller
             $signatureSignedAt = isset($validated['owner_signature_signed_at'])
                 ? Carbon::parse($validated['owner_signature_signed_at'], 'Asia/Manila')->format('Y-m-d H:i:s')
                 : null;
-            $transactionSignatureDataUrl = $validated['owner_signature_data_url'] ?? null;
+            $transactionSignatureDataUrl = !empty($validated['owner_signature_data_url'])
+                ? app(SignatureStorage::class)->normalize($validated['owner_signature_data_url'])
+                : null;
             $permanentSignaturePublicId = null;
 
             if (
@@ -925,10 +874,6 @@ class BanyeraTransactionController extends Controller
                 !empty($validated['owner_signature_save_for_future']) &&
                 $boat?->owner
             ) {
-                $uploadedSignature = $this->uploadSignatureToCloudinary($validated['owner_signature_data_url']);
-                $transactionSignatureDataUrl = $uploadedSignature['url'];
-                $permanentSignaturePublicId = $uploadedSignature['public_id'];
-
                 $boat->owner->update([
                     'owner_signature_data_url' => $transactionSignatureDataUrl,
                     'owner_signature_public_id' => $permanentSignaturePublicId,

@@ -32,6 +32,7 @@ class BanyeraTransaction extends Model
     ];
 
     protected $casts = [
+        'owner_signature_data_url' => 'encrypted',
         'transaction_date' => 'datetime',
         'total_fee' => 'decimal:2',
         'print_count' => 'integer',

@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Events\TransactionUpdated;
 use App\Models\BillPenalty;
 use App\Models\BillingPenaltyRule;
-use App\Models\BillingPenaltySetting;
+use App\Services\PenaltyRuleState;
 use App\Services\ActivityLogService;
 use App\Services\DatedBillPenaltyService;
 use App\Services\PenaltyToggleProgress;
@@ -49,16 +49,15 @@ class BillingPenaltyRuleController extends Controller
         $values = $this->validated($request, false);
         $values['interval_unit'] = 'months';
         $rule = DB::transaction(function () use ($values, $request, $penalties) {
-            $settings = BillingPenaltySetting::whereKey(1)->lockForUpdate()->firstOrFail();
+            BillingPenaltyRule::lockAll();
             $values['is_active'] ??= true;
             $this->validateWindow($values);
             $rule = BillingPenaltyRule::create([...$values, 'created_by' => $request->user()->getKey()]);
-            $settings->increment('version');
             $penalties->applyAll(false);
             app(ActivityLogService::class)->log(action: 'INSERT', module: 'Boat Bill Penalty',
                 details: 'Added penalty rule "' . $rule->name . '" at PHP ' . $rule->amount . '.', user: $request->user());
             return $rule;
-        });
+        }, 3);
         $this->broadcastChange();
         return response()->json(['message' => 'Penalty record added. Eligible bills have been updated.', 'data' => $this->payload($rule)], 201);
     }
@@ -86,7 +85,7 @@ class BillingPenaltyRuleController extends Controller
         } : null;
         try {
             $rule = DB::transaction(function () use ($id, $values, $request, $penalties, $progress, $token, $onProgress) {
-                $settings = BillingPenaltySetting::whereKey(1)->lockForUpdate()->firstOrFail();
+                BillingPenaltyRule::lockAll();
                 $rule = BillingPenaltyRule::whereKey($id)->lockForUpdate()->firstOrFail();
                 if ($token) $progress->update($token, ['progress' => 5]);
                 if (!$token && $rule->is_active && ($values['is_active'] ?? true)) $penalties->applyAll(false);
@@ -105,13 +104,13 @@ class BillingPenaltyRuleController extends Controller
                 if ($rule->is_active || $rule->isDirty(['effective_from', 'effective_to'])) {
                     $this->validateWindow($rule->toArray(), $rule->id);
                 }
+                if ($rule->isDirty()) $rule->revision += 1;
                 $rule->save();
-                $settings->increment('version');
                 $penalties->applyAll(false, $onProgress);
                 app(ActivityLogService::class)->log(action: 'UPDATE', module: 'Boat Bill Penalty',
                     details: app(ActivityLogService::class)->describeChanges($before, $rule->only(array_keys($before))), user: $request->user());
                 return $rule;
-            });
+            }, 3);
             if ($token) $progress->update($token, ['progress' => 95]);
             $this->broadcastChange();
             if ($token) $progress->update($token, ['progress' => 100, 'status' => 'completed']);
@@ -163,7 +162,7 @@ class BillingPenaltyRuleController extends Controller
 
     private function broadcastChange(): void
     {
-        try { broadcast(new TransactionUpdated('bill-penalty-settings', 'updated', BillingPenaltySetting::findOrFail(1)->toArray())); }
+        try { broadcast(new TransactionUpdated('bill-penalty-settings', 'updated', app(PenaltyRuleState::class)->current())); }
         catch (\Throwable $error) { report($error); }
     }
 }

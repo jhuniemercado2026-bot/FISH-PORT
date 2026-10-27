@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Events\TransactionUpdated;
 use App\Models\Bill;
 use App\Models\BillingPenaltyRule;
-use App\Models\BillingPenaltySetting;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
@@ -34,8 +33,7 @@ class DatedBillPenaltyService
     {
         $result = DB::transaction(function () use ($billId) {
             // One lock order for rule changes, assessments, and payment requests.
-            $settings = BillingPenaltySetting::whereKey(1)->lockForUpdate()->firstOrFail();
-            $rules = BillingPenaltyRule::orderBy('effective_from')->orderBy('id')->get();
+            $rules = BillingPenaltyRule::lockAll()->sortBy('effective_from')->values();
             $bill = Bill::whereKey($billId)->lockForUpdate()->first();
             if (!$bill || !$bill->boat_id) return null;
             $principal = $this->cents($bill->total_amount) - $this->cents($bill->penalty_amount);
@@ -93,7 +91,7 @@ class DatedBillPenaltyService
                         $amount = $base > 0 ? $this->cents($rule->amount) : 0;
                         $bill->penalties()->create([
                             'penalty_rule_id' => $rule->id, 'period_number' => ++$periodNumber,
-                            'settings_version' => $settings->version,
+                            'settings_version' => $rule->revision,
                             'schedule_anchor_at' => $anchor->setTimezone(config('app.timezone', 'Asia/Manila')),
                             'schedule_period_number' => $period, 'period_ended_at' => $storedDeadline,
                             'percentage' => 0, 'fixed_amount' => $rule->amount, 'amount' => $amount / 100,

@@ -2,9 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\BillingPenaltySetting;
-use App\Events\TransactionUpdated;
-use App\Services\ActivityLogService;
+use App\Services\PenaltyRuleState;
 use App\Services\BillPenaltyService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,14 +13,12 @@ class BillingPenaltySettingController extends Controller
     public function show(Request $request)
     {
         abort_unless($request->user()?->role === 'head', 403);
-        return response()->json(['data' => BillingPenaltySetting::findOrFail(1)]);
+        return response()->json(['data' => app(PenaltyRuleState::class)->current()]);
     }
 
     public function state()
     {
-        return response()->json(['data' => BillingPenaltySetting::findOrFail(1)->only([
-            'is_active', 'amount', 'interval_value', 'interval_unit', 'version', 'updated_at',
-        ])]);
+        return response()->json(['data' => app(PenaltyRuleState::class)->current()]);
     }
 
     public function entries(Request $request, BillPenaltyService $penalties)
@@ -77,58 +73,9 @@ class BillingPenaltySettingController extends Controller
         ]);
     }
 
-    public function update(Request $request, BillPenaltyService $penalties)
+    public function update(Request $request)
     {
         abort_unless($request->user()?->role === 'head', 403);
-        abort_if(\Illuminate\Support\Facades\Schema::hasTable('billing_penalty_rules'), 409,
-            'Penalties now use dated records. Refresh Settings and edit the specific penalty record.');
-        $validated = $request->validate([
-            'amount' => ['sometimes', 'required', 'numeric', 'between:0.01,9999999999.99', 'decimal:0,2'],
-            'percentage' => ['prohibited'],
-            'interval_value' => ['sometimes', 'required', 'integer', 'between:1,36500'],
-            'interval_unit' => ['sometimes', 'required', Rule::in(['days', 'months', 'years'])],
-            'is_active' => ['sometimes', 'required', 'boolean'],
-        ]);
-        abort_if($validated === [], 422, 'No penalty settings were provided.');
-
-        $settings = DB::transaction(function () use ($validated, $request, $penalties) {
-            $settings = BillingPenaltySetting::whereKey(1)->lockForUpdate()->firstOrFail();
-            // Keep completed assessments under the old fee when editing its terms.
-            // Switching off removes unpaid fees without creating new assessments.
-            if ($settings->is_active && ($validated['is_active'] ?? true)) {
-                $penalties->applyOverduePenalties(false);
-            }
-            $before = $settings->only(['amount', 'interval_value', 'interval_unit', 'is_active']);
-            $settings->fill($validated);
-            if ($settings->is_active && (float) $settings->amount <= 0) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    'amount' => 'Set a penalty amount in pesos before activating the rule.',
-                ]);
-            }
-            if ($settings->isDirty(['amount', 'interval_value', 'interval_unit'])) $settings->version += 1;
-            $settings->updated_by = $request->user()->getKey();
-            $settings->save();
-            if ($settings->is_active) {
-                $penalties->applyOverduePenalties(false);
-            } else {
-                $penalties->suspendPenalties();
-            }
-            app(ActivityLogService::class)->log(
-                action: 'UPDATE', module: 'Boat Bill Penalty',
-                details: app(ActivityLogService::class)->describeChanges($before, $settings->only(array_keys($before))),
-                user: $request->user()
-            );
-            return $settings;
-        });
-
-        try {
-            broadcast(new TransactionUpdated('bill-penalty-settings', 'updated', $settings->toArray()));
-        } catch (\Throwable $error) {
-            report($error);
-        }
-
-        return response()->json(['message' => $settings->is_active
-            ? 'Penalty is on. Eligible bill balances have been updated.'
-            : 'Penalty is off. Unpaid penalty charges have been removed from bill balances.', 'data' => $settings]);
+        abort(409, 'Penalties now use dated records. Refresh Settings and edit the specific penalty record.');
     }
 }
