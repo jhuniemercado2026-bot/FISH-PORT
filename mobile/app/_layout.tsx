@@ -1,4 +1,4 @@
-import { Provider } from "@ant-design/react-native";
+import Provider from "@ant-design/react-native/lib/provider";
 import { AntDesign } from "@expo/vector-icons";
 import { Montserrat_400Regular } from "@expo-google-fonts/montserrat/400Regular";
 import { Montserrat_600SemiBold } from "@expo-google-fonts/montserrat/600SemiBold";

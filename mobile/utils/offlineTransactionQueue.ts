@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { buildApiHeaders, getApiBaseUrl } from "../api/axios";
 import { getAuthSession, getAuthToken } from "../api/auth";
+import { getOfflineRemittanceLock } from "./offlineRemittance";
 
 export type OfflineTransactionType = "docking" | "banyera" | "tickets" | "remittance";
 
@@ -101,6 +102,14 @@ async function writeQueue(queue: OfflineTransactionDraft[]) {
   await AsyncStorage.setItem(OFFLINE_TRANSACTION_QUEUE_KEY, JSON.stringify(queue));
 }
 
+function assertNoOfflineRemittanceLock(queue: OfflineTransactionDraft[]) {
+  const session = getAuthSession();
+  if (String(session?.user?.role ?? "").toLowerCase() === "head") return;
+  const today = new Date(getServerNow().getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const lock = getOfflineRemittanceLock(queue, session?.user?.user_id, today);
+  if (lock) throw new Error(lock.message);
+}
+
 async function removeDraftFromQueue(localId: string) {
   const queue = await readQueue();
   const nextQueue = queue.filter((draft) => draft.local_id !== localId);
@@ -126,6 +135,7 @@ export async function queueOfflineTransaction({
   metadata?: Record<string, any>;
 }) {
   const queue = await readQueue();
+  assertNoOfflineRemittanceLock(queue);
   const draft: OfflineTransactionDraft = {
     local_id: `${type}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     type,
@@ -208,7 +218,9 @@ export async function syncOfflineTransactions(
     };
   }
 
-  const queue = ownedQueue;
+  // Upload collection drafts before remittances, since a remittance checks the
+  // day's collections and can lock further transactions on the server.
+  const queue = [...ownedQueue].sort((a, b) => Number(a.type === "remittance") - Number(b.type === "remittance"));
   const syncId = `sync-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const total = queue.length;
   const transactions: SyncedOfflineTransaction[] = [];
@@ -337,28 +349,37 @@ export async function submitOrQueueOfflineTransaction({
   token: string;
   metadata?: Record<string, any>;
 }) {
+  assertNoOfflineRemittanceLock(await readQueue());
   const networkState = await NetInfo.fetch().catch(() => null);
+  const hasPendingTransactions = type === "remittance" && (await readQueue()).some(
+    (draft) => String(draft.owner_user_id ?? "") === String(getAuthSession()?.user?.user_id)
+  );
 
-  if (isOfflineNetworkState(networkState)) {
+  if (isOfflineNetworkState(networkState) || hasPendingTransactions) {
     const draft = await queueOfflineTransaction({ type, endpoint, payload, label, metadata });
     return { queued: true, response: null, draft };
   }
 
+  const controller = new AbortController();
+  const timeout = type === "remittance" ? setTimeout(() => controller.abort(), 15000) : null;
   try {
     const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
       method: "POST",
       headers: buildApiHeaders(token),
       body: JSON.stringify(payload),
+      ...(type === "remittance" ? { signal: controller.signal } : {}),
     });
 
     return { queued: false, response, draft: null };
   } catch {
-    if (!networkState) {
+    if (type === "remittance" || !networkState) {
       const draft = await queueOfflineTransaction({ type, endpoint, payload, label, metadata });
       return { queued: true, response: null, draft };
     }
 
     throw new Error("Unable to submit while connected.");
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
   }
 }
 

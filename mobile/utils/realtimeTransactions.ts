@@ -6,6 +6,8 @@ type TransactionUpdatePayload = {
 
 type RealtimeOptions = {
   onTransactionUpdate?: (record: Record<string, any>, payload: TransactionUpdatePayload) => void;
+  onCollectionUpdate?: (record: Record<string, any>, payload: TransactionUpdatePayload) => void;
+  onSubscribed?: () => void;
   onRemittanceUpdate: (record: Record<string, any>, payload: TransactionUpdatePayload) => void;
 };
 
@@ -38,7 +40,7 @@ const buildPusherUrl = () => {
   return `${wsScheme}://${host}${portSegment}/app/${appKey}?protocol=7&client=react-native&version=1.0.0&flash=false`;
 };
 
-export function startTransactionsRealtime({ onRemittanceUpdate, onTransactionUpdate }: RealtimeOptions) {
+export function startTransactionsRealtime({ onRemittanceUpdate, onTransactionUpdate, onCollectionUpdate, onSubscribed }: RealtimeOptions) {
   const enabled =
     String(process.env.EXPO_PUBLIC_REALTIME_ENABLED ?? "true").toLowerCase() !==
     "false";
@@ -50,6 +52,21 @@ export function startTransactionsRealtime({ onRemittanceUpdate, onTransactionUpd
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let closedByCaller = false;
+  let activityTimer: ReturnType<typeof setTimeout> | null = null;
+  let activityTimeout = 120000;
+
+  const clearActivityTimer = () => {
+    if (activityTimer) clearTimeout(activityTimer);
+    activityTimer = null;
+  };
+
+  const resetActivityTimer = () => {
+    clearActivityTimer();
+    activityTimer = setTimeout(() => {
+      socket?.send(JSON.stringify({ event: "pusher:ping", data: {} }));
+      activityTimer = setTimeout(() => socket?.close(), 30000);
+    }, activityTimeout);
+  };
 
   const clearReconnectTimer = () => {
     if (reconnectTimer) {
@@ -91,28 +108,43 @@ export function startTransactionsRealtime({ onRemittanceUpdate, onTransactionUpd
       return;
     }
 
-    socket.onopen = subscribe;
-
     socket.onmessage = (message) => {
       const payload = parseEventData(message.data);
       if (!payload || typeof payload !== "object") return;
 
       const event = String((payload as { event?: string }).event ?? "");
-      if (event.startsWith("pusher:")) return;
-
+      const data = parseEventData((payload as { data?: unknown }).data);
+      if (event === "pusher:connection_established") {
+        const seconds = Number(data?.activity_timeout);
+        activityTimeout = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, 120000) : 120000;
+        subscribe();
+      }
+      resetActivityTimer();
+      if (event === "pusher:ping") {
+        socket?.send(JSON.stringify({ event: "pusher:pong", data: {} }));
+        return;
+      }
       const channel = String((payload as { channel?: string }).channel ?? "");
       if (channel && channel !== TRANSACTIONS_CHANNEL) return;
+      if (event === "pusher_internal:subscription_succeeded") {
+        onSubscribed?.();
+        return;
+      }
+      if (event.startsWith("pusher:")) return;
 
       if (event !== "created" && event !== ".created" && event !== "updated" && event !== ".updated") {
         return;
       }
 
-      const data = parseEventData((payload as { data?: unknown }).data);
       if (!data || typeof data !== "object") return;
 
       const transactionPayload = data as TransactionUpdatePayload;
       if (!transactionPayload.record) {
         return;
+      }
+
+      if (["docking", "banyera", "tickets", "payment"].includes(transactionPayload.type ?? "")) {
+        onCollectionUpdate?.(transactionPayload.record, transactionPayload);
       }
 
       if (
@@ -133,7 +165,10 @@ export function startTransactionsRealtime({ onRemittanceUpdate, onTransactionUpd
       socket?.close();
     };
 
-    socket.onclose = scheduleReconnect;
+    socket.onclose = () => {
+      clearActivityTimer();
+      scheduleReconnect();
+    };
   };
 
   connect();
@@ -141,6 +176,7 @@ export function startTransactionsRealtime({ onRemittanceUpdate, onTransactionUpd
   return () => {
     closedByCaller = true;
     clearReconnectTimer();
+    clearActivityTimer();
     socket?.close();
     socket = null;
   };

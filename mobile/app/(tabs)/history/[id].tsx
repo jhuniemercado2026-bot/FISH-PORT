@@ -482,6 +482,7 @@ const createDraftDetail = (draft: OfflineTransactionDraft): TransactionRecord =>
       surplus: payload.surplus ?? 0,
       deficit: payload.deficit ?? 0,
       remarks: payload.remarks ?? null,
+      breakdown: metadata.breakdown ?? [],
     };
   }
 

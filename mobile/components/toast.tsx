@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect } from "react";
-import { Toast as AntToast } from "@ant-design/react-native";
+import AntToast from "@ant-design/react-native/lib/toast";
 import { Text, View } from "react-native";
 import { useToastStore } from "../store/toastStore";
 

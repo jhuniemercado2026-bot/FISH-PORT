@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Toast } from "@ant-design/react-native";
+import Toast from "@ant-design/react-native/lib/toast";
 import { useToastStore } from "../store/toastStore";
 
 export function AppToast() {

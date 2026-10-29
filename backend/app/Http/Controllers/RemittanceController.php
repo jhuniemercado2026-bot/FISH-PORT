@@ -283,7 +283,9 @@ class RemittanceController extends Controller
         ];
 
         if (!$summaryOnly || $includeBreakdown) {
-            $response['breakdown'] = $this->dateCollectionBreakdown($date, $collectionUserId);
+            $response['breakdown'] = $hasSubmittedRemittance
+                ? []
+                : $this->dateCollectionBreakdown($date, $collectionUserId);
         }
 
         if (!$summaryOnly) {
@@ -315,6 +317,7 @@ class RemittanceController extends Controller
             'surplus' => 'nullable|numeric|min:0',
             'deficit' => 'nullable|numeric|min:0',
             'remarks' => 'nullable|string',
+            'offline_submission' => 'sometimes|boolean',
         ]);
 
         $surplus = round((float) ($validated['surplus'] ?? 0), 2);
@@ -330,12 +333,27 @@ class RemittanceController extends Controller
             ], 422);
         }
 
-        $duplicateExists = Remittance::query()
+        $existingRemittance = Remittance::query()
             ->whereDate('date', $validated['date'])
             ->where('submitted_by', Auth::id())
-            ->exists();
+            ->first();
 
-        if ($duplicateExists) {
+        if ($existingRemittance) {
+            // A connection may fail after saving. A retry of the same offline
+            // submission should acknowledge the saved record and drain the queue.
+            if (($validated['offline_submission'] ?? false)
+                && round((float) $existingRemittance->amount, 2) === round((float) $validated['amount'], 2)
+                && round((float) $existingRemittance->surplus, 2) === $surplus
+                && round((float) $existingRemittance->deficit, 2) === $deficit
+                && trim((string) $existingRemittance->remarks) === $remarks) {
+                $existingRemittance->loadMissing('submittedBy');
+                return response()->json([
+                    'message' => 'Remittance already submitted successfully.',
+                    'remittance' => $this->remittancePayload($existingRemittance),
+                    'transaction_lock' => $this->transactionLockForUser($request->user()),
+                ]);
+            }
+
             return response()->json([
                 'message' => 'You already submitted a remittance record for this date.',
                 'errors' => [

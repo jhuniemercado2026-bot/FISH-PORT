@@ -45,11 +45,13 @@ import { useMasterDataStore } from "../../store/masterDataStore";
 import {
   getOfflineBoats,
   getOfflineResourceArray,
+  getOfflineResource,
   saveOfflineBoats,
   saveOfflineResource,
 } from "../../utils/offlineMasterData";
 import { startTransactionsRealtime } from "../../utils/realtimeTransactions";
-import { submitOrQueueOfflineTransaction } from "../../utils/offlineTransactionQueue";
+import { getOfflineTransactionDrafts, submitOrQueueOfflineTransaction } from "../../utils/offlineTransactionQueue";
+import { buildOfflineRemittanceCollection, getOfflineRemittanceLock } from "../../utils/offlineRemittance";
 import { printThermalReceipt } from "../../utils/thermalReceiptPrinter";
 
 
@@ -63,6 +65,7 @@ type RemittanceCollectionCache = {
   date: string;
   hasSubmittedRemittance: boolean;
   breakdown: RemittanceBreakdownRow[];
+  saved_at?: string;
 };
 
 const transactionOptions: Array<{
@@ -739,6 +742,13 @@ function buildDateFromParts(year: string, month: string, day: string) {
   return `${year.trim()}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
 }
 
+function formatRemittanceDate(value: string) {
+  if (!value) return "";
+  const [year, month, day] = value.split("-");
+  const months = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
+  return `${months[Number(month) - 1]} ${Number(day)}, ${year}`;
+}
+
 function buildDateObjectFromParts(year: string, month: string, day: string) {
   const normalizedYear = year.trim();
   const normalizedMonth = month.trim();
@@ -769,6 +779,7 @@ function getRealtimeRecordDate(record?: Record<string, any> | null) {
   return String(
     record?.date ??
       record?.ticket_date ??
+      record?.docking_date ??
       record?.transaction_date ??
       record?.created_at ??
       ""
@@ -787,10 +798,11 @@ async function readRemittanceCollectionCache(
     if (cached.date !== date) return null;
 
     return {
-      amount: String(cached.amount ?? "0"),
+      amount: cached.hasSubmittedRemittance ? "0" : String(cached.amount ?? "0"),
       date,
       hasSubmittedRemittance: Boolean(cached.hasSubmittedRemittance),
-      breakdown: Array.isArray(cached.breakdown) ? cached.breakdown : [],
+      breakdown: !cached.hasSubmittedRemittance && Array.isArray(cached.breakdown) ? cached.breakdown : [],
+      saved_at: cached.saved_at,
     };
   } catch {
     return null;
@@ -804,7 +816,7 @@ async function saveRemittanceCollectionCache(
   try {
     await AsyncStorage.setItem(
       buildRemittanceCollectionCacheKey(userId, cache.date),
-      JSON.stringify(cache)
+      JSON.stringify({ ...cache, saved_at: getServerNow().toISOString() })
     );
   } catch {
     // Cache writes are best-effort; the live API value remains the source of truth.
@@ -971,6 +983,9 @@ export default function AddTransactionScreen() {
   const triggerHistoryRefresh = useHistoryStore((state) => state.triggerRefresh);
   const addSyncedTransactions = useHistoryStore((state) => state.addSyncedTransactions);
   const addQueuedDrafts = useHistoryStore((state) => state.addQueuedDrafts);
+  const syncedTransactions = useHistoryStore((state) => state.syncedTransactions);
+  const queuedDrafts = useHistoryStore((state) => state.queuedDrafts);
+  const historyRefreshKey = useHistoryStore((state) => state.refreshKey);
   const realtimeTransactionLock = useHistoryStore((state) => state.transactionLock);
   const setRealtimeTransactionLock = useHistoryStore((state) => state.setTransactionLock);
   const clearRealtimeTransactionLock = useHistoryStore((state) => state.clearTransactionLock);
@@ -1133,6 +1148,7 @@ export default function AddTransactionScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [transactionLock, setTransactionLock] = useState<TransactionLockState | null>(null);
+  const [storedOfflineDrafts, setStoredOfflineDrafts] = useState<Awaited<ReturnType<typeof getOfflineTransactionDrafts>>>([]);
   const [hasInternet, setHasInternet] = useState(true);
   const remittanceCollectionRequestRef = useRef(0);
   const ticketDateValue = buildDateObjectFromParts(
@@ -1161,8 +1177,16 @@ export default function AddTransactionScreen() {
     0
   );
 
+  const syncedDraftIds = new Set(syncedTransactions.map((transaction) => transaction.local_id));
+  const pendingRemittanceLock = String(getAuthSession()?.user?.role ?? "").toLowerCase() === "head" ? null
+    : getOfflineRemittanceLock(
+      [...storedOfflineDrafts, ...queuedDrafts].filter((draft) => !syncedDraftIds.has(draft.local_id)),
+      getAuthSession()?.user?.user_id,
+      buildDateFromParts(manilaNow.year, manilaNow.month, manilaNow.day)
+    );
+  const activeTransactionLock = pendingRemittanceLock ?? transactionLock;
   const isGlobalTransactionLocked = Boolean(
-    transactionLock?.is_locked && transactionLock?.applies_to === "transactions"
+    activeTransactionLock?.is_locked && activeTransactionLock?.applies_to === "transactions"
   );
   const isTicketTransactionLocked = Boolean(
     transactionLock?.is_locked &&
@@ -1175,7 +1199,7 @@ export default function AddTransactionScreen() {
   );
   const isRemittanceAlreadySubmitted = Boolean(
     selectedType === "remittance" &&
-      (hasSubmittedRemittance ||
+      (hasSubmittedRemittance || pendingRemittanceLock ||
         (transactionLock?.is_locked &&
           ["transactions", "vehicle-tickets"].includes(String(transactionLock?.applies_to ?? ""))))
   );
@@ -1184,7 +1208,7 @@ export default function AddTransactionScreen() {
     isSubmitting ||
     isSelectedTransactionLocked ||
     isRemittanceAlreadySubmitted ||
-    isOfflineRemittance;
+    (selectedType === "remittance" && isLoadingRemittanceCollection);
 
   const refreshRemittanceCollection = useCallback(
     async (options: { hydrateCache?: boolean; showSpinner?: boolean } = {}) => {
@@ -1199,6 +1223,32 @@ export default function AddTransactionScreen() {
 
       let hasCachedCollection = false;
 
+      const hydrateOfflineCollection = async () => {
+        const [cached, history, drafts] = await Promise.all([
+          readRemittanceCollectionCache(userId, selectedRemittanceDate),
+          getOfflineResource<Record<string, any[]>>("history"),
+          getOfflineTransactionDrafts(),
+        ]);
+        if (requestId !== remittanceCollectionRequestRef.current) return;
+        const collection = buildOfflineRemittanceCollection({
+          date: selectedRemittanceDate, userId: userId ?? "", cached,
+          history: history?.data, historySavedAt: history?.saved_at, drafts,
+          syncedTransactions: useHistoryStore.getState().syncedTransactions,
+        });
+        hasCachedCollection = Boolean(cached) || Number(collection.amount) > 0;
+        setHasSubmittedRemittance(collection.hasSubmittedRemittance);
+        setRemittanceCollected(collection.amount);
+        setRemittanceBreakdown(collection.breakdown);
+        setRemittanceFieldErrors((current) => ({ ...current, date: "" }));
+      };
+
+      const network = await NetInfo.fetch().catch(() => null);
+      if (!hasInternet || network?.isConnected === false || network?.isInternetReachable === false) {
+        await hydrateOfflineCollection();
+        if (requestId === remittanceCollectionRequestRef.current) setIsLoadingRemittanceCollection(false);
+        return;
+      }
+
       if (options.hydrateCache) {
         const cached = await readRemittanceCollectionCache(userId, selectedRemittanceDate);
 
@@ -1210,7 +1260,6 @@ export default function AddTransactionScreen() {
           hasCachedCollection = true;
           setHasSubmittedRemittance(cached.hasSubmittedRemittance);
           setRemittanceCollected(cached.amount);
-          setRemittanceCash(cached.amount);
           setRemittanceBreakdown(cached.breakdown);
           setRemittanceFieldErrors((current) => ({ ...current, date: "" }));
         }
@@ -1225,12 +1274,14 @@ export default function AddTransactionScreen() {
         setIsLoadingRemittanceCollection(true);
       }
 
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
       try {
         const response = await fetch(
           `${getApiBaseUrl()}/remittances/today-collection?date=${encodeURIComponent(
             selectedRemittanceDate
           )}&summary=1&breakdown=1`,
-          { headers: buildApiHeaders(authToken) }
+          { headers: buildApiHeaders(authToken), signal: controller.signal }
         );
         const data = await response.json().catch(() => null);
 
@@ -1246,18 +1297,28 @@ export default function AddTransactionScreen() {
         const amount = hasSubmittedForDate ? 0 : Number(data?.amount ?? 0);
         const amountText = amount > 0 ? amount.toFixed(2) : "0";
 
-        setHasSubmittedRemittance(hasSubmittedForDate);
-        setRemittanceCollected(amountText);
-        setRemittanceCash(amountText);
-        setRemittanceBreakdown(Array.isArray(data?.breakdown) ? data.breakdown : []);
+        const collection = buildOfflineRemittanceCollection({
+          date: selectedRemittanceDate,
+          userId: userId ?? "",
+          cached: {
+            amount: amountText, hasSubmittedRemittance: hasSubmittedForDate,
+            breakdown: Array.isArray(data?.breakdown) ? data.breakdown : [],
+          },
+          drafts: await getOfflineTransactionDrafts(),
+        });
+        if (requestId !== remittanceCollectionRequestRef.current) return;
+        setHasSubmittedRemittance(collection.hasSubmittedRemittance);
+        setRemittanceCollected(collection.amount);
+        setRemittanceBreakdown(collection.breakdown);
         setRemittanceFieldErrors((current) => ({ ...current, date: "" }));
         await saveRemittanceCollectionCache(userId, {
           amount: amountText,
           date: selectedRemittanceDate,
           hasSubmittedRemittance: hasSubmittedForDate,
-          breakdown: Array.isArray(data?.breakdown) ? data.breakdown : [],
+          breakdown: hasSubmittedForDate ? [] : Array.isArray(data?.breakdown) ? data.breakdown : [],
         });
       } catch {
+        await hydrateOfflineCollection();
         if (requestId !== remittanceCollectionRequestRef.current || hasCachedCollection) {
           return;
         }
@@ -1268,21 +1329,25 @@ export default function AddTransactionScreen() {
           date: "Unable to load daily vehicle ticket collection.",
         }));
       } finally {
+        clearTimeout(timeout);
         if (requestId === remittanceCollectionRequestRef.current) {
           setIsLoadingRemittanceCollection(false);
         }
       }
     },
-    [authToken, selectedRemittanceDate, selectedType]
+    [authToken, hasInternet, selectedRemittanceDate, selectedType]
   );
 
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
-    triggerMasterDataRefresh();
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    setIsRefreshing(false);
-  }, [isRefreshing, triggerMasterDataRefresh]);
+    try {
+      triggerMasterDataRefresh();
+      await refreshRemittanceCollection({ hydrateCache: true, showSpinner: true });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [isRefreshing, triggerMasterDataRefresh, refreshRemittanceCollection]);
 
   useEffect(() => {
     function refreshAutoClockFields() {
@@ -1397,41 +1462,54 @@ export default function AddTransactionScreen() {
     }, [authToken, clearRealtimeTransactionLock, setRealtimeTransactionLock])
   );
 
-  useEffect(() => {
-    refreshRemittanceCollection({ hydrateCache: true });
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void getOfflineTransactionDrafts().then((drafts) => {
+      if (active) setStoredOfflineDrafts(drafts);
+    });
+    return () => { active = false; };
+  }, [queuedDrafts, syncedTransactions, historyRefreshKey]));
+
+  useFocusEffect(useCallback(() => {
+    void refreshRemittanceCollection({ hydrateCache: true });
 
     return () => {
       remittanceCollectionRequestRef.current += 1;
     };
-  }, [refreshRemittanceCollection]);
+  }, [refreshRemittanceCollection, syncedTransactions, queuedDrafts, historyRefreshKey]));
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     if (selectedType !== "remittance" || !selectedRemittanceDate || !authToken) {
       return undefined;
     }
 
-    return startTransactionsRealtime({
-      onTransactionUpdate: (record, payload) => {
-        if (payload.type !== "tickets") {
-          return;
-        }
-
-        if (getRealtimeRecordDate(record) === selectedRemittanceDate) {
-          void refreshRemittanceCollection({ showSpinner: true });
-        }
-      },
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleCollectionRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void refreshRemittanceCollection();
+      }, 200);
+    };
+    const stopRealtime = startTransactionsRealtime({
+      onSubscribed: scheduleCollectionRefresh,
+      onCollectionUpdate: scheduleCollectionRefresh,
       onRemittanceUpdate: (record) => {
         if (getRealtimeRecordDate(record) === selectedRemittanceDate) {
-          void refreshRemittanceCollection({ showSpinner: true });
+          scheduleCollectionRefresh();
         }
       },
     });
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      stopRealtime();
+    };
   }, [
     authToken,
     refreshRemittanceCollection,
     selectedRemittanceDate,
     selectedType,
-  ]);
+  ]));
 
   useEffect(() => {
     let isMounted = true;
@@ -2382,12 +2460,15 @@ export default function AddTransactionScreen() {
   }
 
   function resetRemittanceForm() {
+    remittanceCollectionRequestRef.current += 1;
+    setIsLoadingRemittanceCollection(false);
     const resetNow = getManilaDateParts();
     setRemittanceMonth(resetNow.month);
     setRemittanceDay(resetNow.day);
     setRemittanceYear(resetNow.year);
     setIsRemittanceDateAuto(true);
     setRemittanceCollected("0");
+    setRemittanceBreakdown([]);
     setRemittanceCash("0");
     setRemittanceRemarks("");
     setIsRemittanceBreakdownOpen(false);
@@ -2432,8 +2513,9 @@ export default function AddTransactionScreen() {
   }
 
   async function handleSave(options: SaveOptions = {}) {
+    if (isSubmitting) return;
     if (isSelectedTransactionLocked) {
-      const lockMessage = transactionLock?.message || "Transactions are view-only at the moment.";
+      const lockMessage = activeTransactionLock?.message || "Transactions are view-only at the moment.";
       setFormError(lockMessage);
       showToast("error", lockMessage);
       return;
@@ -2467,17 +2549,25 @@ export default function AddTransactionScreen() {
         );
         const trimmedRemarks = remittanceRemarks.trim();
         const nextErrors: Record<string, string> = {};
+        const existingDrafts = await getOfflineTransactionDrafts();
+        if (existingDrafts.some((draft) => draft.type === "remittance"
+          && String(draft.owner_user_id) === String(getAuthSession()?.user?.user_id)
+          && draft.payload.date === builtRemittanceDate)) {
+          setHasSubmittedRemittance(true);
+          showToast("error", "A remittance for this date is already saved as a draft.");
+          return;
+        }
 
         if (!builtRemittanceDate) {
           nextErrors.date = "Remittance date is required.";
         }
 
         if (remittanceSystemCollection <= 0) {
-          nextErrors.date = "No cash collections were found for today.";
+          nextErrors.date = "No cash collections were found for this date.";
         }
 
-        if (!String(remittanceCash || "").trim()) {
-          nextErrors.amount = "Amount to remit is required.";
+        if (!String(remittanceCash || "").trim() || !Number.isFinite(remittanceCashAmount) || remittanceCashAmount < 0) {
+          nextErrors.amount = "Enter a valid amount to remit.";
         }
 
         if ((remittanceSurplus > 0 || remittanceDeficit > 0) && !trimmedRemarks) {
@@ -2497,6 +2587,7 @@ export default function AddTransactionScreen() {
           surplus: remittanceSurplus,
           deficit: remittanceDeficit,
           remarks: trimmedRemarks || null,
+          offline_submission: true,
         };
 
         const { queued, response, draft } = await submitOrQueueOfflineTransaction({
@@ -2508,6 +2599,7 @@ export default function AddTransactionScreen() {
           metadata: {
             date: builtRemittanceDate,
             source: "daily_vehicle_tickets",
+            breakdown: remittanceBreakdown,
           },
         });
 
@@ -2516,7 +2608,7 @@ export default function AddTransactionScreen() {
             addQueuedDrafts([draft]);
           }
           setHasSubmittedRemittance(true);
-          showToast("success", "Remittance saved as offline draft.");
+          showToast("success", `Remittance for ${builtRemittanceDate} saved as a draft. It will sync when connected.`);
           resetRemittanceForm();
           scrollToAddTransactionTop();
           navigateToHistory("remittance");
@@ -2539,6 +2631,12 @@ export default function AddTransactionScreen() {
 
         showToast("success", data?.message ?? "Remittance submitted successfully.");
         setHasSubmittedRemittance(true);
+        await saveRemittanceCollectionCache(getAuthSession()?.user?.user_id, {
+          date: builtRemittanceDate,
+          amount: "0",
+          hasSubmittedRemittance: true,
+          breakdown: [],
+        });
         if (data?.transaction_lock) {
           setTransactionLock(data.transaction_lock);
           setRealtimeTransactionLock(data.transaction_lock);
@@ -4413,7 +4511,12 @@ export default function AddTransactionScreen() {
             {selectedType === "remittance" ? (
               <>
                 <View className="mt-4">
-                  <FormSectionLabel label="Today's Collection" required />
+                  <View className="flex-row items-center justify-between">
+                    <FormSectionLabel label="Today's Collection" required />
+                    <Text className="mb-2 text-[12px] text-[#64748B]" style={{ fontFamily: "Montserrat_400Regular" }}>
+                      {formatRemittanceDate(selectedRemittanceDate)}
+                    </Text>
+                  </View>
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => setIsRemittanceBreakdownOpen(true)}
@@ -4501,7 +4604,7 @@ export default function AddTransactionScreen() {
                   <Text className="ml-2 flex-1 text-[12px] leading-4 text-[#991B1B]" style={{ fontFamily: "Montserrat_400Regular" }}>
                     {isRemittanceAlreadySubmitted
                       ? "Today's remittance has already been submitted."
-                      : transactionLock?.message || "Transactions are view-only at the moment."}
+                      : activeTransactionLock?.message || "Transactions are view-only at the moment."}
                   </Text>
                 </View>
               </View>
@@ -4515,7 +4618,7 @@ export default function AddTransactionScreen() {
                     className="ml-2 flex-1 text-[12px] leading-4 text-[#1E3A8A]"
                     style={{ fontFamily: "Montserrat_400Regular" }}
                   >
-                    An internet connection is required to submit a remittance.
+                    Save your remittance as an offline draft. It will sync when internet returns and keep its original date.
                   </Text>
                 </View>
               </View>

@@ -183,6 +183,35 @@ class RemittanceNotificationTest extends TestCase
             ->count());
     }
 
+    public function test_offline_remittance_keeps_original_date_and_can_be_retried(): void
+    {
+        $inspector = User::factory()->create(['role' => 'inspector']);
+        User::factory()->create(['role' => 'coordinator', 'status' => 'offline']);
+        $date = now('Asia/Manila')->subDays(3)->toDateString();
+        $this->createVehicleTicketCollection($inspector, $date, 75);
+        $this->actingAs($inspector, 'sanctum');
+        $payload = ['date' => $date, 'amount' => 75, 'offline_submission' => true];
+
+        $first = $this->postJson('/api/remittances', $payload)->assertCreated();
+        $this->postJson('/api/remittances', $payload)->assertOk()
+            ->assertJsonPath('remittance.date', $date)
+            ->assertJsonPath('remittance.remittance_id', $first->json('remittance.remittance_id'));
+        $this->assertDatabaseCount('remittances', 1);
+        $this->assertSame(1, Notification::query()->where('title', 'New remittance submitted')->count());
+        $this->getJson('/api/remittances/today-collection?date=' . $date . '&summary=1&breakdown=1')
+            ->assertOk()
+            ->assertJsonPath('has_submitted_remittance', true)
+            ->assertJsonPath('amount', 0)
+            ->assertJsonPath('breakdown', []);
+        $this->getJson('/api/remittances/' . $first->json('remittance.remittance_id'))
+            ->assertOk()
+            ->assertJsonCount(1, 'remittance.breakdown');
+
+        $this->postJson('/api/remittances', [...$payload, 'amount' => 70])->assertUnprocessable();
+        $this->postJson('/api/remittances', ['date' => $date, 'amount' => 75])->assertUnprocessable();
+        $this->assertDatabaseCount('remittances', 1);
+    }
+
     private function createVehicleTicketCollection(User $collector, string $date, float $amount): void
     {
         $vehicleType = VehicleType::create([
