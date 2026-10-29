@@ -606,7 +606,7 @@ export default function HomeScreen() {
       });
 
       await saveStep(async () => {
-        const payload = await fetchJson("/annual-vehicle-tickets");
+        const payload = await fetchJson("/annual-vehicle-tickets?all=1&status=active&include_stats=0");
         await saveOfflineResource(
           "annual_vehicle_tickets",
           normalizeListPayload(payload, ["tickets"])

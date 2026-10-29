@@ -1687,7 +1687,7 @@ export default function AddTransactionScreen() {
       }
 
       try {
-        const response = await fetch(`${getApiBaseUrl()}/annual-vehicle-tickets`, {
+        const response = await fetch(`${getApiBaseUrl()}/annual-vehicle-tickets?all=1&status=active&include_stats=0`, {
           headers: buildApiHeaders(authToken),
         });
 
@@ -4316,7 +4316,7 @@ export default function AddTransactionScreen() {
                       className="mr-2 flex-1 text-[11px] uppercase text-[#6F6F82]"
                       style={{ fontFamily: "Montserrat_600SemiBold" }}
                     >
-                      DAILY TICKET
+                      {isAnnualRegisteredDailyEntry ? "BANYERA TICKET" : "DAILY TICKET"}
                     </Text>
                     <Text
                       className="mr-2 w-[86px] text-center text-[11px] uppercase text-[#6F6F82]"
@@ -4333,6 +4333,8 @@ export default function AddTransactionScreen() {
                   </View>
 
                   {[ticketDailyRow, ticketBanyeraRow].map((item, index) => {
+                    if (isAnnualRegisteredDailyEntry && item.row_type === "daily") return null;
+
                     const rowType = item.row_type;
                     const selectedItemFee =
                       fees.find(
@@ -4344,8 +4346,8 @@ export default function AddTransactionScreen() {
                       isAnnualRegisteredDailyEntry && rowType === "daily";
 
                     return (
-                      <View key={`${rowType}-${index}`} className={index ? "mt-3" : ""}>
-                        {rowType === "banyera" ? (
+                      <View key={`${rowType}-${index}`} className={index && !isAnnualRegisteredDailyEntry ? "mt-3" : ""}>
+                        {rowType === "banyera" && !isAnnualRegisteredDailyEntry ? (
                           <Text
                             className="mb-1 text-[11px] uppercase text-[#6F6F82]"
                             style={{ fontFamily: "Montserrat_600SemiBold" }}

@@ -1649,12 +1649,15 @@ const AddVehicleTicketDrawer = ({
                 optionLabelProp="label"
                 getPopupContainer={() => document.body}
                 placement="bottomLeft"
-                value={form.control_number || undefined}
+                value={form.control_number}
                 onChange={handleAnnualShortcutPlateNumberChange}
-                options={annualShortcutOptions.map((ticket) => ({
-                  value: String(ticket.control_number),
-                  label: `${ticket.plate_number || "-"}`,
-                }))}
+                options={[
+                  { value: "", label: "None" },
+                  ...annualShortcutOptions.map((ticket) => ({
+                    value: String(ticket.control_number),
+                    label: `${ticket.plate_number || "-"}`,
+                  })),
+                ]}
               />
             </DrawerField>
 
@@ -1732,7 +1735,7 @@ const AddVehicleTicketDrawer = ({
               className="mb-2 grid items-center gap-2 px-1"
               style={{ gridTemplateColumns: "minmax(0,2fr) minmax(96px,0.65fr) minmax(0,1.2fr) 40px" }}
             >
-              <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>DAILY TICKET</p>
+              <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>{isAnnualRegisteredDailyEntry ? "BANYERA TICKET" : "DAILY TICKET"}</p>
               <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Qty</p>
               <p className="m-0 text-[11px] font-semibold uppercase" style={{ color: "#6F6F82", fontFamily: FONT }}>Subtotal</p>
               <span />
@@ -1742,6 +1745,8 @@ const AddVehicleTicketDrawer = ({
               feeItems.find((item) => item.row_type === "daily") ?? { fee_id: "", quantity: "0", row_type: "daily" },
               feeItems.find((item) => item.row_type === "banyera") ?? { fee_id: "", quantity: "0", row_type: "banyera" },
             ].map((item, index) => {
+              if (isAnnualRegisteredDailyEntry && item.row_type === "daily") return null;
+
               const selectedItemFee = fees.find((fee) => String(fee.fee_id) === String(item.fee_id));
               const quantity = Number.parseInt(item.quantity || "0", 10) || 0;
               const subtotal = parseMoneyValue(selectedItemFee?.amount) * quantity;
@@ -1759,7 +1764,7 @@ const AddVehicleTicketDrawer = ({
               const rowFees = selectedRowFee && !rowFeesBase.some((fee) => String(fee.fee_id) === String(selectedRowFee.fee_id))
                 ? [...rowFeesBase, selectedRowFee]
                 : rowFeesBase;
-              const showRowLabel = rowType === "banyera";
+              const showRowLabel = rowType === "banyera" && !isAnnualRegisteredDailyEntry;
 
               return (
                 <div
